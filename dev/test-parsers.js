@@ -145,6 +145,10 @@ check('no year means no date', () => {
   const m = parseMetadata(buildNSF({ numSongs: 1, title: 'T', artist: '', copyright: 'Nintendo' }), 'nsf');
   assert.strictEqual(m.date, null);
 });
+check('impossible dates fall back to a valid part', () => {
+  const m = parseMetadata(buildNSF({ numSongs: 1, title: 'T', artist: '', copyright: '2023-02-31' }), 'nsf');
+  assert.strictEqual(m.date, '2023-02-01');
+});
 
 console.log('Real files under catalog/ (skipped if absent)');
 function realTest(label, globDir, ext, assertions) {

@@ -56,7 +56,7 @@ export default class SIDPlayer extends Player {
     });
   }
 
-  loadData(data, filepath, persistedSettings) {
+  loadData(data, filepath, persistedSettings, subtune = 0) {
     if (!this.initialized) {
       this.core._sid_init(this.sampleRate);
       this.initialized = true;
@@ -79,6 +79,8 @@ export default class SIDPlayer extends Player {
 
     this.mask = Array(18).fill(true);
     this.core._sid_set_voice_mask(0);
+    // Start on the requested sub-tune (each sub-tune is its own SongRef).
+    this.playSubtune(subtune);
     this.resolveParamValues(persistedSettings);
     this.setTempo(persistedSettings.tempo || 1);
     this.resume();

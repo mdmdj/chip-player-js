@@ -176,6 +176,10 @@ export default class GMEPlayer extends Player {
     this.fadeFinished = false;
     this.subtune = subtune;
     this.metadata = this._parseMetadata(subtune);
+    this.emit('playerStateUpdate', {
+      ...this.getBasePlayerState(),
+      isStopped: false,
+    });
     const res = core._gme_start_track(this.gmeCtx, subtune);
     if (this.gmeCtx) {
       core._gme_set_fade(this.gmeCtx, 200000000);

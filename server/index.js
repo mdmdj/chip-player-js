@@ -752,6 +752,10 @@ router.post(
         return res.status(404).json({ error: 'Song not found' });
       }
 
+      if (subtune >= (song.subtune_count || 1)) {
+        return res.status(400).json({ error: 'Sub-tune out of range' });
+      }
+
       // Resolve the path to a song ID on insertion.
       addFavoriteByPathStmt.run({
         userId: req.userId,

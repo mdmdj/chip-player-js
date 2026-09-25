@@ -13,10 +13,18 @@ const DATE_Y_REGEX = /\b(1[89]\d{2}|20\d{2})\b/;
  * parts to Jan 1. Returns null when no year is found.
  */
 function extractDate(...strings) {
+  const isValidYmd = (y, mo, d) =>
+    d >= 1 && d <= new Date(Date.UTC(y, mo, 0)).getUTCDate();
   for (const str of strings) {
     if (!str) continue;
     let m = str.match(DATE_YMD_REGEX);
-    if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+    if (m) {
+      const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+      // Ignore impossible dates (e.g. "2023-02-31") rather than store them.
+      if (isValidYmd(y, mo, d)) {
+        return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+      }
+    }
     m = str.match(DATE_YM_REGEX);
     if (m) return `${m[1]}-${m[2].padStart(2, '0')}-01`;
     m = str.match(DATE_Y_REGEX);
@@ -465,7 +473,6 @@ function parseSID(buf) {
     title: name,
     artist: author,
     copyright: released,
-    game: released,
     date: extractDate(released),
     system: 'C64',
     numSongs,

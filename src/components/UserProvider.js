@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import debounce from 'lodash/debounce';
 import { getAuth, onAuthStateChanged, signInWithPopup, signOut, GoogleAuthProvider } from 'firebase/auth';
 import { initializeApp as firebaseInitializeApp } from 'firebase/app';
@@ -44,6 +44,8 @@ const UserProvider = ({ children }) => {
     }
   });
   const [loadingUser, setLoadingUser] = useState(true); // Manage loading state
+  // Monotonic token so stale favorites refreshes don't overwrite newer ones.
+  const favesRefreshToken = useRef(0);
   const [settings, setSettings] = useState(() => {
     // Restore settings from localStorage.
     try {
@@ -149,8 +151,10 @@ const UserProvider = ({ children }) => {
           await addFavorite(fave);
         }
         // Re-read so every entry carries the catalog's size and sub-tune title.
+        // Only apply the latest refresh: rapid toggles can resolve out of order.
+        const token = ++favesRefreshToken.current;
         const res = await getWithAuth(user, `${API_BASE}/user/favorites`);
-        if (res) setFaves(res.favorites);
+        if (res && token === favesRefreshToken.current) setFaves(res.favorites);
       } catch (e) {
         setFaves(oldFaves);
         console.log('Couldn\'t update favorites in Firebase.', e);

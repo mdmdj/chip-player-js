@@ -97,6 +97,13 @@ check('no playlist exposes all physical tracks', () => {
   assert.deepStrictEqual(m.trackLabels, ['A', 'B', 'C', 'D']);
 });
 
+check('labels stay aligned when some tracks are unlabeled', () => {
+  // One label for three tracks: the label belongs to track 0, not compressed up.
+  const m = parseMetadata(buildNSFe({ numSongs: 3, game: 'G', artist: 'A', copyright: 'C', labels: ['Only One'] }), 'nsfe');
+  assert.strictEqual(m.numSongs, 3);
+  assert.deepStrictEqual(m.trackLabels, ['Only One', null, null]);
+});
+
 console.log('SID (synthetic)');
 check('single subtune', () => {
   const m = parseMetadata(buildSID({ numSongs: 1, name: 'Commando', author: 'Rob Hubbard', released: '1985' }), 'sid');

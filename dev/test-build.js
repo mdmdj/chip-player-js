@@ -120,6 +120,16 @@ try {
     const count = db.prepare('SELECT COUNT(*) c FROM subtune WHERE music_id = ?').get(m.id).c;
     assert.strictEqual(count, 10);
   });
+
+  // Removing a multi-subtune file exercises the FK-safe orphan cleanup.
+  fs.rmSync(path.join(DIR, 'multi.sid'));
+  runBuilder();
+  check('removing a multi-subtune file deletes its music + subtune rows', () => {
+    const musicCount = db.prepare('SELECT COUNT(*) c FROM music WHERE path LIKE ?').get(LIKE).c;
+    const subCount = db.prepare('SELECT COUNT(*) c FROM subtune st JOIN music m ON m.id = st.music_id WHERE m.path LIKE ?').get(LIKE).c;
+    assert.strictEqual(musicCount, 2); // multi.nsfe + single.nsf
+    assert.strictEqual(subCount, 3);   // multi.nsfe's three tunes
+  });
 } finally {
   cleanup();
 }

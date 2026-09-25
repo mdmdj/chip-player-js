@@ -17,7 +17,7 @@ function directoryLinkFromFilepath(filepath, isSongFolder) {
     ? filepath
     : filepath.split(sep).slice(0, -1).join(sep);
   // Same escaping as Browse: %/# must be pre-escaped for react-router.
-  const href = browsePath.replace('%', '%25').replace('#', '%23');
+  const href = browsePath.replace(/%/g, '%25').replace(/#/g, '%23');
   return <DirectoryLink dim to={pathJoin('/browse', href)}>{browsePath}</DirectoryLink>;
 }
 

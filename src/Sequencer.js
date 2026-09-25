@@ -72,14 +72,13 @@ export default class Sequencer extends EventEmitter {
         this.nextSong();
       }
     } else {
-      // The player changes sub-tune on its own for the footer tune buttons and
-      // when auto-advancing at the end of a sub-song. Keep the SongRef (and the
-      // context entry, for list highlighting) in sync with the player.
+      // The player can change sub-tune on its own for the footer tune buttons
+      // and when auto-advancing at the end of a sub-song. Keep the transient
+      // SongRef in sync for metadata/share/favorites, but never mutate the
+      // context: its entries are the navigation list.
       const { subtune } = playerState;
       if (this.currSongRef && subtune != null && this.currSongRef.subtune !== subtune) {
         this.currSongRef = { ...this.currSongRef, subtune };
-        const contextRef = this.currContextRef();
-        if (contextRef) contextRef.subtune = subtune;
       }
       this.emit('sequencerStateUpdate', {
         songPath: this.currSongPath,

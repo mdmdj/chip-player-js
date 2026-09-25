@@ -322,7 +322,8 @@ router.get('/search', cache1Hour, (req, res) => {
   const ftsQuery = sanitizedQuery.trim().split(/\s+/).map(term => `${term}*`).join(' ');
 
   if (searchMap.has(sanitizedQuery)) {
-    items = searchMap.get(sanitizedQuery);
+    // Clone: the sub-tune loop below appends, and the cached array is shared.
+    items = [...searchMap.get(sanitizedQuery)];
   } else {
     try {
       items = searchStmt.all(ftsQuery, limit);

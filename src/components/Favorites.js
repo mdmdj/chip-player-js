@@ -7,7 +7,7 @@ import bytes from 'bytes';
 
 // Same escaping as Browse: %/# must be pre-escaped for react-router.
 function browseHref(path) {
-  return '/browse/' + path.replace('%', '%25').replace('#', '%23');
+  return '/browse/' + path.replace(/%/g, '%25').replace(/#/g, '%23');
 }
 
 const FavoriteRow = (props) => {

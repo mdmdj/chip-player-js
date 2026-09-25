@@ -342,7 +342,8 @@ function parseNSFe(buf) {
   for (let i = 0; i < songCount; i++) {
     const physical = usePlaylist ? playlist[i] : i;
     const label = trackLabels[physical];
-    if (label != null) subtitles.push(label);
+    // Keep a slot for unlabeled tracks so labels stay aligned to their tune.
+    subtitles.push(label != null ? label : null);
   }
 
   meta.numSongs = songCount;

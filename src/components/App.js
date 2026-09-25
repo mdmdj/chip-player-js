@@ -457,7 +457,7 @@ class App extends React.Component {
       } else if (songTitleKey !== this.state.songTitleKey) {
         // Mark this song as loading so a burst of player state updates doesn't
         // fire duplicate metadata requests.
-        this.setState({ songTitleKey, subtuneTitle: null });
+        this.setState({ songTitleKey, subtuneCount: null, subtuneTitle: null });
         const metadataUrl = getMetadataUrlForFilepath(songPath, currSongRef?.subtune);
         // XXX: fix this later
         // if (url.indexOf("%2") > -1 || url.indexOf("#") > -1) {
@@ -484,7 +484,7 @@ class App extends React.Component {
           clearTimeout(this.playbackTimer);
           this.playbackTimer = setTimeout(() => {
             // If still playing this song after 5 seconds, log a playback.
-            if (this.state.songId === songId) {
+            if (this.state.songId === songId && this.state.songTitleKey === songTitleKey) {
               const subtune = currSongRef?.subtune ?? 0;
               postWithOptionalAuth(this.props.userContext.user, `${API_BASE}/playback`, { songId, subtune, durationMs: 5000 });
             }
@@ -718,7 +718,7 @@ class App extends React.Component {
   }
 
   pathToHref(path) {
-    return pathJoin(CATALOG_PREFIX, path.replace('%', '%25').replace('#', '%23'));
+    return pathJoin(CATALOG_PREFIX, path.replace(/%/g, '%25').replace(/#/g, '%23'));
   }
 
   fetchDirectory(path) {
@@ -735,7 +735,7 @@ class App extends React.Component {
           // XXX: Escape immediately: the escaped URL is considered canonical.
           //      The URL must be decoded for display from here on out.
           // TODO: Replace `href` entirely with `url` field
-          const href = item.path.replace('%', '%25').replace('#', '%23');
+          const href = item.path.replace(/%/g, '%25').replace(/#/g, '%23');
           if (item.type === 'file')
             item.href = pathJoin(CATALOG_PREFIX, href);
           else // item.type === 'directory' or 'songfolder'
@@ -958,7 +958,7 @@ class App extends React.Component {
                   )}/>
                   <Route path="/browse/:browsePath*" render={({ history, match, location }) => {
                     // Undo the react-router-dom double-encoded % workaround - see DirectoryLink.js
-                    const browsePath = match.params?.browsePath?.replace('%25', '%') || '';
+                    const browsePath = match.params?.browsePath?.replace(/%25/g, '%') || '';
                     return (
                       this.contentAreaRef.current &&
                       <Browse currContext={currContext}

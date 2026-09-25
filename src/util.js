@@ -127,7 +127,7 @@ export function getUrlFromFilepath(filepath) {
 
 export function getMetadataUrlForFilepath(filepath, subtune = null) {
   // XXX: any time we convert from path to URL, we must encode
-  filepath = filepath.replace('%25', '%').replace('%23', '#');
+  filepath = filepath.replace(/%25/g, '%').replace(/%23/g, '#');
   const subtuneParam = subtune != null ? `&subtune=${subtune}` : '';
   return `${API_BASE}/metadata?path=${encodeURIComponent(filepath)}${subtuneParam}`;
 }

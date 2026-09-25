@@ -144,7 +144,7 @@ db.exec(`
     date TEXT,                   -- per-sub-tune date when the format provides one
     sort_order INTEGER DEFAULT 0,
     UNIQUE(music_id, subtune),
-    FOREIGN KEY(music_id) REFERENCES music(id)
+    FOREIGN KEY(music_id) REFERENCES music(id) ON DELETE CASCADE
   );
 
   -- FTS Virtual Table
@@ -201,14 +201,22 @@ db.exec(`
 `);
 
 // Additive migrations for databases created before these columns existed.
+// Returns true when the column was just added (caller may need to backfill).
 function ensureColumn(table, column, type) {
   const columns = db.prepare(`PRAGMA table_info(${table})`).all();
   if (!columns.some(c => c.name === column)) {
     db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+    return true;
   }
+  return false;
 }
+const addedSubtuneCount = ensureColumn('music', 'subtune_count', 'INTEGER DEFAULT 1');
 ensureColumn('music', 'release_date', 'TEXT');
 ensureColumn('subtune', 'date', 'TEXT');
+
+// A catalog created before subtunes existed has no sub-tune rows. Reprocess
+// everything once so unchanged multi-song files get them.
+if (addedSubtuneCount) options.skipUnmodified = false;
 
 // Statements
 const insertMusicStmt = db.prepare(`
@@ -751,6 +759,10 @@ processDirectory(CATALOG_DIR, '')
         const deleteStmt = db.prepare('DELETE FROM music WHERE path = ?');
         const deleteTransaction = db.transaction((paths) => {
           for (const p of paths) {
+            // Delete sub-tune children first: databases created before the FK
+            // gained ON DELETE CASCADE would otherwise reject the parent delete.
+            const row = findMusicIdStmt.get(p);
+            if (row) deleteSubtunesStmt.run(row.id);
             deleteStmt.run(p);
           }
         });

@@ -12,7 +12,7 @@ engines compiled to WebAssembly via Emscripten.
 
 - Upstream: `git@github.com:mmontag/chip-player-js.git` (remote `upstream`)
 - Our fork: `https://github.com/mdmdj/chip-player-js.git` (remote `origin`)
-- Working branch: `feature/sub-songs-as-first-class`
+- Working branch: `feature/subtunes-as-first-class`
 
 **Important:** Matt has personally given permission for this feature fork, and
 the goal is a merge he will accept. Match existing conventions, keep the diff

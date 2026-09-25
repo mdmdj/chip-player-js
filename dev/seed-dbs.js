@@ -52,6 +52,7 @@ if (fs.existsSync(userDbPath) && !process.env.DEV_SEED_FORCE) {
       user_id TEXT,
       ip_address TEXT,
       song_id TEXT,
+      subtune INTEGER DEFAULT 0,
       played_at INTEGER,
       duration_ms INTEGER
     );

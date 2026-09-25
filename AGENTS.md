@@ -164,6 +164,10 @@ Verified on the real catalog: 1244 files, 621 subtune rows, 59 multi-song files,
 - `/metadata?path=...&subtune=N` returns `subtuneTitle`.
 - `/shuffle` and `/random` return `{path, subtune}`; a multi-song file shuffles
   as a random sub-song.
+- `/playback` accepts `subtune`; `playbacks` gains a `subtune` column
+  (idempotent `ALTER TABLE` in `server/database.js`, also in the dev seed).
+  `/top` (global, user, and metric=favorites) groups by `(song_id, subtune)`
+  and returns `subtune`, `subtune_count`, and `subtune_title`.
 
 ## Client identity model: `SongRef`
 
@@ -236,7 +240,8 @@ because `Sequencer` copies its context).
    `(path, subtune)` — verified via curl (add two sub-tunes + a plain file,
    then remove one sub-tune and confirm the others remain). `getFavoritesStmt`
    also decorates items with `size` and `subtuneTitle`, so the Favorites list
-   shows the catalog title and falls back to `Tune N`.
+   shows the catalog title and falls back to `Tune N`. UI-verified in the dev
+   app, including legacy favorites without `subtune` and per-sub-tune isolation.
 8. Dates and sizes: parsers scrape a release date from free-form metadata
    (`extractDate`), stored as `music.release_date` / `subtune.date`; `/browse`
    sub-tune rows resolve date as subtune -> file metadata -> file mtime, and
@@ -245,8 +250,12 @@ because `Sequencer` copies its context).
    `music` REPLACE (FK ordering fix for incremental reprocessing).
 9. `AppFooter` shows the full song-folder path (and links into it) for
    multi-song files; `isSongFolder` is derived from `/metadata`'s
-   `subtuneCount` (catalog) with the player's `numSubtunes` as fallback, since
-   the dev stub doesn't report sub-tunes.
+   `subtuneCount` (catalog) with the player's `numSubtunes` and a cached
+   `subtuneTitle` as fallbacks, since the dev stub doesn't report sub-tunes.
+10. `playbacks.subtune` + sub-tune-aware Top Charts: `/playback` carries the
+    sub-tune, and the global/user/favorites top queries group by
+    `(song_id, subtune)`, returning `subtune`/`subtune_count`/`subtune_title`
+    so `TopCharts.js` labels and plays the exact sub-song.
 
 **Caveat:** `Sequencer.playContext` copies its context, so array-identity
 checks no longer work. Compare a live context to a stored one with
@@ -255,27 +264,16 @@ checks no longer work. Compare a live context to a stored one with
 
 ## Remaining TODO / roadmap
 
-1. Verify favorites end-to-end in a browser. The dev-user shim works (the
-   server already has real favorites created from the browser), so what's left
-   is the UI specifics: old localStorage faves (no `subtune`) render/play as
-   sub-tune 0, and toggling one sub-tune doesn't disturb the other sub-tunes of
-   the same file.
-2. `playbacks.subtune` + top-charts grouping by `(song_id, subtune)`. The real
-   `user_db` schema isn't tracked here, so either add an idempotent
-   `PRAGMA table_info` + `ALTER TABLE ... ADD COLUMN subtune` shim in
-   `server/database.js` (like `build-music.js`'s `ensureColumn`) or leave the
-   migration to the maintainer. Then: `PlaybackSchema` + `insertPlaybackStmt` +
-   the `/playback` post carry subtune, and the top queries return/display it.
-3. Regression tests. There is no test script; the only harness is
+1. Regression tests. There is no test script; the only harness is
    `dev/test-parsers.js`. A build-music round-trip test (sub-tune rows, counts,
-   dates) and API tests for `/browse`, `/search`, `/shuffle`, favorites would
-   de-risk the PR.
-4. Known unsupported formats (don't add to `FORMATS` without a player/parser):
+   dates) and API tests for `/browse`, `/search`, `/shuffle`, `/top`,
+   playbacks, and favorites would de-risk the PR.
+2. Known unsupported formats (don't add to `FORMATS` without a player/parser):
    plain `.usf` sets (only `.miniusf` is supported), PSF/PSX (`psflib` is reused
    only by the USF loader; no PSX core), and PSM (`libxmp-lite` = it/mod/s3m/xm;
    the files here are the MASI variant, which needs full libxmp).
-5. Phase 3 (later): real GME/SID chip-core wasm build for audio verification.
-6. Before PR: `./dev/remove.sh`, decide whether to keep `dev/`, `.nvmrc`, and
+3. Phase 3 (later): real GME/SID chip-core wasm build for audio verification.
+4. Before PR: `./dev/remove.sh`, decide whether to keep `dev/`, `.nvmrc`, and
    `AGENTS.md` in the PR (currently tracked on the feature branch).
 
 ## Conventions & cautions

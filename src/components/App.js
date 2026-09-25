@@ -485,7 +485,8 @@ class App extends React.Component {
           this.playbackTimer = setTimeout(() => {
             // If still playing this song after 5 seconds, log a playback.
             if (this.state.songId === songId) {
-              postWithOptionalAuth(this.props.userContext.user, `${API_BASE}/playback`, { songId, durationMs: 5000 });
+              const subtune = currSongRef?.subtune ?? 0;
+              postWithOptionalAuth(this.props.userContext.user, `${API_BASE}/playback`, { songId, subtune, durationMs: 5000 });
             }
           }, 5000);
 

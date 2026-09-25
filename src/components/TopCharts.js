@@ -216,12 +216,18 @@ function TopCharts(props) {
     const decorated = sections.map(section => {
       const items = (section.items || []).map((item, localIndex) => {
         const path = item.path;
-        contextRefs.push(songRef(path));
+        const subtune = item.subtune || 0;
+        contextRefs.push(songRef(path, subtune));
         const trackIdx = currentIdx++;
         const rank = localIndex + 1;
-        const name = path.split('/').pop();
+        const filename = path.split('/').pop();
+        // Multi-song files show the sub-tune label (or "Tune N").
+        const name = item.subtune_count > 1
+          ? `${filename} (${item.subtune_title || `Tune ${subtune + 1}`})`
+          : filename;
         const href = item.path ? pathJoin(CATALOG_PREFIX, encodeURIComponent(item.path)) : null;
-        const url = item.song_id ? `/?play=${encodeURIComponent(item.song_id)}` : href;
+        const subtuneParam = subtune ? `&subtune=${subtune}` : '';
+        const url = item.song_id ? `/?play=${encodeURIComponent(item.song_id)}${subtuneParam}` : href;
 
         return {
           ...item,

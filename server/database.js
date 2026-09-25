@@ -16,6 +16,13 @@ const CSDB_DB_PATH = path.resolve(__dirname, 'csdb.db');
 db.exec(`ATTACH DATABASE '${CSDB_DB_PATH}' AS csdb_db`);
 console.log(`Attached CSdb database at ${CSDB_DB_PATH}`);
 
+// playbacks.subtune is new; add it in place for databases created before it.
+const playbackColumns = db.prepare('PRAGMA user_db.table_info(playbacks)').all();
+if (playbackColumns.length > 0 && !playbackColumns.some(c => c.name === 'subtune')) {
+  db.exec('ALTER TABLE user_db.playbacks ADD COLUMN subtune INTEGER DEFAULT 0');
+  console.log('Added playbacks.subtune column');
+}
+
 const dbStatements = {
   // Catalog
   searchStmt: db.prepare(`
@@ -116,8 +123,8 @@ const dbStatements = {
       WHERE id = ?
   `),
   insertPlaybackStmt: db.prepare(`
-      INSERT INTO user_db.playbacks (user_id, ip_address, song_id, played_at, duration_ms)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO user_db.playbacks (user_id, ip_address, song_id, subtune, played_at, duration_ms)
+      VALUES (?, ?, ?, ?, ?, ?)
   `),
 
   // Settings
@@ -189,18 +196,23 @@ const dbStatements = {
   `),
 
   // Top Charts
+  // Grouped by (song_id, subtune), so sub-songs rank individually. Old
+  // playbacks have no subtune and fall back to 0.
   getGlobalTopStmt: db.prepare(`
       SELECT
         top.song_id,
+        top.subtune,
         top.plays,
         m.path,
         m.file_size,
-        m.mtime
+        m.mtime,
+        m.subtune_count,
+        (SELECT st.title FROM subtune st WHERE st.music_id = m.id AND st.subtune = top.subtune) as subtune_title
       FROM (
-        SELECT song_id, COUNT(*) as plays
+        SELECT song_id, COALESCE(subtune, 0) as subtune, COUNT(*) as plays
         FROM user_db.playbacks
         WHERE played_at >= ?
-        GROUP BY song_id
+        GROUP BY song_id, COALESCE(subtune, 0)
         ORDER BY plays DESC
         LIMIT ?
       ) top
@@ -213,15 +225,18 @@ const dbStatements = {
   getUserTopStmt: db.prepare(`
       SELECT
         top.song_id,
+        top.subtune,
         top.plays,
         m.path,
         m.file_size,
-        m.mtime
+        m.mtime,
+        m.subtune_count,
+        (SELECT st.title FROM subtune st WHERE st.music_id = m.id AND st.subtune = top.subtune) as subtune_title
       FROM (
-        SELECT song_id, COUNT(*) as plays
+        SELECT song_id, COALESCE(subtune, 0) as subtune, COUNT(*) as plays
         FROM user_db.playbacks
         WHERE user_id = ? AND played_at >= ?
-        GROUP BY song_id
+        GROUP BY song_id, COALESCE(subtune, 0)
         ORDER BY plays DESC
         LIMIT ?
       ) top
@@ -234,18 +249,22 @@ const dbStatements = {
   getTopFavoritesStmt: db.prepare(`
       SELECT
         top.song_id,
+        top.subtune,
         top.favorites as count,
         top.favorites as plays,
         m.path,
         m.file_size,
-        m.mtime
+        m.mtime,
+        m.subtune_count,
+        (SELECT st.title FROM subtune st WHERE st.music_id = m.id AND st.subtune = top.subtune) as subtune_title
       FROM (
         SELECT
           json_extract(je.value, '$.songId') as song_id,
+          COALESCE(json_extract(je.value, '$.subtune'), 0) as subtune,
           COUNT(DISTINCT p.user_id) as favorites
         FROM user_db.playlists p, json_each(p.items) je
         WHERE p.type = 'favorites' AND json_extract(je.value, '$.songId') IS NOT NULL
-        GROUP BY song_id
+        GROUP BY song_id, subtune
         ORDER BY favorites DESC
         LIMIT ?
       ) top

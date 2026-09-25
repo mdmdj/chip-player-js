@@ -641,11 +641,11 @@ router.post('/playback',
   express.json({ limit: '10kb' }),
   validate(PlaybackSchema),
   (req, res) => {
-  const { songId, durationMs } = req.body;
+  const { songId, subtune, durationMs } = req.body;
 
   try {
     const now = Math.floor(Date.now() / 1000);
-    insertPlaybackStmt.run(req.userId, req.ip, songId, now, durationMs);
+    insertPlaybackStmt.run(req.userId, req.ip, songId, subtune, now, durationMs);
     res.json({ success: true });
   } catch (e) {
     console.error('Error logging playback:', e);

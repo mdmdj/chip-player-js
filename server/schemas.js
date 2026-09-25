@@ -23,5 +23,6 @@ export const SettingsSchema = z.object({
 export const PlaybackSchema = z.object({
   songId: z.string().length(8),
   userId: z.string().optional(),
+  subtune: z.number().int().nonnegative().default(0), // 0-based sub-song index
   durationMs: z.number().int().nonnegative().default(0),
 });

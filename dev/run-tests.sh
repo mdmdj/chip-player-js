@@ -8,3 +8,6 @@ node "$DIR/test-parsers.js"
 echo
 echo "== build-music round-trip =="
 node "$DIR/test-build.js"
+echo
+echo "== sequencer navigation =="
+node "$DIR/test-sequencer.js" 2>/dev/null

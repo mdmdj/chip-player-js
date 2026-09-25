@@ -183,22 +183,6 @@ export default class Sequencer extends EventEmitter {
     this.advanceSong(-1);
   }
 
-  playSubtune(subtune) {
-    this.player.playSubtune(subtune);
-  }
-
-  prevSubtune() {
-    const subtune = this.player.getSubtune() - 1;
-    if (subtune < 0) return;
-    this.playSubtune(subtune);
-  }
-
-  nextSubtune() {
-    const subtune = this.player.getSubtune() + 1;
-    if (subtune >= this.player.getNumSubtunes()) return;
-    this.playSubtune(subtune);
-  }
-
   getPlayer() {
     return this.player;
   }
@@ -223,10 +207,6 @@ export default class Sequencer extends EventEmitter {
     return this.currSongBuffer;
   }
 
-  getSubtune() {
-    return this.player.getSubtune();
-  }
-
   /**
    * Play a single song. Accepts a SongRef (preferred) or a bare path string.
    */
@@ -235,8 +215,7 @@ export default class Sequencer extends EventEmitter {
     if (!ref) return;
     const { path: filepath, subtune } = ref;
 
-    this.currSongRef = ref;
-    this.currSongBuffer = null;
+    this.currSongRef = ref;    this.currSongBuffer = null;
     if (this.player !== null) {
       this.player.suspend();
     }

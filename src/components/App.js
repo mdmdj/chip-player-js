@@ -116,8 +116,6 @@ class App extends React.Component {
       paused: true,
       ejected: true,
       currentSongMetadata: {},
-      currentSongNumSubtunes: 0,
-      currentSongSubtune: 0,
       currentSongDurationMs: 1,
       currentSongPositionMs: 0,
       currentSongBuffer: null,
@@ -274,11 +272,9 @@ class App extends React.Component {
     const map = {
       ejected: 'isEjected',
       paused: 'isPaused',
-      currentSongSubtune: 'subtune',
       currentSongMetadata: 'metadata',
       currentSongPositionMs: 'positionMs',
       currentSongDurationMs: 'durationMs',
-      currentSongNumSubtunes: 'numSubtunes',
       currentSongBuffer: 'songBuffer',
       tempo: 'tempo',
       voiceNames: 'voiceNames',
@@ -404,14 +400,6 @@ class App extends React.Component {
     this.sequencer.nextSong();
   }
 
-  prevSubtune() {
-    this.sequencer.prevSubtune();
-  }
-
-  nextSubtune() {
-    this.sequencer.nextSubtune();
-  }
-
   handleSequencerStateUpdate(sequencerState) {
     const { isEjected } = sequencerState;
     console.debug('App.handleSequencerStateUpdate(isEjected=%s)', isEjected);
@@ -419,11 +407,9 @@ class App extends React.Component {
     if (isEjected) {
       this.setState({
         ejected: true,
-        currentSongSubtune: 0,
         currentSongMetadata: {},
         currentSongPositionMs: 0,
         currentSongDurationMs: 1,
-        currentSongNumSubtunes: 0,
         currentSongBuffer: null,
         imageUrl: null,
         songPath: null,
@@ -900,11 +886,10 @@ class App extends React.Component {
     const isMidi = Boolean(midiData);
     const activeTheaterMode = Boolean(isMidi && this.state.theaterMode && showVisualizer);
     // A multi-song file reads as a song folder in Browse. Any of these means
-    // "has sub-tunes": the catalog count (fresh /metadata), a catalog sub-tune
-    // title (also present in older cached metadata), or the player's own count.
+    // "has sub-tunes": the catalog count (fresh /metadata) or a catalog
+    // sub-tune title (also present in older cached metadata).
     const isSongFolder = this.state.subtuneCount > 1
-      || this.state.subtuneTitle != null
-      || this.state.currentSongNumSubtunes > 1;
+      || this.state.subtuneTitle != null;
 
     return (
       <Dropzone
@@ -1045,8 +1030,6 @@ class App extends React.Component {
           </div>
           <AppFooter
             currentSongDurationMs={this.state.currentSongDurationMs}
-            currentSongNumSubtunes={this.state.currentSongNumSubtunes}
-            currentSongSubtune={this.state.currentSongSubtune}
             ejected={this.state.ejected}
             getCurrentSongLink={this.getCurrentSongLink}
             handleCopyLink={this.handleCopyLink}
@@ -1061,10 +1044,8 @@ class App extends React.Component {
             isSongFolder={isSongFolder}
             md5={this.state.md5}
             nextSong={this.nextSong}
-            nextSubtune={this.nextSubtune}
             paused={this.state.paused}
             prevSong={this.prevSong}
-            prevSubtune={this.prevSubtune}
             repeat={this.state.repeat}
             shuffle={this.state.shuffle}
             sequencer={this.sequencer}

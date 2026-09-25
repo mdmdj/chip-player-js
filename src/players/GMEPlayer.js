@@ -165,20 +165,6 @@ export default class GMEPlayer extends Player {
           }
         }
       }
-    } else {
-      const nextSubtune = this.subtune + 1;
-
-      if (nextSubtune >= core._gme_track_count(this.gmeCtx)) {
-        this.handleSongEnd();
-        return;
-      } else {
-        this.handleSongEnd(() => {
-          if (this.playSubtune(nextSubtune) !== 0) {
-            this.stop();
-          }
-        });
-        return;
-      }
     }
   }
 
@@ -190,11 +176,6 @@ export default class GMEPlayer extends Player {
     this.fadeFinished = false;
     this.subtune = subtune;
     this.metadata = this._parseMetadata(subtune);
-    console.debug('GMEPlayer.playSubtune(subtune=%s)', subtune);
-    this.emit('playerStateUpdate', {
-      ...this.getBasePlayerState(),
-      isStopped: false,
-    });
     const res = core._gme_start_track(this.gmeCtx, subtune);
     if (this.gmeCtx) {
       core._gme_set_fade(this.gmeCtx, 200000000);

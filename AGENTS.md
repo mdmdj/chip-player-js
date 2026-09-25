@@ -51,7 +51,10 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
     real files under `catalog/`).
   - `node dev/test-build.js` — build-music round-trip on a temp catalog subdir
     (sub-tune rows, dates, idempotency); cleans up after itself.
-  - `./dev/run-tests.sh` — runs both. Dev-only, not part of the PR.
+  - `node dev/test-sequencer.js` — sequencer navigation with a fake player
+    (each sub-tune plays once, mixed contexts advance entry-by-entry). Uses an
+    inline Babel require hook; no new deps.
+  - `./dev/run-tests.sh` — runs all three. Dev-only, not part of the PR.
   - `dev/README.md` documents the shims.
 - Run the app: `npm run dev` (webpack dev server on :3000, API server on :8080).
 - **Dev-only note:** the stub `chip-core.js` produces no audio; it's a no-op
@@ -192,6 +195,15 @@ single-song files). Helpers in `src/util.js`:
   `currSongRef` (and `currSongPath` for the player/UI/metadata).
 - Emits `songRef` in `sequencerStateUpdate`.
 - `getCurrSongRef()` added.
+- **Sub-tune navigation is the sequencer's job, not the player's.** A player
+  plays exactly one song and stops (`Player.handleSongEnd` no longer chains
+  `playSubtune(next)`), so `nextSong()` advances one context entry. Every
+  sub-tune is its own SongRef/context entry, which makes a directory of MIDI
+  files, a song folder, and a mixed search/favorites context behave the same.
+  The old footer `Tune N of M` + back/forward UI is gone; `currentSongSubtune`
+  / `currentSongNumSubtunes` state, `Sequencer.prevSubtune` / `nextSubtune` /
+  `getSubtune` / `playSubtune`, and `App`'s sub-tune props were removed. The
+  only place a sub-tune index lives is the SongRef.
 
 `src/util.js`: `getMetadataUrlForFilepath(filepath, subtune = null)` appends
 `&subtune=`. `songRefListsEqual` compares two ordered SongRef lists (needed
@@ -227,15 +239,16 @@ because `Sequencer` copies its context).
 3. Server API: `/browse` songfolder + sub-tune listing, `/search` union,
    `/metadata` subtune title — verified via curl.
 4. `SongRef` helpers in `util.js`; `Sequencer` migrated to SongRef contexts.
-   The player's own sub-tune changes (footer tune buttons, auto-advance) sync
-   back into `currSongRef` and the context entry.
+   Sub-tune navigation is sequencer-owned: the player plays one song and stops,
+   and every sub-tune is its own context entry (see `src/Sequencer.js` notes).
 5. Client migrated to SongRefs: `App.js` (`directoryListingToContext`,
    `fetchDirectory`, `getCurrentSongLink` from `currSongRef.subtune`,
    `songTitleKey`/`subtuneTitle` metadata), `VirtualizedList` (`songRefKey`
    highlight, `songfolder` navigates), `Browse` (`<SONGS>` rows),
-   `Favorites`/`FavoriteButton`/`UserProvider` (keyed by `(path, subtune)`),
-   `Search` (sub-tune hits), `AppFooter` (favorite + share link carry subtune),
-   `LocalFiles`/`TopCharts` (SongRef contexts).
+   `Favorites`/`FavoriteButton`/`UserProvider` (keyed by `(path, subtune)`,
+   grouped under directory/song-folder headings), `Search` (sub-tune hits),
+   `AppFooter` (favorite + share link carry subtune), `LocalFiles`/`TopCharts`
+   (SongRef contexts). The footer's sub-tune-specific nav/label is gone.
 6. Server `/shuffle` and `/random` return `{path, subtune}`; a multi-song file
    shuffles as a random sub-song. (`/random` had a latent leading-slash bug;
    fixed.)
@@ -253,8 +266,8 @@ because `Sequencer` copies its context).
    `music` REPLACE (FK ordering fix for incremental reprocessing).
 9. `AppFooter` shows the full song-folder path (and links into it) for
    multi-song files; `isSongFolder` is derived from `/metadata`'s
-   `subtuneCount` (catalog) with the player's `numSubtunes` and a cached
-   `subtuneTitle` as fallbacks, since the dev stub doesn't report sub-tunes.
+   `subtuneCount` (catalog) with a cached `subtuneTitle` as fallback (the dev
+   stub doesn't report sub-tunes).
 10. `playbacks.subtune` + sub-tune-aware Top Charts: `/playback` carries the
     sub-tune, and the global/user/favorites top queries group by
     `(song_id, subtune)`, returning `subtune`/`subtune_count`/`subtune_title`

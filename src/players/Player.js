@@ -193,6 +193,8 @@ export default class Player extends EventEmitter {
     return 0;
   }
 
+  // Sub-tune selection is handled by the sequencer (one SongRef per sub-tune),
+  // not by the player.
   playSubtune() {}
 
   getMetadata() {
@@ -291,11 +293,9 @@ export default class Player extends EventEmitter {
   }
 
   handleSongEnd(onSilenceEnd = null) {
-    let defaultCallback = null;
-    if (this.getSubtune() + 1 < this.getNumSubtunes()) {
-      defaultCallback = () => this.playSubtune(this.getSubtune() + 1);
-    }
-    const endAction = onSilenceEnd || defaultCallback || (() => this.stop());
+    // A player plays exactly one song and then stops. Sub-tune navigation is
+    // the sequencer's job: each sub-tune is its own context entry.
+    const endAction = onSilenceEnd || (() => this.stop());
 
     if (this.silenceDuration >= 0) {
       const trailingSilenceSec = this.trailingSilenceSamples / this.sampleRate;

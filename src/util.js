@@ -119,7 +119,10 @@ export function getUrlFromFilepath(filepath) {
   if (!filepath) return null;
   // in case it's already encoded
   try { filepath = decodeURIComponent(filepath); } catch {}
-  return pathJoin(CATALOG_PREFIX, encodeURIComponent(filepath));
+  // Encode each path segment so slashes stay separators (browsers name
+  // downloads from the last segment) while spaces/#/% are still escaped.
+  const encoded = filepath.split('/').map(encodeURIComponent).join('/');
+  return pathJoin(CATALOG_PREFIX, encoded);
 }
 
 export function getMetadataUrlForFilepath(filepath, subtune = null) {

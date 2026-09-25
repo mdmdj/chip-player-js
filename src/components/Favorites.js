@@ -8,13 +8,13 @@ const FavoriteRow = (props) => {
   const {
     item, onPlay
   } = props;
-  const { href, path, mtime, size, subtune = 0, subtuneTitle } = item;
+  const { href, path, mtime, size, subtune = 0, subtuneTitle, subtuneCount = 1 } = item;
   const date = new Date(mtime * 1000).toISOString().split('T')[0];
   const filename = path.split('/').pop();
-  // Prefer the catalog's sub-tune title; otherwise fall back to the 1-based
-  // index. Single-song files have neither.
-  const suffix = subtuneTitle ? ` (${subtuneTitle})`
-    : subtune > 0 ? ` (Tune ${subtune + 1})`
+  // Sub-songs show their catalog label, or "Tune N" when unlabeled. Single-song
+  // files get no suffix.
+  const suffix = subtuneCount > 1
+    ? ` (${subtuneTitle || `Tune ${subtune + 1}`})`
     : '';
   const name = filename + suffix;
 

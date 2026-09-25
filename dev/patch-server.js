@@ -3,6 +3,9 @@
 // `server/index.js` uses skia-canvas only to render Open Graph preview images
 // for `/preview`. In dev we don't need that and skia-canvas may be slow or
 // impossible to build. `dev/apply.sh` wraps the require in a try/catch.
+//
+// Reversible: `node dev/patch-server.js --revert` restores the plain require.
+// `dev/remove.sh` uses this so it never has to restore a stale snapshot.
 'use strict';
 
 const fs = require('fs');
@@ -20,7 +23,15 @@ const replacement =
   `}`;
 
 const src = fs.readFileSync(file, 'utf8');
-if (src.includes(replacement)) {
+
+if (process.argv.includes('--revert')) {
+  if (src.includes(replacement)) {
+    fs.writeFileSync(file, src.replace(replacement, original));
+    console.log('[dev] Reverted server/index.js skia-canvas patch.');
+  } else {
+    console.log('[dev] server/index.js already unpatched.');
+  }
+} else if (src.includes(replacement)) {
   console.log('[dev] server/index.js already patched for optional skia-canvas.');
 } else if (src.includes(original)) {
   fs.writeFileSync(file, src.replace(original, replacement));

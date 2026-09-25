@@ -31,14 +31,8 @@ if [ -f server/middleware/auth.js.dev-backup ]; then
   echo "[dev]   restored server/middleware/auth.js"
 fi
 
-if [ -f server/index.js.dev-backup ]; then
-  mv server/index.js.dev-backup server/index.js
-  echo "[dev]   restored server/index.js"
-fi
-
-if [ -f src/components/UserProvider.js.dev-backup ]; then
-  mv src/components/UserProvider.js.dev-backup src/components/UserProvider.js
-  echo "[dev]   restored src/components/UserProvider.js"
-fi
+# Undo in-place patches (reversible, so feature edits are preserved)
+node dev/patch-server.js --revert
+node dev/patch-user-provider.js --revert
 
 echo "[dev] Done. (Left in place: catalog/, server/*.db. Delete manually if desired.)"

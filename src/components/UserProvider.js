@@ -148,6 +148,9 @@ const UserProvider = ({ children }) => {
         } else {
           await addFavorite(fave);
         }
+        // Re-read so every entry carries the catalog's size and sub-tune title.
+        const res = await getWithAuth(user, `${API_BASE}/user/favorites`);
+        if (res) setFaves(res.favorites);
       } catch (e) {
         setFaves(oldFaves);
         console.log('Couldn\'t update favorites in Firebase.', e);

@@ -32,17 +32,10 @@ fi
 cp dev/shims/server-auth.js server/middleware/auth.js
 echo "[dev]   installed server/middleware/auth.js (bypass)"
 
-# 4. Optional skia-canvas patch for server/index.js (tracked, so back it up)
-if [ ! -f server/index.js.dev-backup ]; then
-  cp server/index.js server/index.js.dev-backup
-fi
+# 4. Optional skia-canvas patch for server/index.js (reversible, no backup)
 node dev/patch-server.js
 
-# 5. Dev user -> src/components/UserProvider.js (tracked, so back it up)
-if [ ! -f src/components/UserProvider.js.dev-backup ]; then
-  cp src/components/UserProvider.js src/components/UserProvider.js.dev-backup
-  echo "[dev]   backed up src/components/UserProvider.js"
-fi
+# 5. Dev user -> src/components/UserProvider.js (reversible, no backup)
 node dev/patch-user-provider.js
 
 # 6. Seed sqlite databases (catalog.db is built separately by build-music.js)

@@ -5,12 +5,14 @@
 // `getIdToken()` so the heart button and the favorites API calls work. The
 // server auth bypass accepts any bearer token and resolves the dev user.
 //
-// `dev/apply.sh` backs up the tracked file first; `dev/remove.sh` restores it.
+// Reversible: `node dev/patch-user-provider.js --revert` removes the dev user.
+// `dev/remove.sh` uses this so it never has to restore a stale snapshot.
 'use strict';
 
 const fs = require('fs');
 
 const file = require('path').join(__dirname, '..', 'src', 'components', 'UserProvider.js');
+const MARKER = 'DEV-ONLY: a fake user so favorites work';
 
 const patches = [
   {
@@ -52,7 +54,23 @@ const patches = [
 ];
 
 const src = fs.readFileSync(file, 'utf8');
-if (src.includes('DEV-ONLY: a fake user so favorites work')) {
+
+if (process.argv.includes('--revert')) {
+  if (!src.includes(MARKER)) {
+    console.log('[dev] UserProvider.js already unpatched.');
+  } else {
+    let out = src;
+    for (const { from, to } of patches) {
+      if (!out.includes(to)) {
+        console.warn('[dev] Could not find UserProvider patch target; skipping revert.');
+        process.exit(0);
+      }
+      out = out.replace(to, from);
+    }
+    fs.writeFileSync(file, out);
+    console.log('[dev] Reverted UserProvider.js dev user.');
+  }
+} else if (src.includes(MARKER)) {
   console.log('[dev] UserProvider.js already patched for a dev user.');
 } else {
   let patched = src;

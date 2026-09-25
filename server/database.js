@@ -134,6 +134,7 @@ const dbStatements = {
               '$.href', CONCAT('https://gifx.co/music/', m.path),
               '$.path', m.path,
               '$.size', m.file_size,
+              '$.subtuneCount', m.subtune_count,
               '$.subtuneTitle', (
                   SELECT st.title FROM subtune st
                   WHERE st.music_id = m.id

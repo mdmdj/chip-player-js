@@ -155,7 +155,8 @@ app.use((req, res, next) => {
 });
 
 const cache1Hour = (req, res, next) => {
-  res.header('Cache-Control', 'public, max-age=3600');
+  // Skip caching in dev so code/catalog changes aren't masked by stale responses.
+  if (!isDev) res.header('Cache-Control', 'public, max-age=3600');
   next();
 };
 
@@ -482,7 +483,7 @@ router.get('/browse', cache1Hour, async (req, res) => {
         return {
           path: normalizedPath,
           type: 'file',
-          name: sub.title,
+          name: sub.title || `Tune ${sub.subtune + 1}`,
           song_id: song ? song.song_id : null,
           subtune: sub.subtune,
           durationMs: sub.length_ms,
@@ -576,6 +577,7 @@ async function getCsdbImageUrl(csdbid) {
  *   infoTexts: [ string, ... ],
  *   soundfont: string|null,
  *   md5: string|null,
+ *   subtuneCount: number,
  *   subtuneTitle: string|null
  * }
  *
@@ -626,6 +628,7 @@ router.get('/metadata', cache1Hour, (req, res, next) => {
       infoTexts: infoTexts,
       soundfont: soundfont,
       md5: meta.md5,
+      subtuneCount: meta.subtune_count,
       subtuneTitle: subtuneTitle,
     });
   } else {

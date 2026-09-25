@@ -350,7 +350,8 @@ const MULTISONG_EXTENSIONS = new Set(['nsf', 'nsfe', 'sid', 'mus']);
  * keeps the browse tree flat (a plain file).
  *
  *   - subtune:  0-based index, matches the player's subtune index
- *   - title:    per-track label when available, else "Song N"
+ *   - title:    per-track label when the format provides one, else null
+ *               (clients show "Tune N" as a fallback)
  *   - lengthMs: duration in ms when known (reserved; parsers don't emit yet)
  *   - date:     per-track release date when the format provides one (rare)
  */
@@ -369,7 +370,7 @@ function describeSubtunes(extension, meta) {
     const label = labels[i] != null ? String(labels[i]).trim() : '';
     subtunes.push({
       subtune: i,
-      title: label || `Song ${i + 1}`,
+      title: label || null,
       lengthMs: Number.isFinite(lengths[i]) ? lengths[i] : null,
       date: dates[i] != null ? String(dates[i]).trim() || null : null,
     });

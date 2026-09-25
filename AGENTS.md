@@ -126,6 +126,9 @@ CREATE INDEX idx_subtune_music ON subtune(music_id);
 
 - Only multi-song files get `subtune` rows. A single-song file has none, so a
   sub-song and a plain song are the same kind of thing to the client.
+- `subtune.title` is set only when the format provides a label; otherwise it is
+  `NULL` and clients fall back to `Tune N`. (`describeSubtunes` no longer invents
+  a `Song N` placeholder — that was inconsistent with the fallback.)
 - `subtune_fts` (fts5, `content='subtune'`) + `ai/ad/au` triggers mirror
   `music_fts`, making sub-song titles searchable.
 - `processFile` clears a file's old sub-tune rows **before** the
@@ -150,7 +153,8 @@ Verified on the real catalog: 1244 files, 621 subtune rows, 59 multi-song files,
     `/browse/<path>` like a directory. A file/folder row's `mtime` prefers the
     parsed `release_date` over the file system mtime.
   - When `path` names a multi-song file, returns its sub-tunes as
-    `type: 'file'` rows with `name` (label), `subtune`, `song_id`,
+    `type: 'file'` rows with `name` (label, or `Tune N` when unlabeled),
+    `subtune`, `song_id`,
     `durationMs`, `url = /?play=<songId>&subtune=N`. Each row reuses the parent
     file's `size`, and `mtime` resolves **subtune date -> file `release_date` ->
     file system mtime** (as Unix seconds).
@@ -196,9 +200,10 @@ because `Sequencer` copies its context).
   file this resolves to the song-folder entry.
 - Share links are canonical as `/?play=<songId>&subtune=N`
   (`App.getCurrentSongLink`, `App.js` startup parse). No link migration.
-- `getFavoritesStmt` decorates each item with `href`, `path`, `size`, and
-  `subtuneTitle` (looked up by `(music_id, subtune)`), so the Favorites list can
-  show the catalog title instead of just the sub-tune index.
+- `getFavoritesStmt` decorates each item with `href`, `path`, `size`,
+  `subtuneCount`, and `subtuneTitle` (looked up by `(music_id, subtune)`). The
+  Favorites list shows the label, or `Tune N` when unlabeled; toggling
+  re-fetches so optimistic entries get the same decoration.
 - **Testing favorites in the dev app:** the server auth bypass makes the API
   usable, but the client's own `user` state (Firebase) stays null. The
   `dev/patch-user-provider.js` shim injects a fake `user` with `getIdToken()`
@@ -239,9 +244,9 @@ because `Sequencer` copies its context).
    `release_date` over mtime. `processFile` clears sub-tune rows before the
    `music` REPLACE (FK ordering fix for incremental reprocessing).
 9. `AppFooter` shows the full song-folder path (and links into it) for
-   multi-song files; `isSongFolder` is derived from `subtuneTitle` (catalog)
-   with the player's `numSubtunes` as fallback, since the dev stub doesn't
-   report sub-tunes.
+   multi-song files; `isSongFolder` is derived from `/metadata`'s
+   `subtuneCount` (catalog) with the player's `numSubtunes` as fallback, since
+   the dev stub doesn't report sub-tunes.
 
 **Caveat:** `Sequencer.playContext` copies its context, so array-identity
 checks no longer work. Compare a live context to a stored one with
@@ -283,12 +288,12 @@ checks no longer work. Compare a live context to a stored one with
 - Templates literals: **do not put backticks inside SQL template strings**
   (broke `build-music.js` twice via SQL comments using backticks).
 - Verify with `curl` against `localhost:8080/api/...`.
-- `dev/remove.sh` restores patched tracked files from `*.dev-backup`. Keep those
-  backups **feature-only** (dev shim reverted, not upstream): if you edit a
-  patched file for the feature, refresh its backup, or `remove.sh` will drop the
-  feature changes. The `server/index.js` backup was regenerated feature-only for
-  this reason; `auth.js` is a whole-file replacement so its upstream backup is
-  correct. Before a PR, prefer undoing the shim by hand for `server/index.js` /
-  `UserProvider.js` and double-check `git diff`.
+- Dev shims that edit tracked files in place (`server/index.js`,
+  `src/components/UserProvider.js`) are patched by `dev/patch-server.js` /
+  `dev/patch-user-provider.js` and undone with `--revert`; `dev/remove.sh`
+  calls those, so feature edits in those files are preserved. Files that are
+  wholly replaced (`server/middleware/auth.js`, `src/config/firebaseConfig.js`)
+  are restored from `*.dev-backup`, so keep those backups correct. Before a PR,
+  run `./dev/remove.sh` and double-check `git diff` / `git status`.
 - The client uses React 16, react-router-dom v5, react-virtualized, lodash,
   auto-bind. Match those.

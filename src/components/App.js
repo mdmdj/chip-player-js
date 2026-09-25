@@ -131,6 +131,7 @@ class App extends React.Component {
       songPath: null,
       songRef: null,
       songTitleKey: null,
+      subtuneCount: null,
       subtuneTitle: null,
       songId: null,
       volume: 100,
@@ -428,6 +429,7 @@ class App extends React.Component {
         songPath: null,
         songRef: null,
         songTitleKey: null,
+        subtuneCount: null,
         subtuneTitle: null,
       });
       // TODO: Disabled to support scroll restoration.
@@ -468,12 +470,13 @@ class App extends React.Component {
         // TODO: move fetch metadata to Player when it becomes event emitter
         axios.get(metadataUrl).then(response => {
           if (songTitleKey !== this.state.songTitleKey) return; // song changed while loading
-          const { imageUrl: imagePath, infoTexts, md5, songId, subtuneTitle } = response.data;
+          const { imageUrl: imagePath, infoTexts, md5, songId, subtuneTitle, subtuneCount } = response.data;
           const imageUrl = imagePath ? getUrlFromFilepath(imagePath) : null;
           const newInfoTexts = [...this.state.infoTexts, ...infoTexts ];
           const newShowInfo = this.state.showInfo && newInfoTexts.length > 0;
           this.setState({
             imageUrl, infoTexts: newInfoTexts, md5, showInfo: newShowInfo, songId,
+            subtuneCount: subtuneCount ?? null,
             subtuneTitle: subtuneTitle ?? null,
           });
 
@@ -895,10 +898,12 @@ class App extends React.Component {
     ) ? (this.state.currentSongBuffer || this.sequencer?.getCurrSongBuffer()) : null;
     const isMidi = Boolean(midiData);
     const activeTheaterMode = Boolean(isMidi && this.state.theaterMode && showVisualizer);
-    // A multi-song file reads as a song folder in Browse. The player's own
-    // sub-tune count is authoritative, but may be unavailable (e.g. before the
-    // engine reports it), so the catalog's sub-tune title is a good fallback.
-    const isSongFolder = this.state.subtuneTitle != null || this.state.currentSongNumSubtunes > 1;
+    // A multi-song file reads as a song folder in Browse. Any of these means
+    // "has sub-tunes": the catalog count (fresh /metadata), a catalog sub-tune
+    // title (also present in older cached metadata), or the player's own count.
+    const isSongFolder = this.state.subtuneCount > 1
+      || this.state.subtuneTitle != null
+      || this.state.currentSongNumSubtunes > 1;
 
     return (
       <Dropzone

@@ -36,8 +36,8 @@ To revert:
 | `shims/chip-core.js` | `src/chip-core.js` | target gitignored | No-op Emscripten module + in-memory FS. No audio. |
 | `shims/firebaseConfig.js` | `src/config/firebaseConfig.js` | target gitignored | Placeholder Firebase config. |
 | `shims/server-auth.js` | `server/middleware/auth.js` | target tracked (backed up) | Fixed `dev-user`; no service account needed. |
-| `patch-server.js` | `server/index.js` | target tracked (backed up) | Makes `skia-canvas` optional. |
-| `patch-user-provider.js` | `src/components/UserProvider.js` | target tracked (backed up) | Injects a fake client `user`, so the favorites UI works without Firebase. |
+| `patch-server.js` | `server/index.js` | target tracked (reversible) | Makes `skia-canvas` optional. |
+| `patch-user-provider.js` | `src/components/UserProvider.js` | target tracked (reversible) | Injects a fake client `user`, so the favorites UI works without Firebase. |
 | `seed-dbs.js` | `server/users.db`, `server/csdb.db` | gitignored | Creates `users`/`playlists`/`playbacks` schemas. |
 | generated | `server/.env.local` | gitignored | Points server at local dirs. |
 | generated | `catalog/`, `server/catalog.db` | gitignored | Built by `scripts/build-music.js`. |

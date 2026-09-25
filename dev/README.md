@@ -60,11 +60,26 @@ future header-based shim.
 Drop extra files into `catalog/` (NSF/NSFE/SID/MOD/etc.), then rebuild:
 
 ```sh
-node scripts/build-music.js -f <subdir>
+node scripts/build-music.js --filter <subdir>
 ```
 
 `game-music-emu/test.nsf` is a convenient multi-track NSF and is copied in
 automatically for a starter fixture.
+
+## Tests
+
+Dev-only harnesses (plain Node + `assert`, no framework and no new deps). They
+are removed with the rest of `dev/` before the PR.
+
+```sh
+node dev/test-parsers.js   # parser edge cases + real files under catalog/
+node dev/test-build.js     # build-music round-trip (synthetic subdir, cleans up)
+./dev/run-tests.sh         # both
+```
+
+`test-build.js` writes a temp subdir under `catalog/`, runs the builder filtered
+to it (twice, to exercise reprocessing), asserts the `music`/`subtune` rows, and
+removes its temp dir and rows afterwards.
 
 ## Limitations
 

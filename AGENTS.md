@@ -47,8 +47,11 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
     `server/.env.local`, builds `catalog/` + `server/catalog.db`.
   - `./dev/remove.sh` — reverts everything (tracked files restored from
     `*.dev-backup`; generated files removed).
-  - `node dev/test-parsers.js` — parser test harness (19 checks; uses synthetic
-    buffers + real files under `catalog/`).
+  - `node dev/test-parsers.js` — parser harness (19 checks; synthetic buffers +
+    real files under `catalog/`).
+  - `node dev/test-build.js` — build-music round-trip on a temp catalog subdir
+    (sub-tune rows, dates, idempotency); cleans up after itself.
+  - `./dev/run-tests.sh` — runs both. Dev-only, not part of the PR.
   - `dev/README.md` documents the shims.
 - Run the app: `npm run dev` (webpack dev server on :3000, API server on :8080).
 - **Dev-only note:** the stub `chip-core.js` produces no audio; it's a no-op
@@ -264,10 +267,12 @@ checks no longer work. Compare a live context to a stored one with
 
 ## Remaining TODO / roadmap
 
-1. Regression tests. There is no test script; the only harness is
-   `dev/test-parsers.js`. A build-music round-trip test (sub-tune rows, counts,
-   dates) and API tests for `/browse`, `/search`, `/shuffle`, `/top`,
-   playbacks, and favorites would de-risk the PR.
+1. Testing. Dev-only harnesses now cover parsers (`dev/test-parsers.js`) and a
+   build-music round-trip (`dev/test-build.js`), run via `./dev/run-tests.sh`.
+   They are removed with `dev/` before the PR, which still ships without tests
+   (matching the repo, which has no test runner or CI). If Matt wants a durable
+   suite, the same harnesses could move to a tracked `test/` dir and run via
+   `node --test` with no new deps.
 2. Known unsupported formats (don't add to `FORMATS` without a player/parser):
    plain `.usf` sets (only `.miniusf` is supported), PSF/PSX (`psflib` is reused
    only by the USF loader; no PSX core), and PSM (`libxmp-lite` = it/mod/s3m/xm;

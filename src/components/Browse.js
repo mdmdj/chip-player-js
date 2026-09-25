@@ -56,7 +56,8 @@ export default class Browse extends React.PureComponent {
       const { item, onPlay } = props;
       item.isBackLink = item.name === '..' && prevPageIsParentDir;
 
-      if (item.type === 'directory') {
+      const isSongFolder = item.type === 'songfolder';
+      if (item.type === 'directory' || isSongFolder) {
         return (
           <>
             <div className="BrowseList-colName">
@@ -64,15 +65,17 @@ export default class Browse extends React.PureComponent {
                              isBackLink={item.isBackLink}>{item.name}</DirectoryLink>
             </div>
             <div className="BrowseList-colDir">
-              &lt;DIR&gt;
+              {isSongFolder ? <>&lt;SONGS&gt;</> : <>&lt;DIR&gt;</>}
             </div>
-            <div className="BrowseList-colCount" title={`Contains ${item.count} direct child items`}>
+            <div className="BrowseList-colCount"
+                 title={isSongFolder ? `Contains ${item.count} sub-songs` : `Contains ${item.count} direct child items`}>
               {item.count}
             </div>
             <div className="BrowseList-colMtime">
               {item.mtime}
             </div>
-            <div className="BrowseList-colSize" title={`Directory size is ${item.size} bytes (recursive)`}>
+            <div className="BrowseList-colSize"
+                 title={isSongFolder ? `File size is ${item.size} bytes` : `Directory size is ${item.size} bytes (recursive)`}>
               {item.size != null && bytes(item.size, { unitSeparator: ' ' })}
             </div>
           </>

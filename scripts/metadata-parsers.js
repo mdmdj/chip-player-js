@@ -2,9 +2,32 @@ const fs = require('fs');
 const zlib = require('zlib');
 // TextDecoder is global in modern Node.js (11+)
 
+const DATE_YMD_REGEX = /\b(1[89]\d{2}|20\d{2})[-/.](0?[1-9]|1[0-2])[-/.](0?[1-9]|[12]\d|3[01])\b/;
+const DATE_YM_REGEX = /\b(1[89]\d{2}|20\d{2})[-/.](0?[1-9]|1[0-2])\b/;
+const DATE_Y_REGEX = /\b(1[89]\d{2}|20\d{2})\b/;
+
+/**
+ * Extract a release date from free-form metadata strings (copyright, released,
+ * GD3 release date, ...). Formats vary wildly: "1988 Konami", "(C)1984 CAPCOM",
+ * "2008-2009", "1988-12-16". Normalizes to an ISO date, defaulting the unknown
+ * parts to Jan 1. Returns null when no year is found.
+ */
+function extractDate(...strings) {
+  for (const str of strings) {
+    if (!str) continue;
+    let m = str.match(DATE_YMD_REGEX);
+    if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+    m = str.match(DATE_YM_REGEX);
+    if (m) return `${m[1]}-${m[2].padStart(2, '0')}-01`;
+    m = str.match(DATE_Y_REGEX);
+    if (m) return `${m[1]}-01-01`;
+  }
+  return null;
+}
+
 /**
  * Extract metadata from a buffer based on the file extension.
- * Returns: { title, artist, game, system, copyright, comment, duration }
+ * Returns: { title, artist, game, system, copyright, comment, date, duration }
  */
 function parseMetadata(buffer, ext) {
   const parser = PARSERS[ext.toLowerCase()];
@@ -149,6 +172,8 @@ const PARSERS = {
   mid: parseMIDI,
   midi: parseMIDI,
   mdx: parseMIDI, // Fallback: MDX often uses SMF-like structures or no header, but standard MIDI parser won't hurt if format is different.
+  sid: parseSID,
+  mus: parseSID, // MUS files are a stripped C64 format; header is compatible enough for counts.
 };
 
 function parseVGM(buf) {
@@ -188,6 +213,8 @@ function parseVGM(buf) {
       meta.system = readString();// System Name (En)
       readString();              // System Name (Jp)
       meta.artist = readString();// Author (En)
+      readString();              // Author (Jp)
+      meta.date = extractDate(readString()); // Release Date
     } else {
       console.warn(`[VGM] GD3 pointer exists (0x${gd3Offset.toString(16)}) but 'Gd3 ' magic missing.`);
     }
@@ -200,18 +227,46 @@ function parseNSF(buf) {
   // Spec: https://www.nesdev.org/wiki/NSF
   if (buf.length < 0x80) return {};
 
-  const magic = buf.toString('ascii', 0, 5);
+  // The total number of songs is stored at offset 0x06, and the
+  // starting song index (1-based) at 0x07.
+  const numSongs = buf[0x06] || 1;
+  const startingSong = buf[0x07] || 1;
+
   // Use latin1 to preserve 8-bit chars like ©
+  const copyright = readStr(buf, 0x4E, 0x6E);
   return {
     title: readStr(buf, 0x0E, 0x2E),
     artist: readStr(buf, 0x2E, 0x4E),
-    copyright: readStr(buf, 0x4E, 0x6E),
-    system: 'NES'
+    copyright,
+    date: extractDate(copyright),
+    system: 'NES',
+    numSongs,
+    startingSong,
   };
+}
+
+/**
+ * Parse the NSFE `tlbl`/`auth` string chunks into an array of strings.
+ * The chunk is a run of null-terminated strings.
+ */
+function parseNsfeStrings(buf, start, end) {
+  const strings = [];
+  let cursor = start;
+  while (cursor < end) {
+    let strEnd = cursor;
+    while (strEnd < end && buf[strEnd] !== 0) strEnd++;
+    strings.push(readStr(buf, cursor, strEnd));
+    cursor = strEnd + 1;
+  }
+  return strings;
 }
 
 function parseNSFe(buf) {
   // Spec: https://www.nesdev.org/wiki/NSFe
+  //
+  // NSFE is a chunked ("tagged") format. Each chunk is a little-endian
+  // uint32 size followed by a 4-byte ASCII tag (INFO, BANK, time, auth,
+  // plst, tlbl, DATA, NEND, ...). See game-music-emu/gme/Nsfe_Emu.cpp.
   if (buf.toString('ascii', 0, 4) !== 'NSFE') {
     return parseNSF(buf);
   }
@@ -219,47 +274,91 @@ function parseNSFe(buf) {
   const meta = { system: 'NES' };
   let cursor = 4;
 
-  while (cursor < buf.length) {
-    if (cursor + 8 > buf.length) break;
+  // NSFE does not embed a base NSF header; counts come from the INFO chunk.
+  // `trackCount` is the number of tracks physically present in the DATA chunk.
+  // The `plst` (playlist) chunk, when present, is the authoritative list of
+  // sub-songs (and their order/remapping), mirroring game-music-emu.
+  let trackCount = 1;
+  let startingSong = 1;
 
+  let trackLabels = [];   // labels indexed by physical track
+  let playlist = null;    // array of physical track indices
+
+  while (cursor + 8 <= buf.length) {
     const chunkSize = buf.readUInt32LE(cursor);
     const chunkType = buf.toString('ascii', cursor + 4, cursor + 8);
     const chunkDataStart = cursor + 8;
-    const nextChunk = chunkDataStart + chunkSize;
+    const nextChunk = Math.min(chunkDataStart + chunkSize, buf.length);
 
-    if (chunkType === 'auth') {
-      let localCursor = chunkDataStart;
-
-      const readChunkStr = () => {
-        if (localCursor >= nextChunk) return '';
-        let end = localCursor;
-        while (end < nextChunk && buf[end] !== 0) end++;
-        const str = readStr(buf, localCursor, end);
-        localCursor = end + 1; // Skip null
-        return str;
-      };
-
-      meta.game = readChunkStr();
-      meta.artist = readChunkStr();
-      meta.copyright = readChunkStr();
-      if (!meta.title) meta.title = meta.game;
-    }
-    else if (chunkType === 'tlbl') {
-      let localCursor = chunkDataStart;
-      let end = localCursor;
-      while (end < nextChunk && buf[end] !== 0) end++;
-      const firstTrackTitle = readStr(buf, localCursor, end);
-
-      if (firstTrackTitle) {
-        meta.title = firstTrackTitle;
+    switch (chunkType) {
+      case 'INFO': {
+        // load_addr(2), init_addr(2), play_addr(2), speed_flags(1),
+        // chip_flags(1), track_count(1), first_track(1), unused(6)
+        if (chunkSize >= 10) {
+          trackCount = buf[chunkDataStart + 8] || 1;
+          // NSFE `first_track` is 0-based (unlike the 1-based NSF header).
+          startingSong = buf[chunkDataStart + 9] + 1;
+        }
+        break;
       }
-    }
-    else if (chunkType === 'NEND') {
-      break;
+      case 'auth': {
+        const strs = parseNsfeStrings(buf, chunkDataStart, nextChunk);
+        if (strs[0]) meta.game = strs[0];
+        if (strs[1]) meta.artist = strs[1];
+        if (strs[2]) meta.copyright = strs[2];
+        if (strs[3]) meta.dumper = strs[3];
+        if (!meta.title) meta.title = meta.game;
+        break;
+      }
+      case 'tlbl': {
+        trackLabels = parseNsfeStrings(buf, chunkDataStart, nextChunk);
+        break;
+      }
+      case 'plst': {
+        // A byte array of physical track indices.
+        playlist = Array.from(buf.subarray(chunkDataStart, nextChunk));
+        break;
+      }
+      case 'time': // per-track lengths in ms; reserved for future use.
+      case 'fade': // per-track fadeout times in ms; reserved for future use.
+        break;
+      default:
+        break;
     }
 
+    if (chunkType === 'NEND') break;
+    if (nextChunk <= cursor) break;
     cursor = nextChunk;
   }
+
+  // Mirror game-music-emu's Nsfe_Info:
+  //   - with a non-empty playlist, songs are the playlist entries remapped
+  //     into the physical track list;
+  //   - otherwise, songs are all physical tracks 1:1.
+  const usePlaylist = Array.isArray(playlist) && playlist.length > 0;
+  const songCount = usePlaylist ? playlist.length : trackCount;
+
+  const subtitles = [];
+  for (let i = 0; i < songCount; i++) {
+    const physical = usePlaylist ? playlist[i] : i;
+    const label = trackLabels[physical];
+    if (label != null) subtitles.push(label);
+  }
+
+  meta.numSongs = songCount;
+  meta.startingSong = startingSong;
+  if (subtitles.length > 0) {
+    meta.trackLabels = subtitles;
+  }
+  // A single empty label is the spec's "one unnamed track" placeholder.
+  if (meta.trackLabels && meta.trackLabels.length === 1 && meta.trackLabels[0] === '') {
+    delete meta.trackLabels;
+  }
+  if (meta.trackLabels && meta.trackLabels[0]) {
+    meta.title = meta.trackLabels[0];
+  }
+
+  meta.date = extractDate(meta.copyright);
 
   return meta;
 }
@@ -315,6 +414,62 @@ function parseIT(buf) {
   return {
     title: readStr(buf, 0x04, 0x1E),
     system: 'PC'
+  };
+}
+
+function parseSID(buf) {
+  // Spec: https://www.hvsc.c64.org/download/C64Music/DOCUMENTS/SID_file_format.txt
+  if (buf.length < 0x76 || buf.toString('ascii', 0, 4) !== 'PSID') {
+    // PSID is the common variant; RSID shares the same header layout.
+    if (buf.toString('ascii', 0, 4) !== 'RSID') {
+      console.warn('[SID] Missing PSID/RSID signature.');
+      return { system: 'C64' };
+    }
+  }
+
+  // Version 2+ adds flags, start page, page length, second/third SID address.
+  const version = buf.readUInt16BE(0x04);
+
+  // Metadata strings live at fixed offsets in the header:
+  // name at 0x16 (22), author at 0x36 (54), released at 0x56 (86),
+  // each 32 bytes null-padded.
+  const name = readStr(buf, 0x16, 0x36);
+  const author = readStr(buf, 0x36, 0x56);
+  const released = readStr(buf, 0x56, 0x76);
+
+  // Song counts: word at 0x0E (total songs), word at 0x10 (start song).
+  let numSongs = buf.readUInt16BE(0x0E) || 1;
+  const startingSong = buf.readUInt16BE(0x10) || 1;
+  if (numSongs === 0) numSongs = 1;
+
+  // The `speed` byte at 0x12 (bit 0 = PAL/NTSC for the *first* song) plus the
+  // per-song speed table at 0x18 + 0x04..0x?? For v2+, each song's speed is
+  // one bit in the packed table. We expose a simple PAL/NTSC choice for now.
+  let speeds = null;
+  if (version >= 2) {
+    // The packed speed table begins at 0x18 (24). Bit i == 1 => PAL.
+    // Table length is ceil(numSongs / 8) bytes.
+    const tableBytes = Math.ceil(numSongs / 8);
+    if (0x18 + tableBytes <= buf.length) {
+      const speedsArr = [];
+      for (let i = 0; i < numSongs; i++) {
+        const byte = buf[0x18 + (i >> 3)];
+        speedsArr.push((byte & (1 << (i & 7))) ? 'PAL' : 'NTSC');
+      }
+      speeds = speedsArr;
+    }
+  }
+
+  return {
+    title: name,
+    artist: author,
+    copyright: released,
+    game: released,
+    date: extractDate(released),
+    system: 'C64',
+    numSongs,
+    startingSong,
+    ...(speeds ? { speeds } : {}),
   };
 }
 

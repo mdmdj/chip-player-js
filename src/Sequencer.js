@@ -2,7 +2,7 @@ import axios from 'redaxios';
 import autoBind from 'auto-bind';
 import EventEmitter from 'events';
 import shuffle from 'lodash/shuffle';
-import { getUrlFromFilepath } from './util';
+import { getUrlFromFilepath, songRef } from './util';
 
 export const REPEAT_OFF = 0;
 export const REPEAT_ALL = 1;
@@ -31,6 +31,7 @@ export default class Sequencer extends EventEmitter {
     this.currIdx = 0;
     this.context = null;
     this.currSongPath = null;
+    this.currSongRef = null;
     this.shuffle = SHUFFLE_OFF;
     this.shuffleOrder = [];
     this.songRequest = null;
@@ -65,13 +66,24 @@ export default class Sequencer extends EventEmitter {
 
     if (isStopped) {
       this.currSongPath = null;
+      this.currSongRef = null;
       this.currSongBuffer = null;
       if (this.context) {
         this.nextSong();
       }
     } else {
+      // The player changes sub-tune on its own for the footer tune buttons and
+      // when auto-advancing at the end of a sub-song. Keep the SongRef (and the
+      // context entry, for list highlighting) in sync with the player.
+      const { subtune } = playerState;
+      if (this.currSongRef && subtune != null && this.currSongRef.subtune !== subtune) {
+        this.currSongRef = { ...this.currSongRef, subtune };
+        const contextRef = this.currContextRef();
+        if (contextRef) contextRef.subtune = subtune;
+      }
       this.emit('sequencerStateUpdate', {
         songPath: this.currSongPath,
+        songRef: this.currSongRef,
         songBuffer: this.currSongBuffer,
         hasPlayer: true,
         // TODO: combine isEjected and hasPlayer
@@ -81,22 +93,34 @@ export default class Sequencer extends EventEmitter {
     }
   }
 
-  playContext(context, index = 0, subtune = 0) {
+  /**
+   * Begin playing a context (an ordered list of SongRefs).
+   * `subtune` is an optional override for the first song, used by share links
+   * (?play=...&subtune=N); normally the sub-tune comes from the SongRef.
+   */
+  playContext(context, index = 0, subtune = null) {
     this.currIdx = index;
-    this.context = context;
+    this.context = context.map(item => songRef(item));
     if (this.shuffle === SHUFFLE_ON) {
       this.setShuffle(this.shuffle);
     }
-    this.playCurrentSong(subtune);
+    const ref = this.currContextRef();
+    if (ref && subtune != null) {
+      ref.subtune = subtune;
+    }
+    this.playCurrentSong();
   }
 
-  playCurrentSong(subtune = 0) {
+  currContextRef() {
     let idx = this.currIdx;
     if (this.shuffle === SHUFFLE_ON) {
       idx = this.shuffleOrder[idx];
-      console.log('Shuffle (%s): %s', this.currIdx, idx);
     }
-    this.playSong(this.context[idx], subtune);
+    return this.context ? this.context[idx] : null;
+  }
+
+  playCurrentSong() {
+    this.playSong(this.currContextRef());
   }
 
   playSonglist(urls) {
@@ -192,6 +216,10 @@ export default class Sequencer extends EventEmitter {
     return this.currSongPath;
   }
 
+  getCurrSongRef() {
+    return this.currSongRef;
+  }
+
   getCurrSongBuffer() {
     return this.currSongBuffer;
   }
@@ -200,7 +228,15 @@ export default class Sequencer extends EventEmitter {
     return this.player.getSubtune();
   }
 
-  playSong(filepath, subtune = 0) {
+  /**
+   * Play a single song. Accepts a SongRef (preferred) or a bare path string.
+   */
+  playSong(songRefOrPath) {
+    const ref = songRef(songRefOrPath);
+    if (!ref) return;
+    const { path: filepath, subtune } = ref;
+
+    this.currSongRef = ref;
     this.currSongBuffer = null;
     if (this.player !== null) {
       this.player.suspend();

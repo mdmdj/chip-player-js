@@ -7,13 +7,18 @@ import { UserContext } from './UserProvider';
 import DirectoryLink from './DirectoryLink';
 import { getUrlFromFilepath, pathJoin } from '../util';
 
-function directoryLinkFromFilepath(filepath) {
+function directoryLinkFromFilepath(filepath, isSongFolder) {
   if (!filepath) return null;
   const sep = '/';
 
-  filepath = filepath
-    .split(sep).slice(0, -1).join(sep);
-  return <DirectoryLink dim to={pathJoin('/browse', encodeURI(filepath))}>{filepath}</DirectoryLink>;
+  // A multi-song file is itself a "song folder" in Browse, so show the whole
+  // path (matching the Browse header) instead of just its parent directory.
+  const browsePath = isSongFolder
+    ? filepath
+    : filepath.split(sep).slice(0, -1).join(sep);
+  // Same escaping as Browse: %/# must be pre-escaped for react-router.
+  const href = browsePath.replace('%', '%25').replace('#', '%23');
+  return <DirectoryLink dim to={pathJoin('/browse', href)}>{browsePath}</DirectoryLink>;
 }
 
 export default memo(AppFooter);
@@ -26,11 +31,13 @@ function AppFooter(props) {
     ejected,
     imageUrl,
     infoTexts,
+    isSongFolder,
     md5,
     paused,
     repeat,
     shuffle,
     songId,
+    songRef,
     songPath,
     subtitle,
     title,
@@ -56,7 +63,7 @@ function AppFooter(props) {
     faves,
   } = useContext(UserContext);
 
-  const directoryLink = directoryLinkFromFilepath(songPath);
+  const directoryLink = directoryLinkFromFilepath(songPath, isSongFolder);
   const songUrl = getUrlFromFilepath(songPath);
   const subtuneText = `Tune ${currentSongSubtune + 1} of ${currentSongNumSubtunes}`;
 
@@ -67,7 +74,7 @@ function AppFooter(props) {
 
   const handleCopySongLink = useCallback((e) => {
     e.preventDefault();
-    handleCopyLink(getCurrentSongLink());
+    handleCopyLink(getCurrentSongLink(/*withSubtune=*/true));
   }, [getCurrentSongLink, handleCopyLink]);
 
   const handleCopySubtuneLink = useCallback((e) => {
@@ -167,6 +174,7 @@ function AppFooter(props) {
             {faves && songPath &&
               <FavoriteButton item={{
                 path: songPath,
+                subtune: songRef?.subtune ?? currentSongSubtune,
                 songId: songId,
               }}/>}
             <div className="SongDetails-title">

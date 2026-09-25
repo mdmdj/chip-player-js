@@ -5,6 +5,54 @@ import axios from 'redaxios';
 
 const MULTI_SLASH_REGEX = /\/{2,}/g;
 
+/**
+ * A playable song is identified by a file path and an optional sub-tune index.
+ * A file containing multiple songs (NSF/NSFE/SID) exposes one SongRef per
+ * sub-song; a single-song file is just a SongRef with subtune 0. This is the
+ * common currency for play contexts, favorites, and share links.
+ *
+ * @typedef {{ path: string, subtune: number }} SongRef
+ */
+
+/**
+ * Normalize anything that names a song into a SongRef.
+ * Accepts a path string, an existing SongRef, or a browse/search item.
+ */
+export function songRef(pathOrRef, subtune = 0) {
+  if (pathOrRef == null) return null;
+  if (typeof pathOrRef === 'object') {
+    return {
+      path: pathOrRef.path,
+      subtune: pathOrRef.subtune || 0,
+    };
+  }
+  return { path: pathOrRef, subtune: subtune || 0 };
+}
+
+/**
+ * Stable identity for a SongRef, usable as an object key or for === comparisons.
+ * NUL is used as the separator because it cannot appear in a path.
+ */
+export function songRefKey(pathOrRef, subtune = 0) {
+  const ref = songRef(pathOrRef, subtune);
+  if (!ref) return null;
+  return `${ref.path}\u0000${ref.subtune}`;
+}
+
+export function songRefsEqual(a, b) {
+  return songRefKey(a) === songRefKey(b);
+}
+
+/**
+ * Whether two ordered lists of songs are the same, for comparing a live play
+ * context to a stored one. Sequencer copies its context, so identity won't do.
+ */
+export function songRefListsEqual(a, b) {
+  if (a === b) return true;
+  if (!a || !b || a.length !== b.length) return false;
+  return a.every((ref, i) => songRefsEqual(ref, b[i]));
+}
+
 export function updateQueryString(newParams) {
   const searchParams = new URLSearchParams(window.location.search);
   Object.entries(newParams).forEach(([key, value]) => {
@@ -74,10 +122,11 @@ export function getUrlFromFilepath(filepath) {
   return pathJoin(CATALOG_PREFIX, encodeURIComponent(filepath));
 }
 
-export function getMetadataUrlForFilepath(filepath) {
+export function getMetadataUrlForFilepath(filepath, subtune = null) {
   // XXX: any time we convert from path to URL, we must encode
   filepath = filepath.replace('%25', '%').replace('%23', '#');
-  return `${API_BASE}/metadata?path=${encodeURIComponent(filepath)}`;
+  const subtuneParam = subtune != null ? `&subtune=${subtune}` : '';
+  return `${API_BASE}/metadata?path=${encodeURIComponent(filepath)}${subtuneParam}`;
 }
 
 export function getMetadataUrlForCatalogUrl(url) {

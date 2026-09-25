@@ -3,6 +3,7 @@ import { z } from 'zod';
 export const FavoriteSchema = z.object({
   // songId: z.string().length(8), // Enforce that 8-char string length
   path: z.string(),
+  subtune: z.number().int().nonnegative().default(0), // 0-based sub-song index
   mtime: z.number().int().nonnegative(), // Unix timestamp in seconds
 });
 

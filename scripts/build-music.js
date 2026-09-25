@@ -67,6 +67,8 @@ try {
 if (options.resetDb) {
   if (options.verbose) console.log(chalk.yellow('Resetting database tables...'));
   db.exec(`
+    DROP TABLE IF EXISTS subtune;
+    DROP TABLE IF EXISTS subtune_fts;
     DROP TABLE IF EXISTS music;
     DROP TABLE IF EXISTS directories;
     DROP TABLE IF EXISTS images;
@@ -115,6 +117,7 @@ db.exec(`
     game TEXT,
     system TEXT,
     copyright TEXT,
+    release_date TEXT,           -- ISO date parsed from metadata (year -> Jan 1)
     file_size INTEGER,
     mtime TEXT,
     raw_meta TEXT,
@@ -122,15 +125,39 @@ db.exec(`
     text_ids TEXT,               -- JSON array of text IDs
     soundfont TEXT,              -- Relative path to soundfont
     md5 TEXT,                    -- MD5 hash for tracker modules
+    subtune_count INTEGER DEFAULT 1, -- Playable sub-songs (1 = single song)
     sort_order INTEGER DEFAULT 0,
     FOREIGN KEY(directory_id) REFERENCES directories(id),
     FOREIGN KEY(image_id) REFERENCES images(id)
   );
-  
+
+  -- Each row is a playable sub-song within a single file (e.g. an NSF/NSFE/SID
+  -- containing several tunes). A file with subtune_count > 1 is presented as a
+  -- "song folder". Single-song files have no rows here, so a sub-song and a
+  -- plain song are the same kind of thing to the client.
+  CREATE TABLE IF NOT EXISTS subtune (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    music_id INTEGER NOT NULL,
+    subtune INTEGER NOT NULL,    -- 0-based, matches the player's subtune index
+    title TEXT,
+    length_ms INTEGER,
+    date TEXT,                   -- per-sub-tune date when the format provides one
+    sort_order INTEGER DEFAULT 0,
+    UNIQUE(music_id, subtune),
+    FOREIGN KEY(music_id) REFERENCES music(id)
+  );
+
   -- FTS Virtual Table
   CREATE VIRTUAL TABLE IF NOT EXISTS music_fts USING fts5(
     title, artist, game, system, filename, path, 
     content='music', content_rowid='id', 
+    prefix='1 2 3'
+  );
+
+  -- Sub-song titles are searchable just like song titles.
+  CREATE VIRTUAL TABLE IF NOT EXISTS subtune_fts USING fts5(
+    title, 
+    content='subtune', content_rowid='id', 
     prefix='1 2 3'
   );
   
@@ -152,21 +179,54 @@ db.exec(`
     VALUES (new.id, new.title, new.artist, new.game, new.system, new.filename, new.path);
   END;
 
+  CREATE TRIGGER IF NOT EXISTS subtune_ai AFTER INSERT ON subtune BEGIN
+    INSERT INTO subtune_fts(rowid, title) VALUES (new.id, new.title);
+  END;
+
+  CREATE TRIGGER IF NOT EXISTS subtune_ad AFTER DELETE ON subtune BEGIN
+    INSERT INTO subtune_fts(subtune_fts, rowid, title) VALUES ('delete', old.id, old.title);
+  END;
+
+  CREATE TRIGGER IF NOT EXISTS subtune_au AFTER UPDATE ON subtune BEGIN
+    INSERT INTO subtune_fts(subtune_fts, rowid, title) VALUES ('delete', old.id, old.title);
+    INSERT INTO subtune_fts(rowid, title) VALUES (new.id, new.title);
+  END;
+
   CREATE INDEX IF NOT EXISTS idx_directories_parent ON directories(parent_id);
   CREATE INDEX IF NOT EXISTS idx_music_directory ON music(directory_id);
   CREATE INDEX IF NOT EXISTS idx_music_sort ON music(sort_order);
   CREATE INDEX IF NOT EXISTS idx_music_songid ON music(song_id);
+  CREATE INDEX IF NOT EXISTS idx_subtune_music ON subtune(music_id);
   CREATE INDEX IF NOT EXISTS idx_directories_sort ON directories(sort_order);
 `);
+
+// Additive migrations for databases created before these columns existed.
+function ensureColumn(table, column, type) {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all();
+  if (!columns.some(c => c.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+  }
+}
+ensureColumn('music', 'release_date', 'TEXT');
+ensureColumn('subtune', 'date', 'TEXT');
 
 // Statements
 const insertMusicStmt = db.prepare(`
     INSERT OR REPLACE INTO music (
       directory_id, filename, path, extension, song_id, title, artist, game, system, 
-      copyright, file_size, mtime, raw_meta, image_id, text_ids, soundfont, md5, sort_order
+      copyright, release_date, file_size, mtime, raw_meta, image_id, text_ids, soundfont, md5, subtune_count, sort_order
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
+
+const insertSubtuneStmt = db.prepare(`
+    INSERT INTO subtune (music_id, subtune, title, length_ms, date, sort_order)
+    VALUES (?, ?, ?, ?, ?, ?)
+`);
+
+const deleteSubtunesStmt = db.prepare('DELETE FROM subtune WHERE music_id = ?');
+
+const findMusicIdStmt = db.prepare('SELECT id FROM music WHERE path = ?');
 
 const insertDirStmt = db.prepare(`
     INSERT INTO directories (parent_id, name, path, image_id, text_ids, sort_order, count, total_size, mtime)
@@ -277,6 +337,44 @@ function findSpecificSidecar(entries, baseName, extensions) {
 
 function escapeRegExp(string) {
   return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// Formats that can contain more than one song ("sub-songs") in a single file.
+const MULTISONG_EXTENSIONS = new Set(['nsf', 'nsfe', 'sid', 'mus']);
+
+/**
+ * Describe the playable sub-songs inside a file from parser metadata.
+ *
+ * Returns an array of { subtune, title, lengthMs } when the file contains 2+
+ * songs, otherwise an empty array. Single-song files have no sub-tunes, which
+ * keeps the browse tree flat (a plain file).
+ *
+ *   - subtune:  0-based index, matches the player's subtune index
+ *   - title:    per-track label when available, else "Song N"
+ *   - lengthMs: duration in ms when known (reserved; parsers don't emit yet)
+ *   - date:     per-track release date when the format provides one (rare)
+ */
+function describeSubtunes(extension, meta) {
+  if (!MULTISONG_EXTENSIONS.has(extension)) return [];
+
+  const numSongs = meta.numSongs || 1;
+  if (numSongs < 2) return [];
+
+  const labels = Array.isArray(meta.trackLabels) ? meta.trackLabels : [];
+  const lengths = Array.isArray(meta.trackLengths) ? meta.trackLengths : [];
+  const dates = Array.isArray(meta.trackDates) ? meta.trackDates : [];
+
+  const subtunes = [];
+  for (let i = 0; i < numSongs; i++) {
+    const label = labels[i] != null ? String(labels[i]).trim() : '';
+    subtunes.push({
+      subtune: i,
+      title: label || `Song ${i + 1}`,
+      lengthMs: Number.isFinite(lengths[i]) ? lengths[i] : null,
+      date: dates[i] != null ? String(dates[i]).trim() || null : null,
+    });
+  }
+  return subtunes;
 }
 
 // --- DB Helpers ---
@@ -490,6 +588,7 @@ function processFile(child, directoryId, dirEntries, dirImagePath, dirTextIds) {
   const meta = parseMetadata(buffer, extension);
   const title = meta.title || path.basename(name, ext);
   const system = meta.system || detectSystemFromPath(relativePath);
+  const subtunes = describeSubtunes(extension, meta);
 
   // --- Sidecar Resolution for File ---
   
@@ -555,6 +654,14 @@ function processFile(child, directoryId, dirEntries, dirImagePath, dirTextIds) {
   }
 
   if (!options.dryrun) {
+    // INSERT OR REPLACE deletes and reinserts the music row. With foreign keys
+    // enforced that rejects the old subtune children, so clear them first and
+    // rewrite both below.
+    const previousMusicRow = findMusicIdStmt.get(relativePath);
+    if (previousMusicRow) {
+      deleteSubtunesStmt.run(previousMusicRow.id);
+    }
+
     insertMusicStmt.run(
       directoryId,
       name,
@@ -566,6 +673,7 @@ function processFile(child, directoryId, dirEntries, dirImagePath, dirTextIds) {
       meta.game || null,
       system,
       meta.copyright || null,
+      meta.date || null,
       stat.size,
       stat.mtime.toISOString(),
       JSON.stringify(meta),
@@ -573,8 +681,16 @@ function processFile(child, directoryId, dirEntries, dirImagePath, dirTextIds) {
       JSON.stringify(finalTextIds),
       soundfont,
       md5,
+      subtunes.length || 1,
       sortOrder
     );
+
+    const musicRow = findMusicIdStmt.get(relativePath);
+    if (musicRow) {
+      subtunes.forEach((sub, i) => {
+        insertSubtuneStmt.run(musicRow.id, sub.subtune, sub.title, sub.lengthMs, sub.date, i);
+      });
+    }
   }
 
   if (existingFiles.has(relativePath)) {

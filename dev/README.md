@@ -72,14 +72,19 @@ Dev-only harnesses (plain Node + `assert`, no framework and no new deps). They
 are removed with the rest of `dev/` before the PR.
 
 ```sh
-node dev/test-parsers.js   # parser edge cases + real files under catalog/
-node dev/test-build.js     # build-music round-trip (synthetic subdir, cleans up)
-./dev/run-tests.sh         # both
+node dev/test-parsers.js    # parser edge cases + real files under catalog/
+node dev/test-build.js      # build-music round-trip (synthetic subdir, cleans up)
+node dev/test-sequencer.js  # sequencer sub-tune navigation with a fake player
+./dev/run-tests.sh          # all three
 ```
 
 `test-build.js` writes a temp subdir under `catalog/`, runs the builder filtered
 to it (twice, to exercise reprocessing), asserts the `music`/`subtune` rows, and
 removes its temp dir and rows afterwards.
+
+`test-sequencer.js` requires `src/Sequencer.js` with a small inline Babel require
+hook (the client code is ESM/JSX and the repo has no test runner), so it needs no
+build and no new dependencies.
 
 ## Limitations
 

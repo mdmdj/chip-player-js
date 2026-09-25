@@ -4,7 +4,7 @@ import { getAuth, onAuthStateChanged, signInWithPopup, signOut, GoogleAuthProvid
 import { initializeApp as firebaseInitializeApp } from 'firebase/app';
 import firebaseConfig from '../config/firebaseConfig';
 import { API_BASE, CATALOG_PREFIX } from '../config';
-import { pathJoin } from '../util';
+import { pathJoin, songRef } from '../util';
 import { getWithAuth, postWithAuth } from '../util';
 
 const UserContext = createContext({
@@ -124,20 +124,21 @@ const UserProvider = ({ children }) => {
     }
   };
 
-  const handleToggleFavorite = async (path, songId) => {
+  const handleToggleFavorite = async (path, subtune = 0, songId) => {
     if (user) {
       const oldFaves = faves;
-      const isFavorite = faves.find(fave => fave.path === path);
+      const isFavorite = faves.find(fave => fave.path === path && (fave.subtune || 0) === subtune);
 
       const fave = {
         path,
+        subtune,
         songId,
         href: pathJoin(CATALOG_PREFIX, encodeURIComponent(path)),
         mtime: Math.floor(Date.now() / 1000),
       };
 
       const newFaves = isFavorite
-        ? faves.filter(fave => fave.path !== path)
+        ? faves.filter(fave => !(fave.path === path && (fave.subtune || 0) === subtune))
         : [...faves, fave];
       setFaves(newFaves);
 
@@ -147,6 +148,9 @@ const UserProvider = ({ children }) => {
         } else {
           await addFavorite(fave);
         }
+        // Re-read so every entry carries the catalog's size and sub-tune title.
+        const res = await getWithAuth(user, `${API_BASE}/user/favorites`);
+        if (res) setFaves(res.favorites);
       } catch (e) {
         setFaves(oldFaves);
         console.log('Couldn\'t update favorites in Firebase.', e);
@@ -186,9 +190,10 @@ const UserProvider = ({ children }) => {
     saveSettings(user, newSettings);
   }, [user, saveSettings]);
 
-  // We need to derive a list of paths to use as the play context.
+  // We need to derive a list of SongRefs to use as the play context. Old
+  // favorites have no subtune and resolve to the parent file (sub-tune 0).
   const favesContext = useMemo(() => {
-    return faves.map(fave => fave.path);
+    return faves.map(fave => songRef(fave.path, fave.subtune));
   }, [faves]);
 
   return (

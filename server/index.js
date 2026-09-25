@@ -28,9 +28,12 @@ const { SettingsSchema, FavoriteSchema, PlaybackSchema } = require('./schemas');
 
 const {
   searchStmt,
+  searchSubtuneStmt,
   getDirIdStmt,
   getDirChildrenStmt,
+  getSubtunesStmt,
   getMetadataStmt,
+  getSubtuneMetadataStmt,
   getSidMetadataByHashStmt,
   getSidMetadataByPathStmt,
   getTextContentStmt,
@@ -152,7 +155,8 @@ app.use((req, res, next) => {
 });
 
 const cache1Hour = (req, res, next) => {
-  res.header('Cache-Control', 'public, max-age=3600');
+  // Skip caching in dev so code/catalog changes aren't masked by stale responses.
+  if (!isDev) res.header('Cache-Control', 'public, max-age=3600');
   next();
 };
 
@@ -303,7 +307,10 @@ app.get('/preview', cache1Hour, async (req, res) => {
 });
 
 /**
- * Returns: { items: [ { file, title, artist, game, system }, ... ], total }
+ * Returns: { items: [ { file, song_id, title?, subtune? }, ... ], total }
+ *
+ * Searches both song titles (music_fts) and sub-song titles (subtune_fts).
+ * Items with a `subtune` are individual sub-songs; items without are files.
  */
 router.get('/search', cache1Hour, (req, res) => {
   const { limit = 100, query } = req.query;
@@ -311,15 +318,33 @@ router.get('/search', cache1Hour, (req, res) => {
 
   let items = [];
   const sanitizedQuery = query.replace(/"/g, '""');
-  if (searchMap.has(sanitizedQuery)) {
-    items = searchMap.get(sanitizedQuery);
-  } else {
-    const ftsQuery = sanitizedQuery.trim().split(/\s+/).map(term => `${term}*`).join(' ');
 
+  const ftsQuery = sanitizedQuery.trim().split(/\s+/).map(term => `${term}*`).join(' ');
+
+  if (searchMap.has(sanitizedQuery)) {
+    // Clone: the sub-tune loop below appends, and the cached array is shared.
+    items = [...searchMap.get(sanitizedQuery)];
+  } else {
     try {
       items = searchStmt.all(ftsQuery, limit);
     } catch (e) {
       console.error('Search error:', e.message);
+    }
+  }
+
+  // Append matches that were found in sub-song titles rather than file titles.
+  if (ftsQuery) {
+    try {
+      const subtuneItems = searchSubtuneStmt.all(ftsQuery, limit);
+      // Drop sub-songs of files that already matched at the file level.
+      const seen = new Set(items.map(item => item.file));
+      for (const item of subtuneItems) {
+        if (!seen.has(item.file)) {
+          items.push(item);
+        }
+      }
+    } catch (e) {
+      console.error('Sub-song search error:', e.message);
     }
   }
 
@@ -341,11 +366,21 @@ router.get('/total', cache1Hour, (req, res) => {
 });
 
 /**
- * Returns: { items: [ path, ... ], total }
+ * Returns: { items: [ { path, subtune }, ... ], total }
+ *
+ * A multi-song file is shuffled as one of its sub-songs, so shuffle plays
+ * individual songs rather than always landing on sub-tune 0.
  */
+function toShuffledSongRefs(rows) {
+  return rows.map(({ path, subtune_count }) => ({
+    path,
+    subtune: subtune_count > 1 ? Math.floor(Math.random() * subtune_count) : 0,
+  }));
+}
+
 router.get('/random', (req, res) => {
   const limit = parseInt(req.query.limit, 10) || 1;
-  const items = getShuffleStmt.all('/%', limit);
+  const items = toShuffledSongRefs(getShuffleStmt.all('%', limit));
   res.json({
     items: items,
     total: items.length,
@@ -353,13 +388,13 @@ router.get('/random', (req, res) => {
 });
 
 /**
- * Returns: { items: [ path, ... ], total }
+ * Returns: { items: [ { path, subtune }, ... ], total }
  */
 router.get('/shuffle', (req, res) => {
   const limit = parseInt(req.query.limit, 10) || 100;
   let reqPath = (req.query.path || '').replace(/^\/+/g, '');
   if (reqPath !== '') reqPath += '/';
-  items = getShuffleStmt.pluck().all(`${reqPath}%`, limit);
+  const items = toShuffledSongRefs(getShuffleStmt.all(`${reqPath}%`, limit));
 
   res.json({
     items: items,
@@ -368,7 +403,22 @@ router.get('/shuffle', (req, res) => {
 });
 
 /**
+ * Convert an ISO date/timestamp string to Unix seconds (0 when unknown).
+ */
+function toUnixSeconds(value) {
+  if (value == null) return 0;
+  const time = new Date(value).getTime();
+  return Number.isFinite(time) ? time / 1000 : 0;
+}
+
+/**
  * Returns: [ { path, type, size, mtime, idx, count }, ... ]
+ *
+ * `path` may name either a directory or a multi-song file. When it names a
+ * multi-song file, this returns that file's sub-songs as `type: 'file'` rows
+ * (each with a `subtune` index), which is how the client drills into a
+ * "song folder". A file with two or more sub-songs appears in its parent
+ * directory as `type: 'songfolder'`.
  */
 router.get('/browse', cache1Hour, async (req, res) => {
   const { path: reqPath } = req.query;
@@ -403,15 +453,50 @@ router.get('/browse', cache1Hour, async (req, res) => {
     if (dirRow) {
       const children = getDirChildrenStmt.all(dirRow.id, dirRow.id);
 
-      const result = children.map((child) => ({
-        path: normalizedPath ? `${normalizedPath}/${child.path}` : child.path,
-        type: child.type,
-        size: child.size,
-        mtime: typeof child.mtime === 'string' ? new Date(child.mtime).getTime() / 1000 : 0,
-        idx: child.type === 'directory' ? null : (idx++),
-        count: child.count || 0,
-        url: child.type === 'directory' ? null : `/?play=${encodeURIComponent(child.song_id)}`,
-      }));
+      const result = children.map((child) => {
+        // A file containing multiple sub-songs is presented as a folder.
+        const isSongFolder = child.type === 'file' && child.subtune_count > 1;
+        return {
+          path: normalizedPath ? `${normalizedPath}/${child.path}` : child.path,
+          type: isSongFolder ? 'songfolder' : child.type,
+          size: child.size,
+          // Prefer the parsed release date over the file system mtime.
+          mtime: toUnixSeconds(child.release_date || child.mtime),
+          idx: child.type === 'directory' ? null : (idx++),
+          count: isSongFolder ? child.subtune_count : (child.count || 0),
+          url: child.type === 'directory' || isSongFolder
+            ? null
+            : `/?play=${encodeURIComponent(child.song_id)}`,
+        };
+      });
+
+      res.json(result);
+    } else if (getSubtunesStmt.all(normalizedPath).length > 0) {
+      // The requested path is a multi-song file: return its sub-songs.
+      const song = getSongByPathStmt.get(normalizedPath);
+      const subtunes = getSubtunesStmt.all(normalizedPath);
+
+      const result = subtunes.map((sub) => {
+        // A sub-song lives inside its parent file, so reuse the file's size.
+        // For the date, prefer per-sub-tune metadata, then file metadata, then
+        // the file system mtime.
+        const dateValue = sub.date || song?.release_date || song?.mtime;
+        return {
+          path: normalizedPath,
+          type: 'file',
+          name: sub.title || `Tune ${sub.subtune + 1}`,
+          song_id: song ? song.song_id : null,
+          subtune: sub.subtune,
+          durationMs: sub.length_ms,
+          size: song ? song.file_size : 0,
+          mtime: toUnixSeconds(dateValue),
+          idx: idx++,
+          count: 0,
+          url: song
+            ? `/?play=${encodeURIComponent(song.song_id)}&subtune=${sub.subtune}`
+            : null,
+        };
+      });
 
       res.json(result);
     } else {
@@ -488,14 +573,19 @@ async function getCsdbImageUrl(csdbid) {
 
 /**
  * Returns: {
+ *   songId: string,
  *   imageUrl: string|null,
  *   infoTexts: [ string, ... ],
  *   soundfont: string|null,
- *   md5: string|null
+ *   md5: string|null,
+ *   subtuneCount: number,
+ *   subtuneTitle: string|null
  * }
+ *
+ * Pass `subtune=N` to get metadata for a specific sub-song (its title).
  */
 router.get('/metadata', cache1Hour, (req, res, next) => {
-  const { path: reqPath } = req.query;
+  const { path: reqPath, subtune } = req.query;
   if (!reqPath) return res.json({});
 
   const normalizedPath = reqPath.replace(/^\/+/, '');
@@ -526,12 +616,21 @@ router.get('/metadata', cache1Hour, (req, res, next) => {
       soundfont = parts.map(encodeURIComponent).join('/');
     }
 
+    // Resolve the sub-song title when a subtune index is supplied.
+    let subtuneTitle = null;
+    if (subtune !== undefined) {
+      const sub = getSubtuneMetadataStmt.get(normalizedPath, parseInt(subtune, 10));
+      if (sub) subtuneTitle = sub.title;
+    }
+
     res.json({
       songId: meta.song_id,
       imageUrl: imageUrl,
       infoTexts: infoTexts,
       soundfont: soundfont,
       md5: meta.md5,
+      subtuneCount: meta.subtune_count,
+      subtuneTitle: subtuneTitle,
     });
   } else {
     res.json({});
@@ -543,11 +642,11 @@ router.post('/playback',
   express.json({ limit: '10kb' }),
   validate(PlaybackSchema),
   (req, res) => {
-  const { songId, durationMs } = req.body;
+  const { songId, subtune, durationMs } = req.body;
 
   try {
     const now = Math.floor(Date.now() / 1000);
-    insertPlaybackStmt.run(req.userId, req.ip, songId, now, durationMs);
+    insertPlaybackStmt.run(req.userId, req.ip, songId, subtune, now, durationMs);
     res.json({ success: true });
   } catch (e) {
     console.error('Error logging playback:', e);
@@ -640,7 +739,7 @@ router.post(
   express.json({ limit: '10kb' }),
   validate(FavoriteSchema),
   (req, res) => {
-    const { href, path, mtime } = req.body;
+    const { href, path, subtune, mtime } = req.body;
 
     try {
       let songPath = path || href
@@ -657,6 +756,7 @@ router.post(
       addFavoriteByPathStmt.run({
         userId: req.userId,
         path: songPath,
+        subtune,
         now: mtime,
       });
       res.json({ success: true });
@@ -673,7 +773,7 @@ router.post(
   express.json({ limit: '10kb' }),
   validate(FavoriteSchema),
   (req, res) => {
-    const { href, path } = req.body;
+    const { href, path, subtune } = req.body;
 
     try {
       const now = Math.floor(Date.now() / 1000);
@@ -684,6 +784,7 @@ router.post(
       removeFavoriteByPathStmt.run({
         userId: req.userId,
         path: songPath,
+        subtune,
         now,
       });
       // Get rows affected

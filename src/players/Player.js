@@ -58,6 +58,9 @@ export default class Player extends EventEmitter {
    * @return {number} - A pointer to the allocated memory.
    */
   copyToHeap(data) {
+    // TODO: the JSDoc promises an ArrayBuffer, but HEAPU8.set() only accepts a
+    // TypedArray/array-like, so an ArrayBuffer silently copies nothing. Callers
+    // pass a Uint8Array today; normalize `data` here.
     const dataPtr = this.core._malloc(data.byteLength);
     this.core.HEAPU8.set(data, dataPtr);
     return dataPtr;

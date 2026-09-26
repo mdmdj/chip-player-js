@@ -3,6 +3,7 @@ import FavoriteButton from './FavoriteButton';
 import DirectoryLink from './DirectoryLink';
 import { UserContext } from './UserProvider';
 import VirtualizedList from './VirtualizedList';
+import { songRef } from '../util';
 import bytes from 'bytes';
 
 // Same escaping as Browse: %/# must be pre-escaped for react-router.
@@ -43,13 +44,17 @@ const FavoriteRow = (props) => {
 /**
  * Group favorites under the path that contains them: a single-song file is
  * listed under its directory, and a sub-song under its song folder (the parent
- * file). This mirrors Browse (path above, songs below) and Search. The original
- * favorite order is preserved within each group, and `idx` still points into
- * the unfiltered favorites context.
+ * file). This mirrors Browse (path above, songs below) and Search. Favorite
+ * order is preserved within a directory, while a song folder's sub-tunes are
+ * listed in index order.
+ *
+ * Returns the display rows and a play context in the same order as the song
+ * rows, so "next" follows the list the user sees. `idx` on each row indexes
+ * that context (directory rows are not playable).
  */
 function favoritesToListing(faves) {
   const sep = '/';
-  const decorated = faves.map((fave, i) => {
+  const decorated = faves.map((fave) => {
     const path = fave.path;
     const subtune = fave.subtune || 0;
     const isSongFolder = (fave.subtuneCount || 1) > 1;
@@ -57,7 +62,6 @@ function favoritesToListing(faves) {
     const filename = path.split(sep).pop();
     return {
       ...fave,
-      idx: i,
       type: 'file',
       container: isSongFolder ? path : dir,
       isSongFolder,
@@ -65,10 +69,16 @@ function favoritesToListing(faves) {
     };
   });
 
-  // Group by container, keeping favorite order within each group.
-  decorated.sort((a, b) => a.container.localeCompare(b.container));
+  // Group by container; within a directory keep the user's favorite order, but
+  // order a song folder's sub-tunes numerically (so Tune 2 precedes Tune 6).
+  decorated.sort((a, b) => {
+    const byContainer = a.container.localeCompare(b.container);
+    if (byContainer !== 0) return byContainer;
+    return a.isSongFolder && b.isSongFolder ? a.subtune - b.subtune : 0;
+  });
 
   const rows = [];
+  const context = [];
   let curr;
   for (const item of decorated) {
     if (item.container !== curr) {
@@ -81,9 +91,11 @@ function favoritesToListing(faves) {
           : '/',
       });
     }
+    item.idx = context.length;
+    context.push(songRef(item.path, item.subtune));
     rows.push(item);
   }
-  return rows;
+  return { rows, context };
 }
 
 export default memo(Favorites);
@@ -102,11 +114,10 @@ function Favorites(props) {
     user,
     loadingUser,
     faves,
-    favesContext,
     handleLogin,
   } = useContext(UserContext);
 
-  const rows = useMemo(() => favoritesToListing(faves), [faves]);
+  const { rows, context: playContext } = useMemo(() => favoritesToListing(faves), [faves]);
 
   const handleShufflePlayFavorites = useCallback(() => {
     handleShufflePlay('favorites');
@@ -138,7 +149,7 @@ function Favorites(props) {
         onSongClick,
         listRef,
         itemList: rows,
-        songContext: favesContext,
+        songContext: playContext,
         rowRenderer: FavoriteRow,
       }}
     >

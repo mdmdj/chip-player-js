@@ -302,8 +302,10 @@ function parseNSFe(buf) {
       case 'INFO': {
         // load_addr(2), init_addr(2), play_addr(2), speed_flags(1),
         // chip_flags(1), track_count(1), first_track(1), unused(6)
-        if (chunkSize >= 10) {
+        if (chunkSize >= 9) {
           trackCount = buf[chunkDataStart + 8] || 1;
+        }
+        if (chunkSize >= 10) {
           // NSFE `first_track` is 0-based (unlike the 1-based NSF header).
           startingSong = buf[chunkDataStart + 9] + 1;
         }

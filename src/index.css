@@ -112,7 +112,10 @@ a {
     cursor: pointer;
 }
 
-a:visited { color: var(--clickable); }
+/* Keep visited links the normal link color, not the browser's default visited
+   color. :where() drops the element's specificity so component classes (e.g.
+   .DirectoryLink-dim) still override this on visited links. */
+:where(a):visited { color: var(--clickable); }
 
 [data-theme="msdos"] {
 

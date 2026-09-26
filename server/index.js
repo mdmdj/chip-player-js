@@ -40,6 +40,7 @@ const {
   getShuffleStmt,
   getTotalStmt,
   getSongByPathStmt,
+  getSubtuneCountBySongIdStmt,
   getSongByIdStmt,
   getSongImageByIdStmt,
 
@@ -645,6 +646,13 @@ router.post('/playback',
   const { songId, subtune, durationMs } = req.body;
 
   try {
+    // Don't record a sub-tune the file doesn't have (single-song files only
+    // have sub-tune 0); such rows can never be played from the charts.
+    const song = getSubtuneCountBySongIdStmt.get(songId);
+    if (song && subtune >= (song.subtune_count || 1)) {
+      return res.status(400).json({ error: 'Invalid sub-tune' });
+    }
+
     const now = Math.floor(Date.now() / 1000);
     insertPlaybackStmt.run(req.userId, req.ip, songId, subtune, now, durationMs);
     res.json({ success: true });

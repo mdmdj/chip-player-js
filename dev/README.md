@@ -38,6 +38,7 @@ To revert:
 | `shims/server-auth.js` | `server/middleware/auth.js` | target tracked (backed up) | Fixed `dev-user`; no service account needed. |
 | `patch-server.js` | `server/index.js` | target tracked (reversible) | Makes `skia-canvas` optional. |
 | `patch-user-provider.js` | `src/components/UserProvider.js` | target tracked (reversible) | Injects a fake client `user`, so the favorites UI works without Firebase. |
+| `patch-sid-stub.js` | `src/players/SIDPlayer.js` | target tracked (reversible) | Silent SID when the core lacks libsidplayfp. |
 | `seed-dbs.js` | `server/users.db`, `server/csdb.db` | gitignored | Creates `users`/`playlists`/`playbacks` schemas. |
 | generated | `server/.env.local` | gitignored | Points server at local dirs. |
 | generated | `catalog/`, `server/catalog.db` | gitignored | Built by `scripts/build-music.js`. |
@@ -66,6 +67,21 @@ node scripts/build-music.js --filter <subdir>
 `game-music-emu/test.nsf` is a convenient multi-track NSF and is copied in
 automatically for a starter fixture.
 
+## Real audio (optional)
+
+By default the dev app uses a silent stub `chip-core.js`. To build a real one
+(see AGENTS.md "Building the real chip-core"):
+
+```sh
+./scripts/build-subprojects.sh                 # vendored engines
+./scripts/build-libsidplayfp.sh                # SID core (official v2.9.0)
+node scripts/build-chip-core.js
+```
+
+This writes `src/chip-core.{js,wasm}` (gitignored) which the app loads instead
+of the stub. `dev/patch-sid-stub.js` keeps SID files silent-but-harmless on
+cores built without libsidplayfp; with the real SID core it is a no-op.
+
 ## Tests
 
 Dev-only harnesses (plain Node + `assert`, no framework and no new deps). They
@@ -88,7 +104,8 @@ build and no new dependencies.
 
 ## Limitations
 
-- No audio playback (stub core).
+- No audio with the stub core (build the real chip-core for playback; SID is
+  silent on it too unless `./scripts/build-libsidplayfp.sh` has been run).
 - No real login (placeholder Firebase config). A fake `dev-user` is injected so
   favorites can be added/removed and persist through the local API
   (`server/users.db`), which is seeded automatically.

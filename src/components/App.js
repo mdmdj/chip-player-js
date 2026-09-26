@@ -25,6 +25,9 @@ import {
   getUrlFromFilepath,
   pathJoin,
   postWithOptionalAuth,
+  songRef,
+  songRefKey,
+  songRefListsEqual,
   titlesFromMetadata,
   unlockAudioContext
 } from '../util';
@@ -113,8 +116,6 @@ class App extends React.Component {
       paused: true,
       ejected: true,
       currentSongMetadata: {},
-      currentSongNumSubtunes: 0,
-      currentSongSubtune: 0,
       currentSongDurationMs: 1,
       currentSongPositionMs: 0,
       currentSongBuffer: null,
@@ -126,6 +127,10 @@ class App extends React.Component {
       infoTexts: [],
       showInfo: false,
       songPath: null,
+      songRef: null,
+      songTitleKey: null,
+      subtuneCount: null,
+      subtuneTitle: null,
       songId: null,
       volume: 100,
       repeat: REPEAT_OFF,
@@ -220,7 +225,7 @@ class App extends React.Component {
       // See comment in Browse.js for more about why a sticky play param is not a good idea.
       const playPath = window.__chipConfig?.songPath;
       const subtuneParam = urlParams.get('subtune');
-      const subtune = subtuneParam ? parseInt(subtuneParam, 10) : 0;
+      const subtune = subtuneParam != null ? parseInt(subtuneParam, 10) : null;
       const tParam = urlParams.get('t');
       const time = tParam ? parseInt(tParam, 10) : 0;
       urlParams.delete('play');
@@ -232,9 +237,10 @@ class App extends React.Component {
       const dirname = pathe.dirname(playPath);
       this.fetchDirectory(dirname).then(() => {
         this.props.history.replace(`${pathJoin('/browse', dirname)}${search}`);
-        const index = this.playContexts[dirname].indexOf(playPath);
+        const context = this.playContexts[dirname] || [];
+        const index = context.findIndex(ref => ref.path === playPath);
 
-        this.playContext(this.playContexts[dirname], index, subtune);
+        this.playContext(context, index < 0 ? 0 : index, subtune);
 
         if (time) {
           setTimeout(() => {
@@ -266,17 +272,16 @@ class App extends React.Component {
     const map = {
       ejected: 'isEjected',
       paused: 'isPaused',
-      currentSongSubtune: 'subtune',
       currentSongMetadata: 'metadata',
       currentSongPositionMs: 'positionMs',
       currentSongDurationMs: 'durationMs',
-      currentSongNumSubtunes: 'numSubtunes',
       currentSongBuffer: 'songBuffer',
       tempo: 'tempo',
       voiceNames: 'voiceNames',
       voiceMask: 'voiceMask',
       voiceGroups: 'voiceGroups',
       songPath: 'songPath',
+      songRef: 'songRef',
       hasPlayer: 'hasPlayer',
       // TODO: Move to a separate paramStateUpdate?
       paramDefs: 'paramDefs',
@@ -383,7 +388,7 @@ class App extends React.Component {
     navigator.mediaSession.setPositionState(positionState);
   }
 
-  playContext(context, index = 0, subtune = 0) {
+  playContext(context, index = 0, subtune = null) {
     this.sequencer.playContext(context, index, subtune);
   }
 
@@ -395,14 +400,6 @@ class App extends React.Component {
     this.sequencer.nextSong();
   }
 
-  prevSubtune() {
-    this.sequencer.prevSubtune();
-  }
-
-  nextSubtune() {
-    this.sequencer.nextSubtune();
-  }
-
   handleSequencerStateUpdate(sequencerState) {
     const { isEjected } = sequencerState;
     console.debug('App.handleSequencerStateUpdate(isEjected=%s)', isEjected);
@@ -410,14 +407,16 @@ class App extends React.Component {
     if (isEjected) {
       this.setState({
         ejected: true,
-        currentSongSubtune: 0,
         currentSongMetadata: {},
         currentSongPositionMs: 0,
         currentSongDurationMs: 1,
-        currentSongNumSubtunes: 0,
         currentSongBuffer: null,
         imageUrl: null,
         songPath: null,
+        songRef: null,
+        songTitleKey: null,
+        subtuneCount: null,
+        subtuneTitle: null,
       });
       // TODO: Disabled to support scroll restoration.
       // updateQueryString({ play: undefined });
@@ -433,14 +432,19 @@ class App extends React.Component {
     } else {
       const player = this.sequencer.getPlayer();
       const songPath = this.sequencer.getCurrSongPath();
+      const currSongRef = this.sequencer.getCurrSongRef();
+      const songTitleKey = songRefKey(currSongRef);
       // TODO: this is messy. imageUrl comes asynchronously from the /metadata request.
       //       Title, artist, etc. come synchronously from player.getMetadata().
       //       ...but these are also emitted with playerStateUpdate.
       //       It would be better to incorporate imageUrl into playerStateUpdate.
       if (!songPath) {
         this.setState({ imageUrl: null });
-      } else if (songPath !== this.state.songPath) {
-        const metadataUrl = getMetadataUrlForFilepath(songPath);
+      } else if (songTitleKey !== this.state.songTitleKey) {
+        // Mark this song as loading so a burst of player state updates doesn't
+        // fire duplicate metadata requests.
+        this.setState({ songTitleKey, subtuneCount: null, subtuneTitle: null });
+        const metadataUrl = getMetadataUrlForFilepath(songPath, currSongRef?.subtune);
         // XXX: fix this later
         // if (url.indexOf("%2") > -1 || url.indexOf("#") > -1) {
         //   console.warn("handleSequencerStateUpdate() url:", url);
@@ -451,18 +455,24 @@ class App extends React.Component {
         // updateQueryString({ play: filepath, t: undefined });
         // TODO: move fetch metadata to Player when it becomes event emitter
         axios.get(metadataUrl).then(response => {
-          const { imageUrl: imagePath, infoTexts, md5, songId } = response.data;
+          if (songTitleKey !== this.state.songTitleKey) return; // song changed while loading
+          const { imageUrl: imagePath, infoTexts, md5, songId, subtuneTitle, subtuneCount } = response.data;
           const imageUrl = imagePath ? getUrlFromFilepath(imagePath) : null;
           const newInfoTexts = [...this.state.infoTexts, ...infoTexts ];
           const newShowInfo = this.state.showInfo && newInfoTexts.length > 0;
-          this.setState({ imageUrl, infoTexts: newInfoTexts, md5, showInfo: newShowInfo, songId });
+          this.setState({
+            imageUrl, infoTexts: newInfoTexts, md5, showInfo: newShowInfo, songId,
+            subtuneCount: subtuneCount ?? null,
+            subtuneTitle: subtuneTitle ?? null,
+          });
 
           // Playback logging
           clearTimeout(this.playbackTimer);
           this.playbackTimer = setTimeout(() => {
             // If still playing this song after 5 seconds, log a playback.
-            if (this.state.songId === songId) {
-              postWithOptionalAuth(this.props.userContext.user, `${API_BASE}/playback`, { songId, durationMs: 5000 });
+            if (this.state.songId === songId && this.state.songTitleKey === songTitleKey) {
+              const subtune = currSongRef?.subtune ?? 0;
+              postWithOptionalAuth(this.props.userContext.user, `${API_BASE}/playback`, { songId, subtune, durationMs: 5000 });
             }
           }, 5000);
 
@@ -475,6 +485,7 @@ class App extends React.Component {
             this.updateMediaSessionPositionState();
           }
         }).catch(e => {
+          if (songTitleKey !== this.state.songTitleKey) return; // song changed while loading
           this.setState({ imageUrl: null });
         });
       }
@@ -640,10 +651,10 @@ class App extends React.Component {
       this.sequencer.playContext(shuffle(customContext || this.playContexts['top'] || []));
     } else {
       // This is more like a synthetic recursive shuffle.
-      // Response of this API is an array of *paths*.
+      // Response of this API is an array of { path, subtune } song refs.
       fetch(`${API_BASE}/shuffle?path=${encodeURI(path)}&limit=100`)
         .then(response => response.json())
-        .then(json => json.items) // paths, e.g. "MIDI/Crystal Waters/100% Pure Love.mid"
+        .then(json => json.items)
         .then(items => this.sequencer.playContext(items));
     }
   }
@@ -660,7 +671,7 @@ class App extends React.Component {
       if (context) {
         this.playContext(context, index);
       } else {
-        this.sequencer.playSonglist([url]);
+        this.sequencer.playSonglist([songRef(url)]);
       }
     }
   }
@@ -684,13 +695,16 @@ class App extends React.Component {
   }
 
   directoryListingToContext(items) {
+    // Every non-directory item is playable: a file is a SongRef with subtune 0,
+    // a songfolder is its first sub-song, and the sub-songs of one file are
+    // listed as their own items when browsing inside a song folder.
     return items
-      .filter(item => item.type === 'file')
-      .map(item => item.path); // paths, e.g. "MIDI/Crystal Waters/100% Pure Love.mid"
+      .filter(item => item.type === 'file' || item.type === 'songfolder')
+      .map(item => songRef(item.path, item.subtune));
   }
 
   pathToHref(path) {
-    return pathJoin(CATALOG_PREFIX, path.replace('%', '%25').replace('#', '%23'));
+    return pathJoin(CATALOG_PREFIX, path.replace(/%/g, '%25').replace(/#/g, '%23'));
   }
 
   fetchDirectory(path) {
@@ -702,14 +716,15 @@ class App extends React.Component {
         items.forEach(item => {
           // Convert timestamp 1704067200 to ISO date 2024-01-01
           item.mtime = new Date(item.mtime * 1000).toISOString().split('T')[0];
-          item.name = item.path.split('/').pop();
+          // Sub-song rows carry a label from the server; don't clobber it.
+          item.name = item.name || item.path.split('/').pop();
           // XXX: Escape immediately: the escaped URL is considered canonical.
           //      The URL must be decoded for display from here on out.
           // TODO: Replace `href` entirely with `url` field
-          const href = item.path.replace('%', '%25').replace('#', '%23');
+          const href = item.path.replace(/%/g, '%25').replace(/#/g, '%23');
           if (item.type === 'file')
             item.href = pathJoin(CATALOG_PREFIX, href);
-          else // item.type === 'directory'
+          else // item.type === 'directory' or 'songfolder'
             item.href = pathJoin('/browse', href);
         });
 
@@ -737,7 +752,7 @@ class App extends React.Component {
 
     let link = BASE_URL + '/?play=' + this.state.songId;
     if (withSubtune) {
-      const subtune = this.sequencer?.getSubtune();
+      const subtune = this.sequencer?.getCurrSongRef()?.subtune ?? 0;
       if (subtune !== 0) {
         link += '&subtune=' + subtune;
       }
@@ -749,7 +764,7 @@ class App extends React.Component {
     const localFiles = this.localFilesManager.readAll();
     // Convert timestamp 1704067200 to ISO date 2024-01-01
     localFiles.forEach(item => item.mtime = new Date(item.mtime * 1000).toISOString().split('T')[0]);
-    this.playContexts['local'] = localFiles.map(item => item.path);
+    this.playContexts['local'] = localFiles.map(item => songRef(item.path));
     this.setState({ localFiles });
   }
 
@@ -795,7 +810,7 @@ class App extends React.Component {
         .filter(result => result.status === 'fulfilled')
         .reduce((acc, result) => acc + result.value, 0);
       if (numSongsAdded > 0) {
-        const currContextIsLocalFiles = this.sequencer?.getCurrContext() === this.playContexts['local'];
+        const currContextIsLocalFiles = songRefListsEqual(this.sequencer?.getCurrContext(), this.playContexts['local']);
         this.updateLocalFiles();
         this.props.history.push('/local');
         if (currContextIsLocalFiles) this.sequencer.context = this.playContexts['local'];
@@ -814,13 +829,13 @@ class App extends React.Component {
 
   handleLocalFileDelete = (filePaths) => {
     if (!Array.isArray(filePaths)) filePaths = [filePaths];
-    const currContextIsLocalFiles = this.sequencer?.getCurrContext() === this.playContexts['local'];
+    const currContextIsLocalFiles = songRefListsEqual(this.sequencer?.getCurrContext(), this.playContexts['local']);
     let currIndexWasDeleted = false;
     filePaths.forEach(filePath => {
       const deleted = this.localFilesManager.delete(filePath);
 
       if (deleted && currContextIsLocalFiles) {
-        const index = this.playContexts['local'].indexOf(filePath);
+        const index = this.playContexts['local'].findIndex(ref => ref.path === filePath);
         if (index === this.sequencer.currIdx) currIndexWasDeleted = true;
         if (index <= this.sequencer.currIdx) {
           this.sequencer.currIdx--;
@@ -853,7 +868,10 @@ class App extends React.Component {
   render() {
     // TODO: Consolidate imageUrl under metadata.
     const metadata = this.state.currentSongMetadata;
-    const { title, subtitle } = titlesFromMetadata(metadata);
+    const { title: metadataTitle, subtitle } = titlesFromMetadata(metadata);
+    // A sub-song's label from the catalog takes precedence over the player's
+    // generic track title.
+    const title = this.state.subtuneTitle || metadataTitle;
     const imageUrl = metadata.imageUrl || this.state.imageUrl;
     const currContext = this.sequencer?.getCurrContext();
     const currIdx = this.sequencer?.getCurrIdx();
@@ -867,6 +885,11 @@ class App extends React.Component {
     ) ? (this.state.currentSongBuffer || this.sequencer?.getCurrSongBuffer()) : null;
     const isMidi = Boolean(midiData);
     const activeTheaterMode = Boolean(isMidi && this.state.theaterMode && showVisualizer);
+    // A multi-song file reads as a song folder in Browse. Any of these means
+    // "has sub-tunes": the catalog count (fresh /metadata) or a catalog
+    // sub-tune title (also present in older cached metadata).
+    const isSongFolder = this.state.subtuneCount > 1
+      || this.state.subtuneTitle != null;
 
     return (
       <Dropzone
@@ -920,7 +943,7 @@ class App extends React.Component {
                   )}/>
                   <Route path="/browse/:browsePath*" render={({ history, match, location }) => {
                     // Undo the react-router-dom double-encoded % workaround - see DirectoryLink.js
-                    const browsePath = match.params?.browsePath?.replace('%25', '%') || '';
+                    const browsePath = match.params?.browsePath?.replace(/%25/g, '%') || '';
                     return (
                       this.contentAreaRef.current &&
                       <Browse currContext={currContext}
@@ -1007,8 +1030,6 @@ class App extends React.Component {
           </div>
           <AppFooter
             currentSongDurationMs={this.state.currentSongDurationMs}
-            currentSongNumSubtunes={this.state.currentSongNumSubtunes}
-            currentSongSubtune={this.state.currentSongSubtune}
             ejected={this.state.ejected}
             getCurrentSongLink={this.getCurrentSongLink}
             handleCopyLink={this.handleCopyLink}
@@ -1020,16 +1041,16 @@ class App extends React.Component {
             handleVolumeChange={this.handleVolumeChange}
             imageUrl={imageUrl}
             infoTexts={this.state.infoTexts}
+            isSongFolder={isSongFolder}
             md5={this.state.md5}
             nextSong={this.nextSong}
-            nextSubtune={this.nextSubtune}
             paused={this.state.paused}
             prevSong={this.prevSong}
-            prevSubtune={this.prevSubtune}
             repeat={this.state.repeat}
             shuffle={this.state.shuffle}
             sequencer={this.sequencer}
             songId={this.state.songId}
+            songRef={this.state.songRef}
             songPath={this.state.songPath}
             subtitle={subtitle}
             tempo={this.state.tempo}

@@ -1,5 +1,6 @@
 import React, { memo, useCallback, useRef } from 'react';
 import { FORMATS } from '../config';
+import { songRefListsEqual } from '../util';
 import bytes from 'bytes';
 
 const formatList = FORMATS.filter(f => f !== 'miniusf').map(f => `.${f}`);
@@ -48,6 +49,8 @@ function LocalFiles(props) {
       onDelete(listing.map(item => item.path));
     }
   }
+
+  const isCurrentContext = songRefListsEqual(currContext, playContext);
 
   return (
     <div>
@@ -100,7 +103,7 @@ function LocalFiles(props) {
               listing.map((item, i) => {
                 const href = item.path;
                 const title = decodeURIComponent(href.split('/').pop());
-                const isPlaying = currContext === playContext && currIdx === i;
+                const isPlaying = isCurrentContext && currIdx === i;
                 return (
                   <div key={title} className={isPlaying ? 'Song-now-playing BrowseList-row' : 'BrowseList-row'}>
                     <button className='Trash-button' title='Delete' onClick={handleDelete} data-href={href}>

@@ -7,13 +7,18 @@ import { UserContext } from './UserProvider';
 import DirectoryLink from './DirectoryLink';
 import { getUrlFromFilepath, pathJoin } from '../util';
 
-function directoryLinkFromFilepath(filepath) {
+function directoryLinkFromFilepath(filepath, isSongFolder) {
   if (!filepath) return null;
   const sep = '/';
 
-  filepath = filepath
-    .split(sep).slice(0, -1).join(sep);
-  return <DirectoryLink dim to={pathJoin('/browse', encodeURI(filepath))}>{filepath}</DirectoryLink>;
+  // A multi-song file is itself a "song folder" in Browse, so show the whole
+  // path (matching the Browse header) instead of just its parent directory.
+  const browsePath = isSongFolder
+    ? filepath
+    : filepath.split(sep).slice(0, -1).join(sep);
+  // Same escaping as Browse: %/# must be pre-escaped for react-router.
+  const href = browsePath.replace(/%/g, '%25').replace(/#/g, '%23');
+  return <DirectoryLink dim to={pathJoin('/browse', href)}>{browsePath}</DirectoryLink>;
 }
 
 export default memo(AppFooter);
@@ -21,16 +26,16 @@ function AppFooter(props) {
   const {
     // this.state.
     currentSongDurationMs,
-    currentSongNumSubtunes,
-    currentSongSubtune,
     ejected,
     imageUrl,
     infoTexts,
+    isSongFolder,
     md5,
     paused,
     repeat,
     shuffle,
     songId,
+    songRef,
     songPath,
     subtitle,
     title,
@@ -44,9 +49,7 @@ function AppFooter(props) {
     handleTimeSliderChange,
     handleVolumeChange,
     nextSong,
-    nextSubtune,
     prevSong,
-    prevSubtune,
     sequencer,
     toggleInfo,
     togglePause,
@@ -56,9 +59,8 @@ function AppFooter(props) {
     faves,
   } = useContext(UserContext);
 
-  const directoryLink = directoryLinkFromFilepath(songPath);
+  const directoryLink = directoryLinkFromFilepath(songPath, isSongFolder);
   const songUrl = getUrlFromFilepath(songPath);
-  const subtuneText = `Tune ${currentSongSubtune + 1} of ${currentSongNumSubtunes}`;
 
   const handleToggleInfo = useCallback((e) => {
     e.preventDefault();
@@ -66,11 +68,6 @@ function AppFooter(props) {
   }, [toggleInfo]);
 
   const handleCopySongLink = useCallback((e) => {
-    e.preventDefault();
-    handleCopyLink(getCurrentSongLink());
-  }, [getCurrentSongLink, handleCopyLink]);
-
-  const handleCopySubtuneLink = useCallback((e) => {
     e.preventDefault();
     handleCopyLink(getCurrentSongLink(/*withSubtune=*/true));
   }, [getCurrentSongLink, handleCopyLink]);
@@ -100,32 +97,6 @@ function AppFooter(props) {
                   disabled={ejected}>
             <span className="inline-icon icon-next"/>
           </button>
-          {currentSongNumSubtunes > 1 &&
-            <>
-              {songPath ?
-                <a style={{ color: 'var(--neutral4)' }}
-                   href={getCurrentSongLink(/*subtune=*/true)}
-                   title="Copy subtune link to clipboard"
-                   onClick={handleCopySubtuneLink}>
-                  {subtuneText}
-                  <span className="inline-icon icon-copy"/>
-                </a>
-                :
-                subtuneText
-              }
-              <button
-                className="AppFooter-back box-button"
-                disabled={ejected}
-                onClick={prevSubtune}>
-                <span className="inline-icon icon-back"/>
-              </button>
-              <button
-                className="AppFooter-forward box-button"
-                disabled={ejected}
-                onClick={nextSubtune}>
-                <span className="inline-icon icon-forward"/>
-              </button>
-            </>}
           <button title="Cycle Repeat (repeat off, repeat all songs in the context, or repeat one song)"
                   style={{ marginLeft: 'auto' }}
                   className="AppFooter-repeat box-button" onClick={handleCycleRepeat}>
@@ -167,6 +138,7 @@ function AppFooter(props) {
             {faves && songPath &&
               <FavoriteButton item={{
                 path: songPath,
+                subtune: songRef?.subtune ?? 0,
                 songId: songId,
               }}/>}
             <div className="SongDetails-title">

@@ -5,7 +5,7 @@ import autoBindReact from 'auto-bind/react';
 import debounce from 'lodash/debounce';
 
 import { API_BASE } from '../config';
-import { getUrlFromFilepath, pathJoin } from '../util';
+import { getUrlFromFilepath, pathJoin, songRef } from '../util';
 import DirectoryLink from './DirectoryLink';
 import FavoriteButton from './FavoriteButton';
 import VirtualizedList from './VirtualizedList';
@@ -118,16 +118,19 @@ export default class Search extends PureComponent {
             .sort((a, b) => a.file.localeCompare(b.file))
             .map((item, i) => {
               const path = item.file;
+              const subtune = item.subtune || 0;
               return {
                 idx: i,
                 path: path,
-                name: path.substring(path.lastIndexOf('/') + 1),
+                subtune: subtune,
+                // Sub-song hits are labeled by their own title.
+                name: item.title || path.substring(path.lastIndexOf('/') + 1),
                 href: getUrlFromFilepath(path),
                 type: 'file',
                 songId: item.song_id,
               };
             });
-          const resultsContext = resultFiles.map(item => item.path);
+          const resultsContext = resultFiles.map(item => songRef(item));
           // Build the results list with interleaved directory headings.
           const resultsWithHeadings = [];
           let currHeading = null;

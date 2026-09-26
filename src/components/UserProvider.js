@@ -1,10 +1,10 @@
-import React, { createContext, useCallback, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import debounce from 'lodash/debounce';
 import { getAuth, onAuthStateChanged, signInWithPopup, signOut, GoogleAuthProvider } from 'firebase/auth';
 import { initializeApp as firebaseInitializeApp } from 'firebase/app';
 import firebaseConfig from '../config/firebaseConfig';
 import { API_BASE, CATALOG_PREFIX } from '../config';
-import { pathJoin } from '../util';
+import { pathJoin, songRef } from '../util';
 import { getWithAuth, postWithAuth } from '../util';
 
 const UserContext = createContext({
@@ -44,6 +44,8 @@ const UserProvider = ({ children }) => {
     }
   });
   const [loadingUser, setLoadingUser] = useState(true); // Manage loading state
+  // Monotonic token so stale favorites refreshes don't overwrite newer ones.
+  const favesRefreshToken = useRef(0);
   const [settings, setSettings] = useState(() => {
     // Restore settings from localStorage.
     try {
@@ -124,20 +126,21 @@ const UserProvider = ({ children }) => {
     }
   };
 
-  const handleToggleFavorite = async (path, songId) => {
+  const handleToggleFavorite = async (path, subtune = 0, songId) => {
     if (user) {
       const oldFaves = faves;
-      const isFavorite = faves.find(fave => fave.path === path);
+      const isFavorite = faves.find(fave => fave.path === path && (fave.subtune || 0) === subtune);
 
       const fave = {
         path,
+        subtune,
         songId,
         href: pathJoin(CATALOG_PREFIX, encodeURIComponent(path)),
         mtime: Math.floor(Date.now() / 1000),
       };
 
       const newFaves = isFavorite
-        ? faves.filter(fave => fave.path !== path)
+        ? faves.filter(fave => !(fave.path === path && (fave.subtune || 0) === subtune))
         : [...faves, fave];
       setFaves(newFaves);
 
@@ -147,6 +150,11 @@ const UserProvider = ({ children }) => {
         } else {
           await addFavorite(fave);
         }
+        // Re-read so every entry carries the catalog's size and sub-tune title.
+        // Only apply the latest refresh: rapid toggles can resolve out of order.
+        const token = ++favesRefreshToken.current;
+        const res = await getWithAuth(user, `${API_BASE}/user/favorites`);
+        if (res && token === favesRefreshToken.current) setFaves(res.favorites);
       } catch (e) {
         setFaves(oldFaves);
         console.log('Couldn\'t update favorites in Firebase.', e);
@@ -186,9 +194,10 @@ const UserProvider = ({ children }) => {
     saveSettings(user, newSettings);
   }, [user, saveSettings]);
 
-  // We need to derive a list of paths to use as the play context.
+  // We need to derive a list of SongRefs to use as the play context. Old
+  // favorites have no subtune and resolve to the parent file (sub-tune 0).
   const favesContext = useMemo(() => {
-    return faves.map(fave => fave.path);
+    return faves.map(fave => songRef(fave.path, fave.subtune));
   }, [faves]);
 
   return (

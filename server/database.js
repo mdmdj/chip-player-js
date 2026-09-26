@@ -92,6 +92,10 @@ const dbStatements = {
       WHERE m.path = ?
       LIMIT 1
   `),
+  // Used to validate a playback log's sub-tune against the file's count.
+  getSubtuneCountBySongIdStmt: db.prepare(`
+      SELECT subtune_count FROM music WHERE song_id = ? LIMIT 1
+  `),
   // Used to populate meta tags. Favor entries with images
   getSongByIdStmt: db.prepare(`
       SELECT m.song_id, m.path, m.title, m.artist, m.game, m.system, m.copyright, i.path as image_path

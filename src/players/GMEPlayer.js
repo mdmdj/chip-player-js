@@ -165,6 +165,9 @@ export default class GMEPlayer extends Player {
           }
         }
       }
+    } else {
+      // The track ended; the sequencer owns advancing to the next SongRef.
+      this.handleSongEnd();
     }
   }
 

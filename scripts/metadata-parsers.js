@@ -24,6 +24,9 @@ function extractDate(...strings) {
       if (isValidYmd(y, mo, d)) {
         return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
       }
+      // Don't fall through to the coarser patterns: "2023-02-31" must not
+      // become a fabricated "2023-02-01".
+      continue;
     }
     m = str.match(DATE_YM_REGEX);
     if (m) return `${m[1]}-${m[2].padStart(2, '0')}-01`;
@@ -302,8 +305,10 @@ function parseNSFe(buf) {
       case 'INFO': {
         // load_addr(2), init_addr(2), play_addr(2), speed_flags(1),
         // chip_flags(1), track_count(1), first_track(1), unused(6)
-        if (chunkSize >= 10) {
+        if (chunkSize >= 9) {
           trackCount = buf[chunkDataStart + 8] || 1;
+        }
+        if (chunkSize >= 10) {
           // NSFE `first_track` is 0-based (unlike the 1-based NSF header).
           startingSong = buf[chunkDataStart + 9] + 1;
         }

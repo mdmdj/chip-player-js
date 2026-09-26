@@ -24,9 +24,6 @@ function extractDate(...strings) {
       if (isValidYmd(y, mo, d)) {
         return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
       }
-      // Don't fall through to the coarser patterns: "2023-02-31" must not
-      // become a fabricated "2023-02-01".
-      continue;
     }
     m = str.match(DATE_YM_REGEX);
     if (m) return `${m[1]}-${m[2].padStart(2, '0')}-01`;

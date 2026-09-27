@@ -24,13 +24,11 @@ fi
 cp dev/shims/firebaseConfig.js src/config/firebaseConfig.js
 echo "[dev]   installed src/config/firebaseConfig.js (placeholder)"
 
-# 3. Auth bypass -> server/middleware/auth.js (tracked, so back it up)
-if [ ! -f server/middleware/auth.js.dev-backup ]; then
-  cp server/middleware/auth.js server/middleware/auth.js.dev-backup
-  echo "[dev]   backed up server/middleware/auth.js"
-fi
-cp dev/shims/server-auth.js server/middleware/auth.js
-echo "[dev]   installed server/middleware/auth.js (bypass)"
+# 3. Auth bypass -> server/middleware/auth.dev.js (untracked, gitignored).
+# server/index.js requires DEV_AUTH_MODULE when set, so the real middleware is
+# never patched.
+cp dev/shims/server-auth.js server/middleware/auth.dev.js
+echo "[dev]   staged server/middleware/auth.dev.js (bypass)"
 
 # 4. Optional skia-canvas patch for server/index.js (reversible, no backup)
 node dev/patch-server.js
@@ -41,9 +39,10 @@ node dev/patch-user-provider.js
 # 5b. Silent SID fallback (reversible, no backup)
 node dev/patch-sid-stub.js
 
-# 5c. Browser test hooks (window.__cpDev); staged file + reversible patch
+# 5c. Browser test hooks (window.__cpDev). Staged as an untracked, gitignored
+# module and picked up by the dev webpack entry; no tracked file is patched.
 cp dev/shims/devtools.js src/chip-player-devtools.js
-node dev/patch-devtools.js
+echo "[dev]   staged src/chip-player-devtools.js"
 
 # 6. Seed sqlite databases (catalog.db is built separately by build-music.js)
 node dev/seed-dbs.js
@@ -60,6 +59,11 @@ EOF
   echo "[dev]   wrote server/.env.local"
 else
   echo "[dev]   server/.env.local already exists; leaving as-is"
+fi
+# Ensure the auth override is set (older .env.local files predate it).
+if ! grep -q '^DEV_AUTH_MODULE=' server/.env.local; then
+  echo "DEV_AUTH_MODULE='./middleware/auth.dev.js'" >> server/.env.local
+  echo "[dev]   added DEV_AUTH_MODULE to server/.env.local"
 fi
 
 # 8. Sample catalog (gitignored) + catalog db

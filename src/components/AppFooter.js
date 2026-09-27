@@ -2,7 +2,7 @@ import React, { memo, useCallback, useContext } from 'react';
 import TimeSlider from './TimeSlider';
 import VolumeSlider from './VolumeSlider';
 import FavoriteButton from './FavoriteButton';
-import { REPEAT_LABELS, REPEAT_ONE, SHUFFLE_LABELS } from '../Sequencer';
+import { REPEAT_LABELS, SHUFFLE_LABELS } from '../Sequencer';
 import { UserContext } from './UserProvider';
 import DirectoryLink from './DirectoryLink';
 import { getUrlFromFilepath, pathJoin } from '../util';
@@ -71,9 +71,15 @@ function AppFooter(props) {
   const hasLoopRegion = currentSongDurationMs > 0 &&
     Number.isFinite(meta.intro_length) && meta.intro_length >= 0 &&
     Number.isFinite(meta.loop_length) && meta.loop_length > 0;
-  const loopStart = hasLoopRegion ? meta.intro_length / currentSongDurationMs : null;
+  // Highlight the LAST loop instance before the fade (default playback is intro
+  // + two passes + fade). That gives the user as long as possible to decide to
+  // stay, and toggling repeat never shifts the band.
+  const lastLoopInstance = 2;
+  const loopStart = hasLoopRegion
+    ? (meta.intro_length + (lastLoopInstance - 1) * meta.loop_length) / currentSongDurationMs
+    : null;
   const loopEnd = hasLoopRegion
-    ? Math.min((meta.intro_length + meta.loop_length) / currentSongDurationMs, 1)
+    ? Math.min((meta.intro_length + lastLoopInstance * meta.loop_length) / currentSongDurationMs, 1)
     : null;
 
   const handleToggleInfo = useCallback((e) => {
@@ -134,21 +140,9 @@ function AppFooter(props) {
             loopStart={loopStart}
             loopEnd={loopEnd}
             getCurrentPositionMs={() => {
-              // TODO: reevaluate this approach
               const player = sequencer && sequencer.getPlayer();
               if (!player) return 0;
-              const position = player.getPositionMs();
-              // The player's position keeps counting across native loops. While
-              // repeating a defined region, fold it back so the head follows the
-              // audio instead of pinning at the end. (Not while a late repeat-one
-              // is still playing out to the song end.)
-              if (hasLoopRegion && repeat === REPEAT_ONE && !player.restartAtEndPending) {
-                const loopEndMs = meta.intro_length + meta.loop_length;
-                if (position >= loopEndMs) {
-                  return meta.intro_length + ((position - meta.intro_length) % meta.loop_length);
-                }
-              }
-              return position;
+              return player.getDisplayPositionMs ? player.getDisplayPositionMs() : player.getPositionMs();
             }}
             onChange={handleTimeSliderChange}/>
           <VolumeSlider

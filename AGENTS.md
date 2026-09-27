@@ -3,6 +3,15 @@
 This file documents a feature branch and its development setup for AI agents
 (and humans) picking up the work. Read it fully before making changes.
 
+## Session start
+
+Begin every session with `nvm use` (repo `.nvmrc` pins **Node 24.21.0**), then
+confirm with `node -v` / `nvm current`. The host default `node` is newer (26.x)
+and `better-sqlite3` is compiled per Node ABI, so running `npm`/`node` under the
+wrong version fails with `NODE_MODULE_VERSION` mismatches. Also check whether an
+`npm run dev` is already up before assuming the environment is correct — a
+long-running server may have been started under a different Node than the shell.
+
 ## Project
 
 **chip-player-js** is a web music player for chiptune/game audio formats
@@ -12,12 +21,35 @@ engines compiled to WebAssembly via Emscripten.
 
 - Upstream: `git@github.com:mmontag/chip-player-js.git` (remote `upstream`)
 - Our fork: `https://github.com/mdmdj/chip-player-js.git` (remote `origin`)
-- Working branch: `feature/subtunes-as-first-class`
 
 **Important:** Matt has personally given permission for this feature fork, and
 the goal is a merge he will accept. Match existing conventions, keep the diff
 minimal and coherent, and do not ship "slop." Read surrounding code before
 editing; mirror its style (comment tone, SQL formatting, naming, etc.).
+
+## Branches
+
+Two long-lived branches, one concern each. The PR is defined by topology, not by
+a list of commits to remember:
+
+- **`feature/subtunes-as-first-class`** — the PR. Based on `master` and contains
+  **only** the sub-tunes feature: `scripts/{build-music,metadata-parsers}.js`,
+  `server/{database,index,schemas}.js`, and the feature parts of `src/`
+  (components, `Sequencer`, `util`, plus the small `Player.handleSongEnd`
+  change). No `dev/` shims, no engine/build tooling, no `AGENTS.md`/`.nvmrc`.
+  `git diff master..feature/subtunes-as-first-class` is the reviewable PR.
+- **`dev/audio-tooling`** — stacked on top of the feature branch (currently one
+  commit) and holds everything else: engine build scripts, `src/bindings/`,
+  `src/tinyplayer.c`, the audio parts of `src/players/*Player.js`,
+  vendored-tree fixes, `config/webpack.config.dev.js`, the `dev/` shims,
+  `AGENTS.md`, `.nvmrc`. This is where the app is developed and run. Local-only;
+  nothing here is part of the PR.
+
+Workflow: commit feature changes on the feature branch; commit audio/dev/tooling
+changes only on `dev/audio-tooling`; then `git rebase
+feature/subtunes-as-first-class` on the dev branch to pick up feature moves.
+Never commit audio/dev changes to the feature branch, and never push either
+branch to `upstream` — everything stays in our fork (`origin`).
 
 ## The feature
 
@@ -39,8 +71,8 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
   skips it. Root `better-sqlite3` is needed by `scripts/build-music.js`.)
 - Server deps: `npm install` inside `server/` (builds `better-sqlite3` and
   `skia-canvas` fine).
-- **Dev shims** live in `dev/` and are tracked so they can be committed on the
-  feature branch but wiped before PR:
+- **Dev shims** live in `dev/` on `dev/audio-tooling` only (never on the feature
+  branch), tracked so the dev environment is reproducible:
   - `./dev/apply.sh` — installs stub `src/chip-core.js`, placeholder Firebase
     config, server auth bypass, optional-skia-canvas patch, a dev-user
     `UserProvider` patch, a silent-SID fallback patch, seeds `users.db` /
@@ -62,22 +94,21 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
   chip-core was built** in this session — see "Building the real chip-core"
   below. It is gitignored and not committed.
 
-### Building the real chip-core (committed separately from the feature)
+### Building the real chip-core
 
 Real audio works locally. `scripts/build-subprojects.sh` + changes to
 `scripts/build-chip-core.js` build all vendored engines into
-`src/chip-core.{js,wasm}`. This work touches vendored trees and is **not part of
-the sub-tunes feature**; it is committed as `704be2f17` (WIP snapshot) and
-`61817ac30` (YM2612 fix) and must be reverted or split out before the PR. See
-"Audio engine roadmap" for what remains.
+`src/chip-core.{js,wasm}`. This work touches vendored trees and lives on
+`dev/audio-tooling`, **not** the feature branch. See "Audio engine roadmap" for
+what remains.
 
-Prereqs (Arch): `sudo pacman -S cmake emscripten` (emcc lands in
+Prereqs (Arch): `sudo pacman -S cmake emscripten xa` (emcc lands in
 `/usr/lib/emscripten`, added by `/etc/profile.d/emscripten.sh`; the script adds
-it to PATH). Then:
+it to PATH; `xa` is the 6502 assembler libsidplayfp needs). Then:
 
 ```sh
 ./scripts/build-subprojects.sh          # all vendored engines
-./scripts/build-libsidplayfp.sh         # SID core (official v2.9.0 tarball)
+./scripts/build-libsidplayfp.sh         # SID core (mmontag fork, needs xa65)
 node scripts/build-chip-core.js
 ```
 
@@ -142,21 +173,40 @@ the target on the main thread, freezing the UI (felt as ~5s). GME avoids this
 with a timesliced seek (`GMEPlayer.doIncrementalSeek`, `requestIdleCallback`).
 N64 would need the same treatment.
 
-**SID:** built from the official `libsidplayfp` v2.9.0 release tarball by
-`scripts/build-libsidplayfp.sh` (not vendored; installs to `../libsidplayfp`).
-v2.9.0 is deliberate: it is the last release with the classic `ReSIDBuilder` the
-wrapper uses, and its tarball ships the generated 6502 driver `.bin` files, so
-no `xa65` is needed. **mmontag/libsidplayfp is not usable:** its
-`montag-dev-2.14` branch pins reSID submodule commits (`1a0cca72`, `13c9e853`)
-that were never pushed to the public `libsidplayfp/resid` repo, so
-`git submodule update` fails and the fork cannot be cloned reproducibly. The
-fork-only `seek()`/`setTempo()` (and reSID `sync_silently`) exist only in those
-unpushed commits. `build-chip-core.js` probes the header and defines
-`SIDPLAYFP_HAVE_SEEK=0` for the official core, so `sid_set_position_ms` and
-`sid_set_speed` are compiled to no-ops (playback position still tracks;
-seeking and speed changes do nothing until the fork's reSID is available).
-`dev/patch-sid-stub.js` (silent SID) only applies to cores without `_sid_*`
-exports and does not trigger now.
+**SID:** built by `scripts/build-libsidplayfp.sh` from **mmontag/libsidplayfp**
+(branch `montag-dev-2.14`) (not vendored; clones to `../libsidplayfp`). It is
+based on the last release with the classic `ReSIDBuilder` the wrapper uses (3.x
+dropped it for residfp) and adds the fast `seek()`/`setTempo()` the wrapper
+calls; its reSID changes live in a submodule (`mmontag/resid`), so the clone is
+`--recursive` (Matt pushed `mmontag/resid` so this clones reproducibly now —
+previously the pinned commits were missing and the fork was unusable). Building
+from git assembles the 6502 driver `.bin` files from source, so **`xa65` is
+required** (Arch: `pacman -S xa`); the script skips the check when the `.bin`
+files already exist (the old v2.9.0 tarball shipped them prebuilt). A
+`multilib`/XTREE clone needs `autoreconf -i`, which the script runs.
+`build-chip-core.js` probes the header and defines `SIDPLAYFP_HAVE_SEEK=1`, so
+`sid_set_position_ms` / `sid_set_speed` are compiled in and call the real fork
+APIs (they used to compile out). `setTempo` is verified working and
+pitch-invariant. **But `seek()` is WIP in the fork and tune-dependent.** Measured
+on the catalog set (seek to 20s mid-playback, then 1s energy per second):
+
+- `Cybernoid_II`: resumes after a ~3s quiet dip, then normal.
+- `Monty_on_the_Run`: resumes immediately with a lower first second.
+- `Cybernoid`, `Bionic_Commando`: stays silent (all-zero) indefinitely.
+- Seek-to-0 (the repeat-one path) is reliable.
+
+Seeking before the first render **hangs** for every tune tested
+(`Player::seek`'s `while (timeMs() < ms)` never advances when the event queue is
+empty); the app's `?t=` path seeks 100ms after playback starts, so it usually
+misses this, but it is reachable. The call is also synchronous: ~10 ms of wall
+time per second of target (a 120s seek ≈ 1.3s main-thread block). Until the
+fork's seek is finished, expect the slider / `?t=` link to be silent on some
+SIDs and to briefly pause on others. This matches prod (its shipped core is
+built from the same fork and shows the same Bionic Commando silence), so it is
+not a regression from our integration — we deliberately keep the wrapper and app
+faithful, with no seek guard or compile-time gate. Plain playback, sub-tune
+switching, voice mask, and tempo are unaffected. `dev/patch-sid-stub.js` (silent
+SID) only applies to cores without `_sid_*` exports and does not trigger now.
 
 `sid_set_subtune` must call `engine->load(currentTune)` after `selectSong()`:
 selectSong only marks the `SidTune`'s current song, so without the reload the
@@ -432,20 +482,11 @@ checks no longer work. Compare a live context to a stored one with
 
 ## Session hand-off notes (read me first)
 
-- **Committed feature work:** branch `feature/subtunes-as-first-class`; the
-  sub-tunes feature is squash-committed and verified (see "Current state"). The
-  audio build + dev shims are now also committed but are **not part of the
-  feature**: `704be2f17` ("Save WIP before libvgm work") snapshots the emscripten
-  build, loop/remote-dev changes, and dev shims; `61817ac30` fixes libvgm
-  YM2612. Revert or split these out before the PR. The tracked tree is otherwise
-  clean (only gitignored generated files and `*.dev-backup` remain).
-- **Build/tooling that must not ride the feature PR:** `scripts/build-subprojects.sh`,
-  `scripts/build-chip-core.js`, `scripts/build-libsidplayfp.sh`,
-  `src/bindings/{libvgm-wrapper.cpp,libsidplayfp-wrapper.cpp}`,
-  `src/tinyplayer.c`, `src/players/{GME,MIDIPlayer,N64,SID,XMP}Player.js`, the
-  vendored-tree edits (`game-music-emu/`, `libvgm/`), `dev/`, and
-  `config/webpack.config.dev.js`'s `webSocketURL`. See "Building the real
-  chip-core" and "Audio engine roadmap".
+- **Branch model:** see "Branches" above. `feature/subtunes-as-first-class` is
+  the PR (feature only); `dev/audio-tooling` is stacked on it and holds the
+  audio/engine/build/dev work. There is no commit list to maintain — a change
+  either belongs to the feature branch or it does not. Run the app from the dev
+  branch.
 - **Remote dev access (LAN/WSL/Tailscale):** fixed, dev tooling only (not the
   feature). Two root causes:
   - `scripts/start.js` built its own minimal `WebpackDevServer` options and
@@ -470,11 +511,13 @@ checks no longer work. Compare a live context to a stored one with
 - **Verified playing:** NSF/NSFE/SPC/GBS/AY (GME), VGM/VGZ/GYM/S98/DRO (libvgm,
   including the YM2612 Gens fix), TG16/Game Boy/Neo Geo/Capcom/Konami VGZs,
   MOD/S3M/XM/IT (libxmp-lite), N64 `.miniusf`, V2M, MDX, MIDI (fluidlite + a
-  SoundFont), SID (official core; sub-tune switching verified). Repeat-one over
+  SoundFont), SID (mmontag fork; sub-tune switching verified). Repeat-one over
   loop regions and the slider loop band are verified.
-- **Still broken / missing:** SID seek/tempo
-  are stubbed (official core); N64 seek freezes ~5s (pre-existing). See
-  "Audio engine roadmap" for the ordered plan.
+- **Still broken / missing:** SID `seek()` to a non-zero position (fork WIP and
+  tune-dependent: some tunes resume after a brief dip, others stay silent; a
+  seek before first render hangs; seek-to-0 works); N64 seek freezes ~5s while
+  timeslicing lands (pre-existing, unrelated to the feature). See "Audio engine
+  roadmap" for the ordered plan.
 
 ## Remaining TODO / roadmap
 
@@ -493,13 +536,19 @@ checks no longer work. Compare a live context to a stored one with
    - **Done:** emscripten build of GME/libvgm/libxmp/N64/V2M/MDX/fluidlite; YM2612
      fixed (force the Gens core); GME↔libvgm symbol clash masked with
      `-Wl,--allow-multiple-definition`.
-   - **(1) SID — done (official core), fork path still open.** Built from the
-     official `libsidplayfp` v2.9.0 tarball (`scripts/build-libsidplayfp.sh`);
-     verified rendering, sub-tunes, sub-tune switching, voice mask, and voice
-     groups. `seek()`/`setTempo()` are compiled out because mmontag's fork pins
-     unpushed reSID commits (see "SID" above). To get seek/tempo parity, someone
-     must publish those reSID changes (or find the upstream PR); then point the
-     build at the fork and `SIDPLAYFP_HAVE_SEEK` flips on automatically.
+   - **(1) SID — fork builds; `setTempo` done, `seek` still WIP.** Built from
+     `mmontag/libsidplayfp` (`montag-dev-2.14`, recursive) by
+     `scripts/build-libsidplayfp.sh`; verified rendering, sub-tunes, sub-tune
+     switching, voice mask, voice groups, and tempo. Matt pushed `mmontag/resid`
+     and pointed the submodule at it, so the clone and build are reproducible
+     (`SIDPLAYFP_HAVE_SEEK` probes to 1; requires `xa65` for the 6502 driver
+      `.bin` files). **`seek()` is WIP and tune-dependent**: Cybernoid II and
+      Monty-on-the-Run resume (with a brief dip), Cybernoid and Bionic Commando
+      stay silent, and a seek-before-play hangs for every tune tested (see "SID"
+      above). Seek-to-0 is reliable. Prod uses the same fork and behaves the
+      same, so this is faithful, not our regression; an upstream fix is still
+      needed for the slider / `?t=` links to be trustworthy on SID. Also pin the
+      fork branch to a commit for reproducible builds.
    - **(2) GME → `mmontag/game-music-emu` fork + newer libxmp, and prune GME.**
      Restores `gme_disable_echo` / `xmp_seek_time_frame` /
      `fluid_synth_get_active_voice_count` (all feature-detected today). While
@@ -546,12 +595,10 @@ checks no longer work. Compare a live context to a stored one with
    - Build/allocator: `dlmalloc` (configurable) and `INITIAL_MEMORY=128MB` vs
      upstream's `emmalloc`/64MB. `-flto` makes duplicate-symbol collisions worse;
      drop it for archives you are trying to keep separate.
-4. Before PR: `./dev/remove.sh`, decide whether to keep `dev/`, `.nvmrc`, and
-   `AGENTS.md` in the PR (currently tracked on the feature branch). The PR diff
-   should contain only the feature: `src/`, `scripts/{build-music,metadata-parsers}.js`,
-   `server/{database,index,schemas}.js`. Keep `config/webpack.config.dev.js`'s
-   `webSocketURL` change with the dev tooling (it's for LAN/Tailscale access),
-   not the feature.
+4. Before PR: the feature branch is already feature-only, so there is nothing to
+   strip. Push `feature/subtunes-as-first-class` to our fork (`origin`) and open
+   the PR against `mmontag:master` — never push to `upstream`, and never include
+   `dev/audio-tooling`. The diff is `git diff master..feature/subtunes-as-first-class`.
 
 ## Conventions & cautions
 

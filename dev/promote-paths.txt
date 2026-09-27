@@ -1,0 +1,37 @@
+# Overlay-only paths. `dev/promote.sh` NEVER promotes anything matched here.
+#
+# Rule of thumb: list whole AREAS (directories, build files, vendored trees) and
+# the one or two "seam" files whose dev delta cannot be expressed as an additive
+# DEV-BEGIN/DEV-END region. Do NOT list individual feature files — wrap dev code
+# in regions instead. This list should stay small and stable.
+#
+# Matched as git pathspecs (see dev/promote.sh).
+
+# Dev kit and tooling.
+dev/**
+AGENTS.md
+.nvmrc
+.gitignore
+config/webpack.config.dev.js
+scripts/start.js
+
+# Audio-engine build/tooling (real, but engine plumbing, not the feature).
+scripts/build-subprojects.sh
+scripts/build-chip-core.js
+scripts/build-libsidplayfp.sh
+src/bindings/**
+src/tinyplayer.c
+game-music-emu/**
+libvgm/**
+libxmp/**
+
+# The two "seam" files. Their overlay-vs-feature delta is only the dev seam,
+# which cannot be an additive region (prod must still load the real module):
+#   server/index.js              -> DEV_AUTH_MODULE require fallback + skia try/catch
+#   src/components/UserProvider.js -> (kept here only if region-stripping is not
+#                                     used for it; see notes below)
+# Promote leaves these at the feature branch's version. If feature work must
+# change them, do it directly on the feature branch (or convert the seam to a
+# DEV-BEGIN/DEV-END region first).
+server/index.js
+src/components/UserProvider.js

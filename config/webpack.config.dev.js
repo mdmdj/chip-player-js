@@ -2,6 +2,7 @@
 
 const autoprefixer = require('autoprefixer');
 const path = require('path');
+const fs = require('fs');
 const webpack = require('webpack');
 const { merge } = require('webpack-merge');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
@@ -27,6 +28,12 @@ const host = process.env.HOST || '0.0.0.0';
 module.exports = merge(commonConfig, {
   mode: 'development',
   devtool: 'cheap-module-source-map',
+  // DEV-ONLY (overlay): prepend the browser test-hooks bootstrap. Staged as an
+  // untracked, gitignored file by dev/apply.sh; in a clean tree only the app
+  // entry (from the common config, concatenated by merge) remains.
+  entry: fs.existsSync(path.resolve(paths.appSrc, 'chip-player-devtools.js'))
+    ? [path.resolve(paths.appSrc, 'chip-player-devtools.js')]
+    : [],
   // These are the "entry points" to our application.
   // This means they will be the "root" imports that are included in JS bundle.
   // The first two entry points enable "hot" CSS and auto-refreshes for JS.

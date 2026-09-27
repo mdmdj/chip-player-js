@@ -1,35 +1,89 @@
-// DEV-ONLY authentication bypass.
-//
-// Installed to `server/middleware/auth.js` by `dev/apply.sh` and removed by
-// `dev/remove.sh`. The real `server/middleware/auth.js` is tracked, so it is
-// backed up to `server/middleware/auth.js.dev-backup` on apply.
-//
-// This bypass:
-//   - never loads Firebase Admin or a service account file,
-//   - treats every request as a fixed dev user (`DEV_USER_ID`),
-//   - still forwards the bearer token in the `Authorization` header to the
-//     real Firebase identity when `DEV_AUTH_MODE=proxy` (used for the dev
-//     auth shim in `dev/dev-auth-shim.js`).
-//
-// Set `DEV_AUTH_MODE=bypass` (default) for a fixed user, or
-// `DEV_AUTH_MODE=proxy` to derive the user id from a `x-dev-uid` header.
-const DEV_USER_ID = process.env.DEV_USER_ID || 'dev-user';
-const DEV_AUTH_MODE = process.env.DEV_AUTH_MODE || 'bypass';
+// Firebase auth middleware for Express 5
+const { dbStatements } = require('../database.js');
+const admin = require('firebase-admin');
+const serviceAccount = require('../untracked/chip-player-js-c57327916be6.json');
 
-function resolveUserId(req) {
-  if (DEV_AUTH_MODE === 'proxy') {
-    return req.headers['x-dev-uid'] || DEV_USER_ID;
+const { getUserStmt, insertUserStmt, updateUserProfileStmt } = dbStatements;
+
+const safe = async (promise) => {
+  try {
+    return [null, await promise];
+  } catch (err) {
+    return [err, null];
   }
-  return DEV_USER_ID;
+};
+
+// Check if app is already initialized to avoid error
+if (admin.apps.length === 0) {
+  admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount)
+  });
+}
+
+function syncUser(decodedToken) {
+  // Check if user exists in SQLite
+  const user = getUserStmt.get(decodedToken.uid);
+
+  if (!user) {
+    // Lazy create: The user is valid in Firebase, but new to SQLite.
+    // This can happen when a user signs in for the first time.
+    const now = Math.floor(Date.now() / 1000);
+    insertUserStmt.run(decodedToken.uid, decodedToken.email, decodedToken.name, decodedToken.picture, now, now);
+    console.log(`Created new user: ${(decodedToken.uid)} (${decodedToken.name})`);
+  } else {
+    // Update profile and last login time
+    const now = Math.floor(Date.now() / 1000);
+    updateUserProfileStmt.run(
+      decodedToken.email,
+      decodedToken.name,
+      decodedToken.picture,
+      now,
+      decodedToken.uid
+    );
+  }
 }
 
 const requireAuth = async (req, res, next) => {
-  req.userId = resolveUserId(req);
+  const token = req.headers.authorization?.split('Bearer ')[1];
+
+  if (!token) {
+    return res.status(401).send('Unauthorized');
+  }
+
+  // Verify Token with Firebase
+  const [authErr, decodedToken] = await safe(admin.auth().verifyIdToken(token));
+
+  if (authErr) {
+    console.error('Authentication error:', authErr);
+    return res.status(401).send('Unauthorized');
+  }
+
+  syncUser(decodedToken);
+
+  // Attach uid to request for the route handler to use
+  req.userId = decodedToken.uid;
   next();
 };
 
 const optionalAuth = async (req, res, next) => {
-  req.userId = req.headers.authorization ? resolveUserId(req) : null;
+  const token = req.headers.authorization?.split('Bearer ')[1];
+
+  if (!token) {
+    req.userId = null;
+    return next();
+  }
+
+  // Verify Token with Firebase
+  const [authErr, decodedToken] = await safe(admin.auth().verifyIdToken(token));
+
+  if (authErr) {
+    // If token is invalid, treat as anonymous
+    req.userId = null;
+    return next();
+  }
+
+  // Attach uid to request for the route handler to use
+  req.userId = decodedToken.uid;
   next();
 };
 

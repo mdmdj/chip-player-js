@@ -54,6 +54,72 @@ feature branch, and never push either branch to `upstream` — everything stays 
 our fork (`origin`). The main worktree (`chip-player-js/`) runs `dev/overlay`; the
 feature branch is checked out in the sibling `chip-player-js-feature/` worktree.
 
+## Dev overlay & promotion
+
+`dev/overlay` is the **dirty working branch**: it deliberately mixes feature,
+audio/engine and dev-tooling commits, and that is fine. The goal is not a clean
+tree — it is a **deterministic, low-effort way to promote feature work to the
+parent** without leaking overlay content. The intended path is a single button:
+
+```sh
+./dev/promote.sh            # dry run: show the plan
+./dev/promote.sh --apply    # promote to feature/subtunes-as-first-class
+```
+
+`promote.sh` requires a clean overlay tree, then, for every file that differs
+from the feature branch, it:
+- skips anything listed in `dev/promote-paths.txt` (overlay-only **areas**:
+  `dev/**`, the engine build scripts, `src/bindings/**`, vendored trees, and the
+  few "seam" files),
+- strips `DEV-BEGIN … DEV-END` regions from the rest,
+- promotes only files whose stripped content still differs from the feature
+  branch (i.e. real feature work).
+
+It writes the result into the feature-branch worktree and commits it there as one
+commit ("Promote feature work from dev/overlay"), leaves `dev/overlay`
+untouched, and refuses if `DEV-BEGIN`/`DEV-END` sentinels are unbalanced. After
+promoting, `git rebase feature/subtunes-as-first-class` on `dev/overlay` so both
+share the feature state.
+
+### Two mechanisms — how to choose
+
+- **Whole files → physical paths.** Dev/engine areas live under paths that never
+  overlap feature code, so they never appear in the promoted diff. Add an entry
+  to `dev/promote-paths.txt` only for a whole AREA (directory / build file /
+  vendored tree) — **not** for individual feature files.
+- **Chunks inside a shared file → additive sentinel regions.** Wrap the dev-only
+  code so *removing the region restores prod behavior exactly*:
+  ```
+  // DEV-BEGIN (stripped for promotion; <why>)
+  ...dev-only code that only ever ADDS behavior...
+  // DEV-END
+  ```
+  Prefer moving dev-only code into `dev/` or an untracked module; prefer a region
+  over a path-list entry. "Additive" is the key property: do not put code inside
+  a region that prod also needs.
+
+### The 1–2 hard-coded seams
+
+A few seams genuinely cannot be additive regions, because prod must still load
+the real module while dev loads an alternative *instead of* it. These live in
+`server/index.js` (`DEV_AUTH_MODULE` require fallback; skia-canvas try/catch) and
+are handled by listing the file as overlay-only. At final PR prep these are the
+"1–2 lines" to remove by hand. (`src/components/UserProvider.js` can be
+region-stripped, but is currently listed for safety.)
+
+### Known gaps (handoff state)
+
+- `dev/promote-paths.txt` still names a few individual shared files
+  (`src/config/index.js`, `src/players/{MIDI,N64,XMP}Player.js`) whose dev deltas
+  are engine/remote-dev, not feature. That is the "bloat" to remove: convert each
+  dev delta to a `DEV-BEGIN/DEV-END` region, then delete the entry.
+- A dry run currently promotes ~9 files (`App`, `AppFooter`, `Slider`,
+  `TimeSlider`, `index.css`, `winamp.css`, `{GME,Player,VGM}Player`). Confirm
+  each is really feature before `--apply`; the classification was made at handoff
+  and is due for review.
+- After the reverted libvgm attempt, the working tree is clean and VGM/looping
+  work (see "Building the real chip-core").
+
 ## The feature
 
 Today a "song" is a file. Some formats (NSF/NSFE, SID) contain **multiple
@@ -218,13 +284,46 @@ SIDs and to briefly pause on others. This matches prod (its shipped core is
 built from the same fork and shows the same Bionic Commando silence), so it is
 not a regression from our integration — we deliberately keep the wrapper and app
 faithful, with no seek guard or compile-time gate. Plain playback, sub-tune
-switching, voice mask, and tempo are unaffected. `dev/patch-sid-stub.js` (silent
-SID) only applies to cores without `_sid_*` exports and does not trigger now.
+switching, voice mask, and tempo are unaffected. The old silent-SID dev hack
+(`dev/patch-sid-stub.js`) was removed: the real SID core now exports `_sid_*`.
 
 `sid_set_subtune` must call `engine->load(currentTune)` after `selectSong()`:
 selectSong only marks the `SidTune`'s current song, so without the reload the
 engine keeps playing song 0 while `sid_get_subtune()` reports the requested
 index (every sub-tune sounds identical).
+
+### libvgm pin — attempted 2026-09, reverted
+
+The engines are built from **out-of-band clones** that the repo does not track:
+`build-chip-core.js` links `../libvgm/build/bin/*.a`, `../libxmp/...`,
+`../FluidLite/...`, `../libADLMIDI/...`, `../game-music-emu/...`. The in-repo
+`libvgm/`, `libxmp/`, `fluidlite/`, `game-music-emu/` trees are **deprecated
+subtrees** (the README says so) and are *not* what the build uses — except that
+`normalizeInput` (`build-chip-core.js:478`) falls back to the in-repo copy when
+the sibling `../<name>` is **absent**. So a stray clone in `../` silently changes
+what gets linked.
+
+Our `libvgm-wrapper.cpp` only carries its `DEVID_OKIM*` / `PLAYTIME_*` /
+`LVGM_*` compat because we were building against the **stale in-repo libvgm**
+(no `parentIdx`, `DEVID_OKIM*`, bool `GetCurTime`). Against current
+`ValleyBell/libvgm` HEAD *all* of that is unnecessary: the wrapper diff vs
+master is exactly the 6 loop functions the looping feature adds (+56 / −0).
+
+Attempted to move the pin to HEAD (`c8b998b`, 2026-09-05), reverted because:
+- **Runtime drift.** It compiles clean, but `PlayerA::LoadFile` leaves
+  `GetPlayer()` null → VGM renders silence (`GetCurTime`, loop getters all 0).
+  HEAD is ~8 months ahead of what the wrapper/engagement expects.
+- **`wasm-opt`.** The post-link `wasm-opt` step failed (binaryen validation
+  error). Cosmetic: the un-optimized wasm is valid and exposes every export, just
+  ~600 KB larger. **No pacman package fixes it** — Arch's `emscripten 6.0.9`
+  ships its own `wasm-opt` (binaryen 132); `extra/binaryen` is older (130).
+- Restored the stale in-repo libvgm + compat; VGM/looping work again (verified
+  `loopStart/End`, `fadeStart`, repeat-one.
+
+To resume the pin: target a revision just after `parentIdx` was added
+(2026-01-21, upstream `57585ea`) to minimise drift, then fix the `LoadFile` /
+`GetPlayer` integration. First `rm -rf ../libvgm` so `normalizeInput` picks the
+in-repo tree, or intentionally point the build at the new clone.
 
 ### Dev environment gotcha
 
@@ -434,11 +533,11 @@ because `Sequencer` copies its context).
   Favorites list shows the label, or `Tune N` when unlabeled; toggling
   re-fetches so optimistic entries get the same decoration.
 - **Testing favorites in the dev app:** the server auth bypass makes the API
-  usable, but the client's own `user` state (Firebase) stays null. The
-  `dev/patch-user-provider.js` shim injects a fake `user` with `getIdToken()`
-  (uid `dev-user`, token `dev-token`), so the heart button and favorites API
-  work in the browser. It is backed up/restored by `dev/apply.sh` /
-  `dev/remove.sh`.
+  usable, but the client's own `user` state (Firebase) stays null. The dev
+  webpack config sets `REACT_APP_DEV_USER`, which `UserProvider`'s single
+  `DEV_USER` gate turns into a fake `user` with `getIdToken()` (uid `dev-user`,
+  token `dev-token`), so the heart button and favorites API work in the browser.
+  No tracked file is patched; see "Dev overlay & promotion".
 
 ## Current state
 
@@ -485,8 +584,8 @@ because `Sequencer` copies its context).
 11. Downloads: `getUrlFromFilepath` encodes per path segment, so browsers name
     downloads correctly instead of using the whole path.
 12. Real audio locally: a chip-core wasm build works (GME/libvgm/libxmp/N64/
-    V2M/MDX/fluidlite MIDI). Uncommitted, separate from the feature — see
-    "Building the real chip-core".
+    V2M/MDX/fluidlite MIDI). Gitignored and not committed; the current engine
+    pin/build is documented under "Building the real chip-core" ("libvgm pin").
 13. Repeat One for VGM (libvgm) — the looping baseline. Native loop count plus a
     band-relative "playlist position" so the head repeats the highlighted loop
     region, and switching repeat off plays past into the fade with no head jump.
@@ -505,6 +604,26 @@ checks no longer work. Compare a live context to a stored one with
   audio/engine/build/dev work. There is no commit list to maintain — a change
   either belongs to the feature branch or it does not. Run the app from the dev
   branch.
+- **Handoff state (2026-09, read this):**
+  - **Looping is now the top priority** and is treated as **feature** work (part
+    of completing the sub-tunes feature), not an overlay extra. The VGM Repeat
+    One baseline is implemented and verified; see "Repeat One / looping model".
+  - **Overlay/promote system** is in place but **WIP**: `dev/promote.sh` +
+    `dev/promote-paths.txt` + `DEV-BEGIN/DEV-END` regions. See "Dev overlay &
+    promotion" for the mechanism and the **Known gaps** (a few shared files are
+    still path-listed and should become regions).
+  - **The libvgm pin move was attempted and reverted** (runtime drift +
+    `wasm-opt`). Working VGM again; see "libvgm pin" above. Do not leave a stray
+    `../libvgm` clone around — it hijacks the link.
+  - **Branches pushed to `origin`**: `dev/overlay`, `feature/subtunes-as-first-class`;
+    `origin/master` is untouched. Worktrees: main = `dev/overlay`, sibling
+    `chip-player-js-feature/` = feature.
+  - **Dev shims are untracked-stage, not tracked patches** (no more
+    `*.dev-backup` / `--revert` for auth/UserProvider). `dev/apply.sh` /
+    `dev/remove.sh` manage them; `git status` stays clean after apply.
+  - The PR was last promoted at commit `51cf89a1e` on the feature branch, then
+    reset to `d44899faf` during the promote rework. Re-run `./dev/promote.sh`
+    (dry run first) to see the current feature delta.
 - **Remote dev access (LAN/WSL/Tailscale):** fixed, dev tooling only (not the
   feature). Two root causes:
   - `scripts/start.js` built its own minimal `WebpackDevServer` options and
@@ -725,12 +844,14 @@ speed), so seek near a boundary to observe short windows.
 - Templates literals: **do not put backticks inside SQL template strings**
   (broke `build-music.js` twice via SQL comments using backticks).
 - Verify with `curl` against `localhost:8080/api/...`.
-- Dev shims that edit tracked files in place (`server/index.js`,
-  `src/components/UserProvider.js`) are patched by `dev/patch-server.js` /
-  `dev/patch-user-provider.js` and undone with `--revert`; `dev/remove.sh`
-  calls those, so feature edits in those files are preserved. Files that are
-  wholly replaced (`server/middleware/auth.js`, `src/config/firebaseConfig.js`)
-  are restored from `*.dev-backup`, so keep those backups correct. Before a PR,
-  run `./dev/remove.sh` and double-check `git diff` / `git status`.
+- Dev shims stage **untracked, gitignored** modules rather than patching tracked
+  files. `dev/apply.sh` writes `server/middleware/auth.dev.js`,
+  `src/chip-player-devtools.js`, `src/chip-core.js`, `src/config/firebaseConfig.js`
+  and `server/.env.local`; `server/index.js` loads the auth module via
+  `DEV_AUTH_MODULE`, and the dev webpack config prepends the devtools entry.
+  `dev/remove.sh` deletes them. No `*.dev-backup`, no `--revert` for these. The
+  remaining in-place patch is `dev/patch-server.js` (skia-canvas), which is
+  reversible and preserved by `remove.sh --revert`. Before a PR, run
+  `./dev/remove.sh` and double-check `git diff` / `git status`.
 - The client uses React 16, react-router-dom v5, react-virtualized, lodash,
   auto-bind. Match those.

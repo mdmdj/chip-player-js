@@ -30,17 +30,17 @@ const DEFAULT_SETTINGS = {
   showLoopArea: true,
 };
 
-// DEV-ONLY (dev/overlay): an inlined dev user so favorites work without
-// Firebase. REACT_APP_DEV_USER is set by the dev webpack config; in prod the
-// branch is undefined and this is null (dead-code eliminated).
+// DEV-BEGIN (stripped for promotion; dev-only fake user so favorites work
+// without Firebase. REACT_APP_DEV_USER is set by the dev webpack config.)
 const DEV_USER = process.env.REACT_APP_DEV_USER
   ? { ...JSON.parse(process.env.REACT_APP_DEV_USER), getIdToken: async () => 'dev-token' }
   : null;
+// DEV-END
 
 const UserProvider = ({ children }) => {
   // Use authState hook for user state
   // const [authUser, userLoading] = useAuthState(firebase.auth());
-  const [user, setUser] = useState(() => DEV_USER); // Local state for user data
+  const [user, setUser] = useState(null); // Local state for user data
   const [faves, setFaves] = useState(() => {
     // Restore favorites from localStorage.
     try {
@@ -51,7 +51,7 @@ const UserProvider = ({ children }) => {
       return [];
     }
   });
-  const [loadingUser, setLoadingUser] = useState(!DEV_USER); // Manage loading state
+  const [loadingUser, setLoadingUser] = useState(true); // Manage loading state
   // Monotonic token so stale favorites refreshes don't overwrite newer ones.
   const favesRefreshToken = useRef(0);
   const [settings, setSettings] = useState(() => {
@@ -65,10 +65,15 @@ const UserProvider = ({ children }) => {
     }
   });
 
+  // DEV-BEGIN (stripped for promotion; inject the dev user and skip Firebase)
+  useEffect(() => {
+    if (!DEV_USER) return;
+    setUser(DEV_USER);
+    setLoadingUser(false);
+  }, []);
+  // DEV-END
 
   useEffect(() => {
-    // DEV-ONLY (dev/overlay): a dev user was injected; skip Firebase.
-    if (DEV_USER) return;
     // Initialize Firebase
     const firebaseApp = firebaseInitializeApp(firebaseConfig);
     const auth = getAuth(firebaseApp);

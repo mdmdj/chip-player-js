@@ -1,0 +1,39 @@
+# Paths that are dev-overlay only and must NEVER be promoted to the feature
+# branch. `dev/promote.sh` copies every other changed file from dev/overlay onto
+# the feature branch.
+#
+# Keep this list as small as possible: prefer moving dev-only code out of shared
+# files (into dev/ or an untracked module) over adding an entry here. One glob
+# per line; '#' starts a comment. Matched as git pathspecs.
+
+# Dev kit and tooling.
+dev/**
+AGENTS.md
+.nvmrc
+.gitignore
+config/webpack.config.dev.js
+scripts/start.js
+
+# Audio-engine build/tooling (real, but not the sub-tunes feature).
+scripts/build-subprojects.sh
+scripts/build-chip-core.js
+scripts/build-libsidplayfp.sh
+src/bindings/**
+src/tinyplayer.c
+
+# Vendored-tree build fixes.
+game-music-emu/**
+libvgm/**
+libxmp/**
+
+# Audio/repeat-one work and dev-only player tweaks. These are overlay deltas on
+# files the feature also touches where relevant; the feature's own hunks in
+# FEATURE-owned files (server/index.js, src/players/Player.js, ...) still come
+# across because promote copies the whole file from the feature side for those.
+src/config/index.js
+src/index.css
+src/winamp.css
+src/components/Slider.js
+src/components/TimeSlider.js
+src/components/AppFooter.js
+src/players/**

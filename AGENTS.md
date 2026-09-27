@@ -75,14 +75,17 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
 - Server deps: `npm install` inside `server/` (builds `better-sqlite3` and
   `skia-canvas` fine).
 - **Dev shims** live in `dev/` on `dev/overlay` only (never on the feature
-  branch), tracked so the dev environment is reproducible:
-  - `./dev/apply.sh` — installs stub `src/chip-core.js`, placeholder Firebase
-    config, server auth bypass, optional-skia-canvas patch, a dev-user
-    `UserProvider` patch, a silent-SID fallback patch, seeds `users.db` /
-    `csdb.db`, writes `server/.env.local`, builds `catalog/` +
-    `server/catalog.db`.
-  - `./dev/remove.sh` — reverts everything (in-place patches via `--revert`;
-    wholly replaced files restored from `*.dev-backup`; generated files removed).
+  branch), tracked so the dev environment is reproducible. They stage
+  **untracked, gitignored** modules rather than patching tracked files, so a
+  working tree stays clean (`git status` shows only intentional overlay edits):
+  - `./dev/apply.sh` — stages untracked `src/chip-core.js`,
+    `src/chip-player-devtools.js`, `server/middleware/auth.dev.js` and a
+    placeholder Firebase config; patches a dev-user `UserProvider` and a
+    silent-SID `SIDPlayer` (reversible, no backups); seeds `users.db` /
+    `csdb.db`; writes `server/.env.local` (with `DEV_AUTH_MODULE`); builds
+    `catalog/` + `server/catalog.db`.
+  - `./dev/remove.sh` — reverts the in-place patches (`--revert`) and deletes
+    the staged untracked files. No tracked file is restored from a backup.
   - `node dev/test-parsers.js` — parser harness (20 checks; synthetic buffers +
     real files under `catalog/`).
   - `node dev/test-build.js` — build-music round-trip on a temp catalog subdir
@@ -92,11 +95,13 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
     inline Babel require hook; no new deps.
   - `./dev/run-tests.sh` — runs all three. Dev-only, not part of the PR.
   - `dev/README.md` documents the shims.
-  - `dev/shims/devtools.js` + `dev/patch-devtools.js` — install `window.__cpDev`
-    (browser test hooks: `snapshot`, `setRepeat`, `seek`, `startRecord`, ...).
-    Staged to `src/chip-player-devtools.js` and patched into `App.js` by
-    `apply.sh`; reverted + deleted by `remove.sh`. See "Repeat One / looping
-    model".
+  - Two tracked seams keep the untracked overrides loadable without touching
+    feature files: `server/index.js` requires `process.env.DEV_AUTH_MODULE ||
+    './middleware/auth.js'` (overlay-only delta), and the overlay-only
+    `config/webpack.config.dev.js` prepends `src/chip-player-devtools.js` to the
+    entry. `dev/shims/devtools.js` self-installs `window.__cpDev` (browser test
+    hooks: `snapshot`, `setRepeat`, `seek`, `startRecord`, ...) and polls for
+    `window.ChipPlayer`. See "Repeat One / looping model".
 - Run the app: `npm run dev` (webpack dev server on :3000, API server on :8080).
 - **Audio:** the dev stub `src/chip-core.js` is a no-op (no audio). A **real
   chip-core was built** in this session — see "Building the real chip-core"
@@ -702,12 +707,13 @@ make it a flag later.
 
 ### Dev tooling
 
-`window.__cpDev` (dev-only; `dev/shims/devtools.js` + `dev/patch-devtools.js`,
-installed by `apply.sh`, removed by `remove.sh`): `snapshot()`, `setRepeat()`,
-`cycleRepeat()`, `seek()`, `startRecord()`/`stopRecord()` (non-blocking), and
-`runTimeline()`. Use it from the t3 preview to script enable/disable timing and
-spy on player state instead of listening. Remember the preview throttles
-background timers (~½ speed), so seek near a boundary to observe short windows.
+`window.__cpDev` (dev-only; `dev/shims/devtools.js`, staged as the untracked
+`src/chip-player-devtools.js` by `apply.sh` and injected via the dev webpack
+entry; deleted by `remove.sh`): `snapshot()`, `setRepeat()`, `cycleRepeat()`,
+`seek()`, `startRecord()`/`stopRecord()` (non-blocking), and `runTimeline()`. Use
+it from the t3 preview to script enable/disable timing and spy on player state
+instead of listening. Remember the preview throttles background timers (~½
+speed), so seek near a boundary to observe short windows.
 
 ## Conventions & cautions
 

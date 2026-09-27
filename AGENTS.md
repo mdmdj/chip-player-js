@@ -38,18 +38,21 @@ a list of commits to remember:
   (components, `Sequencer`, `util`, plus the small `Player.handleSongEnd`
   change). No `dev/` shims, no engine/build tooling, no `AGENTS.md`/`.nvmrc`.
   `git diff master..feature/subtunes-as-first-class` is the reviewable PR.
-- **`dev/audio-tooling`** — stacked on top of the feature branch (currently one
-  commit) and holds everything else: engine build scripts, `src/bindings/`,
-  `src/tinyplayer.c`, the audio parts of `src/players/*Player.js`,
-  vendored-tree fixes, `config/webpack.config.dev.js`, the `dev/` shims,
-  `AGENTS.md`, `.nvmrc`. This is where the app is developed and run. Lives in
-  our fork (`origin`); nothing here is part of the PR.
+- **`dev/overlay`** — stacked on top of the feature branch and holds everything
+  that must **not** be part of the PR: engine build scripts, `src/bindings/`,
+  `src/tinyplayer.c`, the audio parts of `src/players/*Player.js`, vendored-tree
+  fixes, `config/webpack.config.dev.js`, the `dev/` shims and browser test hooks,
+  `AGENTS.md`, `.nvmrc`, `.gitignore`. Think of it as our personal dev overlay:
+  the local setup and tooling we need to work, layered on the reviewable feature.
+  This is where the app is developed and run. Lives in our fork (`origin`);
+  nothing here is part of the PR.
 
-Workflow: commit feature changes on the feature branch; commit audio/dev/tooling
-changes only on `dev/audio-tooling`; then `git rebase
-feature/subtunes-as-first-class` on the dev branch to pick up feature moves.
-Never commit audio/dev changes to the feature branch, and never push either
-branch to `upstream` — everything stays in our fork (`origin`).
+Workflow: commit feature changes on the feature branch; commit dev/overlay changes
+only on `dev/overlay`; then `git rebase feature/subtunes-as-first-class` on the
+overlay branch to pick up feature moves. Never commit overlay changes to the
+feature branch, and never push either branch to `upstream` — everything stays in
+our fork (`origin`). The main worktree (`chip-player-js/`) runs `dev/overlay`; the
+feature branch is checked out in the sibling `chip-player-js-feature/` worktree.
 
 ## The feature
 
@@ -71,7 +74,7 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
   skips it. Root `better-sqlite3` is needed by `scripts/build-music.js`.)
 - Server deps: `npm install` inside `server/` (builds `better-sqlite3` and
   `skia-canvas` fine).
-- **Dev shims** live in `dev/` on `dev/audio-tooling` only (never on the feature
+- **Dev shims** live in `dev/` on `dev/overlay` only (never on the feature
   branch), tracked so the dev environment is reproducible:
   - `./dev/apply.sh` — installs stub `src/chip-core.js`, placeholder Firebase
     config, server auth bypass, optional-skia-canvas patch, a dev-user
@@ -104,7 +107,7 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
 Real audio works locally. `scripts/build-subprojects.sh` + changes to
 `scripts/build-chip-core.js` build all vendored engines into
 `src/chip-core.{js,wasm}`. This work touches vendored trees and lives on
-`dev/audio-tooling`, **not** the feature branch. See "Audio engine roadmap" for
+`dev/overlay`, **not** the feature branch. See "Audio engine roadmap" for
 what remains.
 
 Prereqs (Arch): `sudo pacman -S cmake emscripten xa` (emcc lands in
@@ -483,7 +486,7 @@ because `Sequencer` copies its context).
     band-relative "playlist position" so the head repeats the highlighted loop
     region, and switching repeat off plays past into the fade with no head jump.
     See "Repeat One / looping model". Verified via the t3 preview + `window.__cpDev`
-    (deep-loop toggle has `jump: 0`). Uncommitted on `dev/audio-tooling`.
+    (deep-loop toggle has `jump: 0`). On `dev/overlay`.
 
 **Caveat:** `Sequencer.playContext` copies its context, so array-identity
 checks no longer work. Compare a live context to a stored one with
@@ -493,7 +496,7 @@ checks no longer work. Compare a live context to a stored one with
 ## Session hand-off notes (read me first)
 
 - **Branch model:** see "Branches" above. `feature/subtunes-as-first-class` is
-  the PR (feature only); `dev/audio-tooling` is stacked on it and holds the
+  the PR (feature only); `dev/overlay` is stacked on it and holds the
   audio/engine/build/dev work. There is no commit list to maintain — a change
   either belongs to the feature branch or it does not. Run the app from the dev
   branch.
@@ -612,7 +615,7 @@ checks no longer work. Compare a live context to a stored one with
 5. Before PR: the feature branch is already feature-only, so there is nothing to
    strip. Push `feature/subtunes-as-first-class` to our fork (`origin`) and open
    the PR against `mmontag:master` — never push to `upstream`, and never include
-   `dev/audio-tooling`. The diff is `git diff master..feature/subtunes-as-first-class`.
+   `dev/overlay`. The diff is `git diff master..feature/subtunes-as-first-class`.
 
 ## Repeat One / looping model
 

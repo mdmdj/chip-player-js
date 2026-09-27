@@ -111,13 +111,8 @@ export default class VGMPlayer extends Player {
 
     this.resolveParamValues(persistedSettings);
     this.setTempo(persistedSettings.tempo || 1);
-    this.fadeTailStartMs = null;
-    this.durationExtended = false;
-    // Sync the engine's indefinite flag here, where the loop count is still 0
-    // (so it cannot latch a fade), in case a mid-play toggle was masked by
-    // Repeat One and skipped the native update.
-    this.core._lvgm_set_indefinite_playback(this.vgmCtx, !!this.params.indefinitePlayback);
-    this.applyLoopCount(false);
+    this.restartAtEndPending = false;
+    this.applyLoopCount();
     this.resume();
     this.emit('playerStateUpdate', {
       ...this.getBasePlayerState(),
@@ -333,6 +328,20 @@ export default class VGMPlayer extends Player {
     return this.looping || !!this.params.indefinitePlayback || !!this.durationExtended;
   }
 
+  // Repeat-one overrides the "Indefinite Playback" setting: loop the track
+  // indefinitely (0) instead of fading out after two passes.
+  applyLoopCount() {
+    if (this.vgmCtx && typeof this.core._lvgm_set_loop_count === 'function') {
+      const indefinite = this.looping || !!this.params.indefinitePlayback;
+      this.core._lvgm_set_loop_count(this.vgmCtx, indefinite ? 0 : 2);
+    }
+  }
+
+  setLooping(looping) {
+    super.setLooping(looping);
+    this.applyLoopCount();
+  }
+
   getVoiceName(index) {
     // TODO: Add voice chip map like github.com/mmontag/chip-player-js/commit/a698e9b
     if (this.vgmCtx) return this.core.UTF8ToString(this.core._lvgm_get_voice_name(this.vgmCtx, index));
@@ -395,7 +404,7 @@ export default class VGMPlayer extends Player {
         if (!value && !this.looping)
           this.syncFadeTailCapture(true);
         // Repeat-one owns the loop count while it is active.
-        this.applyLoopCount(wasLooping);
+        this.applyLoopCount();
         break;
       }
       default:

@@ -36,6 +36,13 @@ src/winamp.css
 src/components/Slider.js
 src/components/TimeSlider.js
 
+# Feature-owned files whose entire overlay-vs-feature delta is the dev seam:
+# server/index.js = DEV_AUTH_MODULE require fallback + skia try/catch;
+# UserProvider.js = the single DEV_USER env gate. The feature branch keeps the
+# plain versions (it has no need for a dev auth bypass or dev user).
+server/index.js
+src/components/UserProvider.js
+
 # Engine feature-detection for the fork/newer builds (not part of the feature):
 # these exist only because our engines export APIs the vendored ones don't, so
 # they are engine plumbing, like src/bindings/. GMEPlayer is NOT here: its

@@ -28,7 +28,10 @@ const axiosRetry = require('axios-retry').default;
 const { XMLParser } = require('fast-xml-parser');
 
 const { dbStatements } = require('./database.js');
-const { requireAuth, optionalAuth } = require('./middleware/auth.js');
+// DEV-ONLY (overlay): allow an alternate auth module via DEV_AUTH_MODULE so the
+// dev bypass can live in an untracked file without patching this one. Absent the
+// var, this is exactly require('./middleware/auth.js').
+const { requireAuth, optionalAuth } = require(process.env.DEV_AUTH_MODULE || './middleware/auth.js');
 const { validate } = require('./middleware/validate');
 const { SettingsSchema, FavoriteSchema, PlaybackSchema } = require('./schemas');
 

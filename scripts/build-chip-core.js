@@ -148,6 +148,7 @@ const chipModules = [
       '_lvgm_stop',
       '_lvgm_render',
       '_lvgm_get_position_ms',
+      '_lvgm_get_playlist_position_ms',
       '_lvgm_get_cur_loop',
       '_lvgm_get_fade_start_ms',
       '_lvgm_get_duration_ms',

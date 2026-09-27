@@ -35,3 +35,12 @@ libxmp/**
 # DEV-BEGIN/DEV-END region first).
 server/index.js
 src/components/UserProvider.js
+
+# Engine feature-detection + remote-dev tweaks on shared files. These exist
+# because our fork engines export APIs the vendored ones don't (or to reach the
+# dev API over LAN); they are engine/dev plumbing, not the feature. TODO: wrap
+# their dev deltas in DEV-BEGIN/DEV-END regions and drop these entries.
+src/config/index.js
+src/players/MIDIPlayer.js
+src/players/N64Player.js
+src/players/XMPPlayer.js

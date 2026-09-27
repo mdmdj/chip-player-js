@@ -120,14 +120,12 @@ export default class GMEPlayer extends Player {
     if (playIndefinitely) {
       // GME has no loop API, and once it reports the track ended gme_play only
       // produces silence. Restart the track to loop it (repeat-one or the
-      // Indefinite Playback setting). Looping chip drivers (e.g. NSF) never
-      // report track ended; they loop internally, so there is nothing to
-      // restart -- letting them run is the seamless case. Never restart at
-      // the track length: that would cut a seamlessly looping driver with a
-      // hard restart.
-      if (trackEnded) {
-        // Restarting also resets getPositionMs(), so the elapsed label
-        // restarts with it. Looping drivers never get here and keep climbing.
+      // Indefinite Playback setting). Tracks without a defined loop region
+      // restart right at the track length instead of waiting for GME's silence
+      // detection to end them.
+      const hasLoopRegion = this.metadata && this.metadata.loop_length > 0;
+      const reachedLength = this.getDurationMs() > 0 && this.getPositionMs() >= this.getDurationMs();
+      if (trackEnded || (!hasLoopRegion && reachedLength)) {
         this.restartTrack();
         trackEnded = false;
       }
@@ -361,7 +359,7 @@ export default class GMEPlayer extends Player {
         break;
       case 'disableEcho':
         this.params[id] = !!value;
-        // gme_disable_echo is a 0.6.4+ API; older builds omit it.
+        // gme_disable_echo is a fork-only API; older builds omit it.
         if (this.gmeCtx && core._gme_disable_echo) core._gme_disable_echo(this.gmeCtx, value ? 1 : 0);
         break;
       case 'enableAccuracy':
@@ -411,12 +409,6 @@ export default class GMEPlayer extends Player {
     this.fadingOut = false;
     this.fadeStartMs = null;
     this.fadeFinished = false;
-  }
-
-  // Indefinite Playback behaves like Repeat One: the engine keeps rendering
-  // past durationMs, so the base end detector must stay out of the way.
-  isPlayingIndefinitely() {
-    return this.looping || !!this.params.indefinitePlayback;
   }
 
   restartTrack() {

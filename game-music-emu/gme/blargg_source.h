@@ -79,6 +79,8 @@ static inline void dprintf( const char * fmt, ... )
 static inline void blargg_dprintf_( const char [], ... ) { }
 #undef  dprintf
 #define dprintf (1) ? (void) 0 : blargg_dprintf_
+#undef  debug_printf
+#define debug_printf (1) ? (void) 0 : blargg_dprintf_
 #else
 #include <stdarg.h>
 #include <stdio.h>

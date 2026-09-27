@@ -47,23 +47,6 @@ export default class N64Player extends Player {
     this.buffer = this.core._malloc(this.bufferSize * 4); // 2 ch, 16-bit
     this.seekRequestId = null;
     this.seekTargetMs = null;
-    // Same tail detector as SID (see EndDetector); its levels have not been
-    // verified on USF content, so quiet game mixes are the case to watch.
-    this.endDetector = new EndDetector({
-      sampleRate: this.sampleRate,
-      bufferSize: this.bufferSize,
-    });
-  }
-
-  resetEndDetector() {
-    this.endDetector.reset();
-  }
-
-  // Start of the end-detection trip window, one window before the expected
-  // end. Cached per track: the duration only changes on load, which resets the
-  // detector.
-  getEndDetectTripAtMs() {
-    return this.endDetector.getTripAtMs(this.getDurationMs());
   }
 
   loadData(data, filename, persistedSettings) {
@@ -71,7 +54,6 @@ export default class N64Player extends Player {
     // rather than loading bytes from memory like other players.
     cancelIdleCallback(this.seekRequestId);
     this.seekTargetMs = null;
-    this.resetEndDetector();
     let err;
     this.filepathMeta = Player.metadataFromFilepath(filename);
 
@@ -204,7 +186,6 @@ export default class N64Player extends Player {
   seekMs(positionMs) {
     cancelIdleCallback(this.seekRequestId);
     this.seekTargetMs = positionMs;
-    this.resetEndDetector();
     if (positionMs < this.getPositionMs()) {
       // Seeking backward restarts the tune; do that once up front.
       this.core._n64_seek_ms(0);

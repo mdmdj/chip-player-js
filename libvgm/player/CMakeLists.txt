@@ -12,7 +12,8 @@ set(PLAYER_FILES
 	vgmplayer_cmdhandler.cpp
 	vgmplayer.cpp
 	playera.cpp
-	player_wrapper.cpp
+	# player_wrapper.cpp was moved to src/bindings/ by the chip-player-js fork;
+	# it is not part of this library. See scripts/build-subprojects.sh.
 )
 # export headers
 set(PLAYER_HEADERS

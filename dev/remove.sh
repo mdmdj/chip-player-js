@@ -25,19 +25,16 @@ echo "[dev]   removed server/.env.local"
 rm -f server/*.db-shm server/*.db-wal
 echo "[dev]   removed sqlite WAL sidecar files"
 
-# Restore tracked files that were replaced
-if [ -f server/middleware/auth.js.dev-backup ]; then
-  mv server/middleware/auth.js.dev-backup server/middleware/auth.js
-  echo "[dev]   restored server/middleware/auth.js"
-fi
+# Untracked shim modules staged by apply.sh (no tracked files to restore)
+rm -f server/middleware/auth.dev.js
+echo "[dev]   removed server/middleware/auth.dev.js"
 
 # Undo in-place patches (reversible, so feature edits are preserved)
 node dev/patch-server.js --revert
 node dev/patch-user-provider.js --revert
 node dev/patch-sid-stub.js --revert
-node dev/patch-devtools.js --revert
 
-# Staged devtools shim (copied by apply.sh)
+# Staged devtools shim (copied by apply.sh; untracked, no patch to revert)
 rm -f src/chip-player-devtools.js
 echo "[dev]   removed src/chip-player-devtools.js"
 

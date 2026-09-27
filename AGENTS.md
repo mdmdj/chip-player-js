@@ -42,8 +42,8 @@ a list of commits to remember:
   commit) and holds everything else: engine build scripts, `src/bindings/`,
   `src/tinyplayer.c`, the audio parts of `src/players/*Player.js`,
   vendored-tree fixes, `config/webpack.config.dev.js`, the `dev/` shims,
-  `AGENTS.md`, `.nvmrc`. This is where the app is developed and run. Local-only;
-  nothing here is part of the PR.
+  `AGENTS.md`, `.nvmrc`. This is where the app is developed and run. Lives in
+  our fork (`origin`); nothing here is part of the PR.
 
 Workflow: commit feature changes on the feature branch; commit audio/dev/tooling
 changes only on `dev/audio-tooling`; then `git rebase

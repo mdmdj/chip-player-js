@@ -17,6 +17,7 @@ public/soundfonts/
 src/-catalog-tests/
 src/chip-core.js
 src/chip-player-devtools.js
+server/middleware/auth.dev.js
 server/catalog.json
 server/directories.json
 server/ecosystem.config.js

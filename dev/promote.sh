@@ -7,16 +7,14 @@
 # chunk of feature work on the overlay branch, run this to lift it to the parent
 # in one deterministic step.
 #
-# What it does:
-#   1. Requires a clean dev/overlay worktree (commit or stash first), so the
-#      promotion is exactly what you reviewed.
-#   2. For each file that differs from the feature branch, skips anything in
-#      dev/promote-paths.txt (overlay-only) and anything in the overlay allowlist.
-#   3. Refuses to promote a file whose overlay-vs-feature diff still contains a
-#      dev marker (DEV-ONLY / dev-user / __cpDev), so shims can't leak into the
-#      PR. Move that code into dev/ or an untracked module instead.
-#   4. Shows the plan; with --apply, commits the file contents onto the feature
-#      branch as a single commit and returns you to dev/overlay.
+# How it decides what is feature:
+#   * Whole dev files live under paths that never overlap feature code, so they
+#     simply never appear in the overlay-vs-feature diff (see CONVENTIONS).
+#   * Dev code inside a shared file is wrapped in additive sentinel regions:
+#         // DEV-BEGIN ... // DEV-END
+#     Promotion STRIPS those regions; because each region only adds the dev
+#     behavior, removing it restores prod behavior exactly. There is no
+#     allowlist to maintain.
 #
 # Usage:
 #   ./dev/promote.sh            # dry run: show what would be promoted
@@ -27,109 +25,93 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 FEATURE="${PROMOTE_TARGET:-feature/subtunes-as-first-class}"
-PATHS_FILE="dev/promote-paths.txt"
 APPLY=0
 [ "${1:-}" = "--apply" ] && APPLY=1
 
-# Committed dev markers that must never reach the PR.
-MARKERS='DEV-ONLY|dev-user|dev-token|__cpDev'
+# Sentinel pair marking dev-only additive regions. Stripped on promotion.
+BEGIN='DEV-BEGIN'
+END='DEV-END'
 
 die() { echo "promote: $*" >&2; exit 1; }
 
-# 1. Clean worktree?
+# 1. Clean worktree? (so the plan matches exactly what you reviewed)
 if [ -n "$(git status --porcelain)" ]; then
   die "dev/overlay worktree is dirty. Commit or stash, then re-run so the plan matches what you reviewed."
 fi
 
 git rev-parse --verify -q "$FEATURE" >/dev/null || die "branch $FEATURE not found"
 
-# The feature branch is usually checked out in a sibling worktree (so both can be
-# open at once). Operate there rather than failing on a busy branch.
+# The feature branch is usually checked out in a sibling worktree (both open at
+# once). Operate there rather than failing on a busy branch.
 FEATURE_WT="$(git worktree list --porcelain | awk -v b="refs/heads/$FEATURE" '
   $1=="worktree" { wt=$2 } $1=="branch" && $2==b { print wt }')"
-[ -n "$FEATURE_WT" ] || die "$FEATURE is not checked out in any worktree; check it out there first."
+[ -n "$FEATURE_WT" ] || die "$FEATURE is not checked out in any worktree."
 
-# Overlay-only paths (git pathspecs, comments/blank stripped).
-mapfile -t OVERLAY < <(sed -e 's/#.*//' -e '/^[[:space:]]*$/d' "$PATHS_FILE")
-pathspec_exclusions=()
-for p in "${OVERLAY[@]}"; do pathspec_exclusions+=(":(exclude)$p"); done
+# 2. Candidate files: differ from feature.
+mapfile -t CANDIDATES < <(git diff --name-only "$FEATURE"...HEAD -- . 2>/dev/null | sort -u)
 
-# 2. Candidate files: differ from feature, not overlay-only.
-mapfile -t CANDIDATES < <(
-  git diff --name-only "$FEATURE"...HEAD -- . "${pathspec_exclusions[@]}" 2>/dev/null | sort -u
-)
+# Strip DEV-BEGIN..DEV-END regions (inclusive) from stdin.
+strip_regions() {
+  awk -v b="$BEGIN" -v e="$END" '
+    $0 ~ b { skip=1 }
+    skip==0 { print }
+    $0 ~ e { skip=0 }
+  '
+}
 
 plan=()
-blocked=()
-skipped=()
+unbalanced=()
 for f in "${CANDIDATES[@]}"; do
-  [ -e "$f" ] || { plan+=("$f (deleted)"); continue; }
-  diff="$(git diff "$FEATURE"...HEAD -- "$f")"
-  changed_lines="$(printf '%s\n' "$diff" | grep -E '^[+-][^+-]' || true)"
-  marked="$(printf '%s\n' "$changed_lines" | grep -cE "($MARKERS)" || true)"
-  real="$(printf '%s\n' "$changed_lines" | grep -vcE "($MARKERS)" || true)"
-  if [ "$marked" -eq 0 ]; then
-    plan+=("$f")
-  elif [ "$real" -eq 0 ]; then
-    # Every changed line is dev-marked: the overlay delta on this file is purely
-    # dev (the feature branch already has the real content). Skip, don't leak.
-    skipped+=("$f")
-  else
-    # Dev markers mixed with real changes: needs manual reconciliation.
-    blocked+=("$f")
+  [ -e "$f" ] || continue
+  # Balanced sentinel check.
+  nb="$(git show "HEAD:$f" | grep -c "$BEGIN" || true)"
+  ne="$(git show "HEAD:$f" | grep -c "$END" || true)"
+  if [ "$nb" != "$ne" ]; then
+    unbalanced+=("$f")
+    continue
   fi
+  # Promote if stripping regions leaves a difference from the feature branch.
+  if git show "HEAD:$f" | strip_regions | diff -q - <(git show "$FEATURE:$f" 2>/dev/null) >/dev/null 2>&1; then
+    continue  # nothing but dev regions differ
+  fi
+  plan+=("$f")
 done
 
 echo "promote: target $FEATURE"
-echo "promote: overlay-only paths in $PATHS_FILE are skipped"
 echo
 if [ ${#plan[@]} -eq 0 ]; then
   echo "Nothing to promote (feature branch is up to date)."
 else
-  echo "Will promote ${#plan[@]} file(s):"
+  echo "Will promote ${#plan[@]} file(s) (DEV-BEGIN..DEV-END regions stripped):"
   printf '  %s\n' "${plan[@]}"
 fi
-if [ ${#blocked[@]} -gt 0 ]; then
+if [ ${#unbalanced[@]} -gt 0 ]; then
   echo
-  echo "BLOCKED (dev markers mixed with real changes; reconcile manually):"
-  printf '  %s\n' "${blocked[@]}"
-fi
-if [ ${#skipped[@]} -gt 0 ]; then
-  echo
-  echo "Skipped (overlay delta is purely dev; feature branch already correct):"
-  printf '  %s\n' "${skipped[@]}"
+  echo "ERROR (unbalanced $BEGIN/$END sentinels):"
+  printf '  %s\n' "${unbalanced[@]}"
+  die "fix the sentinel regions before promoting"
 fi
 
-if [ ${#blocked[@]} -gt 0 ]; then
-  die "refusing to promote with dev-only content in feature files"
-fi
-if [ ${#plan[@]} -eq 0 ]; then
-  exit 0
-fi
+[ ${#plan[@]} -eq 0 ] && exit 0
 if [ "$APPLY" -ne 1 ]; then
   echo
   echo "Dry run. Re-run with --apply to promote."
   exit 0
 fi
 
-# 3. Copy the candidate files onto the feature branch and commit there.
-START_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+# 3. Write stripped content onto the feature branch and commit there.
 if [ -n "$(git -C "$FEATURE_WT" status --porcelain)" ]; then
   die "feature worktree at $FEATURE_WT is dirty; commit or stash there first."
 fi
-for f in "${CANDIDATES[@]}"; do
-  if [ -e "$f" ]; then
-    # Take this file's committed content from dev/overlay.
-    git show "HEAD:$f" > "$FEATURE_WT/$f"
-  else
-    rm -f "$FEATURE_WT/$f"
-  fi
+for f in "${plan[@]}"; do
+  mkdir -p "$FEATURE_WT/$(dirname "$f")"
+  git show "HEAD:$f" | strip_regions > "$FEATURE_WT/$f"
 done
-if git -C "$FEATURE_WT" diff --quiet && git -C "$FEATURE_WT" diff --cached --quiet; then
+if git -C "$FEATURE_WT" diff --quiet; then
   echo "promote: no changes staged; nothing to commit."
 else
   git -C "$FEATURE_WT" add -A
   git -C "$FEATURE_WT" commit -q -m "Promote feature work from dev/overlay"
   echo "promote: committed on $FEATURE: $(git -C "$FEATURE_WT" rev-parse --short HEAD)"
 fi
-echo "promote: $START_BRANCH unchanged. Push $FEATURE when ready, then rebase dev/overlay onto it."
+echo "promote: dev/overlay unchanged. Push $FEATURE when ready, then rebase dev/overlay onto it."

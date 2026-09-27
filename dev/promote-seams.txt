@@ -1,0 +1,8 @@
+# Files whose overlay-vs-feature diff may legitimately contain dev markers: the
+# small entry "seams" that load untracked dev modules (and nothing else). Keep
+# this list tiny; anything else with dev markers is blocked by dev/promote.sh.
+#
+# These files are FEATURE-owned (the feature branch changes them), so they are
+# promoted whole. Their dev content is limited to the seam lines below.
+server/index.js                 # DEV_AUTH_MODULE require fallback + skia try/catch
+src/components/UserProvider.js  # single DEV_USER env gate

@@ -28,6 +28,7 @@ cd "$ROOT"
 
 FEATURE="${PROMOTE_TARGET:-feature/subtunes-as-first-class}"
 PATHS_FILE="dev/promote-paths.txt"
+SEAMS_FILE="dev/promote-seams.txt"
 APPLY=0
 [ "${1:-}" = "--apply" ] && APPLY=1
 
@@ -47,6 +48,15 @@ git rev-parse --verify -q "$FEATURE" >/dev/null || die "branch $FEATURE not foun
 mapfile -t OVERLAY < <(sed -e 's/#.*//' -e '/^[[:space:]]*$/d' "$PATHS_FILE")
 pathspec_exclusions=()
 for p in "${OVERLAY[@]}"; do pathspec_exclusions+=(":(exclude)$p"); done
+
+# Seam allowlist: feature-owned files that may carry the accepted dev entry lines.
+declare -A SEAM=()
+if [ -f "$SEAMS_FILE" ]; then
+  while read -r line; do
+    set -- $line
+    [ -n "${1:-}" ] && SEAM["$1"]=1
+  done < <(sed -e 's/#.*//' -e '/^[[:space:]]*$/d' "$SEAMS_FILE")
+fi
 
 # 2. Candidate files: differ from feature, not overlay-only.
 mapfile -t CANDIDATES < <(

@@ -30,11 +30,18 @@ const DEFAULT_SETTINGS = {
   showLoopArea: true,
 };
 
+// DEV-ONLY: a fake user so favorites work without Firebase (applied by dev/apply.sh).
+const DEV_USER = process.env.NODE_ENV === 'development' ? {
+  uid: 'dev-user',
+  displayName: 'Dev User',
+  email: 'dev@example.com',
+  getIdToken: async () => 'dev-token',
+} : null;
 
 const UserProvider = ({ children }) => {
   // Use authState hook for user state
   // const [authUser, userLoading] = useAuthState(firebase.auth());
-  const [user, setUser] = useState(null); // Local state for user data
+  const [user, setUser] = useState(DEV_USER); // Local state for user data
   const [faves, setFaves] = useState(() => {
     // Restore favorites from localStorage.
     try {
@@ -45,7 +52,7 @@ const UserProvider = ({ children }) => {
       return [];
     }
   });
-  const [loadingUser, setLoadingUser] = useState(true); // Manage loading state
+  const [loadingUser, setLoadingUser] = useState(!DEV_USER); // Manage loading state
   // Monotonic token so stale favorites refreshes don't overwrite newer ones.
   const favesRefreshToken = useRef(0);
   const [settings, setSettings] = useState(() => {
@@ -61,6 +68,8 @@ const UserProvider = ({ children }) => {
 
 
   useEffect(() => {
+    // DEV-ONLY: skip Firebase when a dev user is injected.
+    if (DEV_USER) return;
     // Initialize Firebase
     const firebaseApp = firebaseInitializeApp(firebaseConfig);
     const auth = getAuth(firebaseApp);

@@ -13,6 +13,14 @@
 #include <emscripten.h>
 #include <emscripten/bind.h>
 
+// seek() and setTempo() are additions in mmontag/libsidplayfp; the official
+// libsidplayfp (v2.9.x) has neither. build-chip-core.js probes the header and
+// sets this to 1 when building against the fork, so the same wrapper works with
+// either core. Without it, seeking and tempo changes are silently ignored.
+#ifndef SIDPLAYFP_HAVE_SEEK
+#define SIDPLAYFP_HAVE_SEEK 0
+#endif
+
 sidplayfp *engine = nullptr;
 SidTune *currentTune = nullptr;
 ReSIDBuilder *builder = nullptr;
@@ -141,7 +149,11 @@ int sid_render(float *bufferL, float *bufferR, int length) {
 
 EMSCRIPTEN_KEEPALIVE
 void sid_set_speed(float ratio) {
+#if SIDPLAYFP_HAVE_SEEK
   engine->setTempo(ratio);
+#else
+  (void) ratio;
+#endif
 }
 
 EMSCRIPTEN_KEEPALIVE
@@ -152,7 +164,11 @@ int sid_get_position_ms() {
 
 EMSCRIPTEN_KEEPALIVE
 void sid_set_position_ms(int positionMs) {
+#if SIDPLAYFP_HAVE_SEEK
   engine->seek(positionMs);
+#else
+  (void) positionMs;
+#endif
 }
 
 EMSCRIPTEN_KEEPALIVE
@@ -192,11 +208,10 @@ void sid_set_subtune(int subtune) {
   currentTune->selectSong(subtune + 1);
   // selectSong() only marks the SidTune's current song; the engine keeps
   // playing the previously loaded one until load() is called again. Without
-  // this, every sub-tune plays song 0 while sid_get_subtune still reports the
-  // requested index.
+  // this, every sub-tune plays song 0 while getInfo()->currentSong() (and so
+  // sid_get_subtune) reports the requested index.
   if (!engine->load(currentTune)) {
-    char const *err = engine->error();
-    fprintf(stderr, "Failed to load sub-tune %d: %s\n", subtune, err ? err : "unknown error");
+    fprintf(stderr, "Failed to load sub-tune %d: %s\n", subtune, engine->error());
   }
 }
 

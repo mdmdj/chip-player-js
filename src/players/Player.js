@@ -306,32 +306,6 @@ export default class Player extends EventEmitter {
       : null;
   }
 
-  // Highlight band for the time slider, in ms, or null when the track defines
-  // no loop region. The band is the LAST loop instance before the fade
-  // (default playback is intro + two passes + fade): that gives the user as
-  // long as possible to decide to stay, and toggling repeat never shifts the
-  // band. Reads the shared intro_length/loop_length vocabulary; engines whose
-  // loop semantics differ override this.
-  getLoopBandMs() {
-    const meta = this.metadata;
-    if (!meta || !Number.isFinite(meta.intro_length) || meta.intro_length < 0 ||
-        !Number.isFinite(meta.loop_length) || meta.loop_length <= 0)
-      return null;
-    const startMs = meta.intro_length + meta.loop_length;
-    let endMs = meta.intro_length + 2 * meta.loop_length;
-    const durationMs = this.getDurationMs();
-    if (durationMs > 0) endMs = Math.min(endMs, durationMs);
-    return endMs > startMs ? { startMs, endMs } : null;
-  }
-
-  // True when playback legitimately runs past durationMs and the engine (not
-  // the base end detector) owns the end: Repeat One, a player's
-  // indefinite-playback setting, or an extended tail left over from leaving a
-  // deep repeat. Position keeps running past durationMs in all of those.
-  isPlayingIndefinitely() {
-    return this.looping;
-  }
-
   setSilenceDuration(seconds) {
     const val = Number(seconds);
     this.silenceDuration = isNaN(val) ? -1 : val;

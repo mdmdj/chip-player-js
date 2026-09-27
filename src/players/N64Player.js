@@ -14,18 +14,6 @@ const INT16_MAX = 32767; // 2^15 - 1
 // in idle-time chunks (like GMEPlayer) instead of one long freeze.
 const SEEK_INCREMENT_MS = 1000;
 
-// Tail-end detector tuning, mirrored from SIDPlayer (probed 2026-09 on SID
-// output, mean-abs per second): music bodies run 0.03-0.16 while ended tails
-// sit at or below ~0.001, so the level gate separates them by 6x or more and
-// the stillness gate (frozen second-means) suppresses quiet-but-alive
-// passages. N64 output is normalized the same way (int16 full-scale), but the
-// levels have not been probed on USF content yet -- verify before trusting the
-// trip on quiet game mixes. Window mirrors GME's 6s silence rule.
-const END_QUIET_MEAN = 0.004;
-const END_STATIC_RANGE = 0.001;
-const END_WINDOW_SEC = 6;
-const END_TAP_STEP = 7;
-
 export default class N64Player extends Player {
   paramDefs = [
     {
@@ -58,25 +46,6 @@ export default class N64Player extends Player {
     this.buffer = this.core._malloc(this.bufferSize * 4); // 2 ch, 16-bit
     this.seekRequestId = null;
     this.seekTargetMs = null;
-    this.resetEndDetector();
-  }
-
-  resetEndDetector() {
-    this.endSecMeans = [];
-    this.endSecSum = 0;
-    this.endSecFrames = 0;
-    this.endDetectTripAtMs = null;
-  }
-
-  // Start of the end-detection trip window, cached per track: durations only
-  // change on load, which resets the detector, so there is no per-callback
-  // lookup.
-  getEndDetectTripAtMs(tuning = null) {
-    const windowSec = tuning?.windowSec ?? END_WINDOW_SEC;
-    if (this.endDetectTripAtMs == null) {
-      this.endDetectTripAtMs = Math.max(0, (this.getDurationMs() || 0) - windowSec * 1000);
-    }
-    return this.endDetectTripAtMs;
   }
 
   loadData(data, filename, persistedSettings) {
@@ -84,7 +53,6 @@ export default class N64Player extends Player {
     // rather than loading bytes from memory like other players.
     cancelIdleCallback(this.seekRequestId);
     this.seekTargetMs = null;
-    this.resetEndDetector();
     let err;
     this.filepathMeta = Player.metadataFromFilepath(filename);
 
@@ -250,7 +218,6 @@ export default class N64Player extends Player {
   seekMs(positionMs) {
     cancelIdleCallback(this.seekRequestId);
     this.seekTargetMs = positionMs;
-    this.resetEndDetector();
     if (positionMs < this.getPositionMs()) {
       // Seeking backward restarts the tune; do that once up front.
       this.core._n64_seek_ms(0);

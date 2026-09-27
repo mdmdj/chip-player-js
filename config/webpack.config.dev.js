@@ -21,6 +21,15 @@ const publicPath = '/';
 // as %PUBLIC_URL% in `index.html` and `process.env.PUBLIC_URL` in JavaScript.
 // Omit trailing slash as %PUBLIC_PATH%/xyz looks better than %PUBLIC_PATH%xyz.
 const publicUrl = '';
+// DEV-ONLY (overlay): inject a fake user so favorites work without Firebase.
+// Read by UserProvider via the DEV-ONLY branch there; absent in prod builds.
+if (!process.env.REACT_APP_DEV_USER) {
+  process.env.REACT_APP_DEV_USER = JSON.stringify({
+    uid: 'dev-user',
+    displayName: 'Dev User',
+    email: 'dev@example.com',
+  });
+}
 const env = getClientEnvironment(publicUrl);
 const protocol = process.env.HTTPS === 'true' ? 'https' : 'http';
 const host = process.env.HOST || '0.0.0.0';

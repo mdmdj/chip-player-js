@@ -35,3 +35,11 @@ src/index.css
 src/winamp.css
 src/components/Slider.js
 src/components/TimeSlider.js
+
+# Engine feature-detection for the fork/newer builds (not part of the feature):
+# these exist only because our engines export APIs the vendored ones don't, so
+# they are engine plumbing, like src/bindings/. GMEPlayer is NOT here: its
+# repeat-one fallback is looping feature work.
+src/players/MIDIPlayer.js
+src/players/N64Player.js
+src/players/XMPPlayer.js

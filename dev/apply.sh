@@ -41,6 +41,10 @@ node dev/patch-user-provider.js
 # 5b. Silent SID fallback (reversible, no backup)
 node dev/patch-sid-stub.js
 
+# 5c. Browser test hooks (window.__cpDev); staged file + reversible patch
+cp dev/shims/devtools.js src/chip-player-devtools.js
+node dev/patch-devtools.js
+
 # 6. Seed sqlite databases (catalog.db is built separately by build-music.js)
 node dev/seed-dbs.js
 

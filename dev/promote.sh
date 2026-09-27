@@ -59,11 +59,12 @@ skipped=()
 for f in "${CANDIDATES[@]}"; do
   [ -e "$f" ] || { plan+=("$f (deleted)"); continue; }
   diff="$(git diff "$FEATURE"...HEAD -- "$f")"
-  marked="$(printf '%s\n' "$diff" | grep -cE "^[+-].*($MARKERS)")"
-  changed="$(printf '%s\n' "$diff" | grep -cE '^[+-][^+-]')"
+  changed_lines="$(printf '%s\n' "$diff" | grep -E '^[+-][^+-]' || true)"
+  marked="$(printf '%s\n' "$changed_lines" | grep -cE "($MARKERS)" || true)"
+  real="$(printf '%s\n' "$changed_lines" | grep -vcE "($MARKERS)" || true)"
   if [ "$marked" -eq 0 ]; then
     plan+=("$f")
-  elif [ "$marked" -ge "$changed" ]; then
+  elif [ "$real" -eq 0 ]; then
     # Every changed line is dev-marked: the overlay delta on this file is purely
     # dev (the feature branch already has the real content). Skip, don't leak.
     skipped+=("$f")

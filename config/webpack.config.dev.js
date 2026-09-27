@@ -170,6 +170,9 @@ module.exports = merge(commonConfig, {
     client: {
       logging: 'none',
       overlay: false, // The original config had this as false.
+      // Connect HMR WebSockets back to whatever host the page was served from
+      // (LAN, WSL, Tailscale, ...) instead of the bind address.
+      webSocketURL: 'auto://0.0.0.0:0/ws',
     },
     headers: {
       'Access-Control-Allow-Origin': '*',
@@ -190,25 +193,6 @@ module.exports = merge(commonConfig, {
       // This service worker file is effectively a 'no-op' that will reset any
       // previous service worker registered for the same host:port combination.
       devServer.app.use(noopServiceWorkerMiddleware('/'));
-
-      // =============================================
-      // use proper mime-type for wasm files
-      // =============================================
-      devServer.app.get('*.wasm', (req, res, next) => {
-        let options = {
-          root: paths.appPublic,
-          dotfiles: 'deny',
-          headers: {
-            'Content-Type': 'application/wasm',
-          },
-        };
-
-        res.sendFile(req.url, options, (err) => {
-          if (err) {
-            next(err);
-          }
-        });
-      });
 
       return middlewares;
     },

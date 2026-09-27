@@ -67,7 +67,9 @@ const chipModules = [
       '_tp_panic_channel',
       '_tp_reset',
     ],
-    flags: [],
+    flags: [
+      '-DTP_ENABLE_ADLMIDI', // compile tinyplayer's OPL3 (libADLMIDI) path back in
+    ],
   },
   {
     name: 'gme',
@@ -93,7 +95,7 @@ const chipModules = [
       '_gme_set_fade',
       '_gme_voice_name',
       '_gme_set_stereo_depth',
-      '_gme_disable_echo',
+      // '_gme_disable_echo', // fork-only API; not in the vendored game-music-emu
       '_gme_enable_accuracy',
     ],
     flags: [
@@ -121,7 +123,7 @@ const chipModules = [
       '_xmp_stop_module',
       '_xmp_restart_module',
       '_xmp_seek_time',
-      '_xmp_seek_time_frame', // accurate seeking introduced in libxmp 4.7.0
+      // '_xmp_seek_time_frame', // libxmp 4.7+; vendored 4.5 falls back to xmp_seek_time
       '_xmp_channel_mute',
       '_xmp_get_player',
       '_xmp_load_module_from_memory',
@@ -197,24 +199,18 @@ const chipModules = [
       '_fluid_synth_get_polyphony',
       '_fluid_synth_set_polyphony',
       '_fluid_synth_bank_select',
-      '_fluid_synth_get_active_voice_count',
     ],
     flags: [],
   },
   {
     name: 'libADLMIDI',
+    // Enabled with the Nuked OPL3 core. The DOSBox core aborts under this
+    // Emscripten build (~DosBoxOPL3 during adl_setBank), so the archive is
+    // built with ADLMIDI_DISABLE_DOSBOX_EMULATOR (see build-subprojects.sh).
     enabled: true,
     sourceFiles: [
-      'chips/dosbox_opl3.cpp',
-      'chips/dosbox/dbopl.cpp',
-      'wopl/wopl_file.c',
-      'inst_db.cpp',
-      'adlmidi.cpp',
-      'adlmidi_load.cpp',
-      'adlmidi_midiplay.cpp',
-      'adlmidi_opl3.cpp',
-      'adlmidi_private.cpp',
-    ].map(file => 'libADLMIDI/src/' + file),
+      '../libADLMIDI/build/libADLMIDI.a',
+    ],
     exportedFunctions: [
       '_adl_init',
       '_adl_panic',
@@ -238,10 +234,9 @@ const chipModules = [
       '-DBWMIDI_DISABLE_XMI_SUPPORT',
       '-DBWMIDI_DISABLE_MUS_SUPPORT',
       '-DADLMIDI_DISABLE_MIDI_SEQUENCER',
-      '-DADLMIDI_DISABLE_NUKED_EMULATOR',
+      '-DADLMIDI_DISABLE_DOSBOX_EMULATOR',
       '-DADLMIDI_DISABLE_JAVA_EMULATOR',
       '-DADLMIDI_DISABLE_OPAL_EMULATOR',
-      // '-DADLMIDI_DISABLE_DOSBOX_EMULATOR', // DOSBOX is recommended OPL3 core
     ],
   },
   {
@@ -378,8 +373,31 @@ const wasmOutFile = 'src/chip-core.wasm';
 const wasmDir = paths.appPublic;
 const wasmMapOutFile = wasmOutFile + '.map';
 const wasmMapDir = path.resolve(paths.appPublic, '..');
+
+// libsidplayfp isn't vendored in this repo; skip that module unless its static
+// lib is present or CHIP_SID=1 is set. Build the rest with CHIP_NO_SID=1.
+const sidLib = '../libsidplayfp/src/.libs/libsidplayfp.a';
+const haveSidLib = (() => { try { return fs.existsSync(sidLib); } catch { return false; } })();
+const wantSid = process.env.CHIP_NO_SID !== '1' && (haveSidLib || process.env.CHIP_SID === '1');
+if (!wantSid) {
+  console.warn('Skipping libsidplayfp module (not vendored). Set CHIP_SID=1 once built.');
+  for (const m of chipModules) if (m.name === 'libsidplayfp') m.enabled = false;
+} else {
+  // seek()/setTempo() are mmontag/libsidplayfp additions; the official core has
+  // neither. Probe the header so the wrapper's guarded calls are compiled in
+  // only when they exist.
+  const sidHeader = ['../libsidplayfp', 'libsidplayfp']
+    .map(dir => path.resolve(path.resolve(__dirname, '..'), dir, 'src/sidplayfp/sidplayfp.h'))
+    .find(h => { try { return fs.existsSync(h); } catch { return false; } });
+  let hasSeek = false;
+  if (sidHeader) {
+    try { hasSeek = /void\s+seek\s*\(/.test(fs.readFileSync(sidHeader, 'utf8')); } catch { /* ignore */ }
+  }
+  chipModules.find(m => m.name === 'libsidplayfp')
+    .flags.push(`-DSIDPLAYFP_HAVE_SEEK=${hasSeek ? 1 : 0}`);
+}
+
 const runtimeMethods = [
-  'ALLOC_NORMAL',
   'FS',
   'UTF8ToString',
   'HEAPU8',
@@ -407,11 +425,17 @@ const flags = [
   '-s', 'EXPORTED_FUNCTIONS=[' + exportedFns.join(',') + ']',
   '-s', 'EXPORTED_RUNTIME_METHODS=[' + runtimeMethods.join(',') + ']',
   '-s', 'ALLOW_MEMORY_GROWTH=1',
-  '-s', 'ASSERTIONS=0',      // assertions increase runtime size about 100K
+  '-s', `ASSERTIONS=${process.env.CHIP_ASSERTIONS || '0'}`, // assertions increase runtime size about 100K
   '-flto',                   // Add Link-Time Optimization
+  // game-music-emu and libvgm both ship a MAME-derived YM2203/YM2608 with the
+  // same global symbols. GME needs its copies (VRC7/Z80 live in the same CMake
+  // block), so let the linker keep the first definition.
+  '-Wl,--allow-multiple-definition',
   '-msimd128',
   // '-s', 'NO_DISABLE_EXCEPTION_CATCHING',
-  '-s', 'MALLOC="emmalloc"', // Use the smaller allocator
+  // emmalloc trips a free-list assertion in _tp_init (libADLMIDI/fluidlite
+  // allocation churn). dlmalloc is larger but robust; overridable for testing.
+  '-s', `MALLOC="${process.env.CHIP_MALLOC || 'dlmalloc'}"`,
   '-s', 'STACK_OVERFLOW_CHECK=0', // Disable runtime stack checks for size
   '-s', 'MODULARIZE=1',
   '-s', 'EXPORT_NAME=CHIP_CORE',
@@ -419,11 +443,13 @@ const flags = [
   '-s', 'USE_ZLIB=1',
   '-s', 'EXPORT_ES6=1',
   // '-s', 'LEGACY_VM_SUPPORT=1',
-  // '-s', 'INITIAL_MEMORY=33554432', // 32MB initial memory; can grow with ALLOW_MEMORY_GROWTH
-  '-s', 'INITIAL_MEMORY=65536000', // 64MB initial memory
+  '-s', `INITIAL_MEMORY=${process.env.CHIP_INITIAL_MEMORY || '134217728'}`, // 128MB initial; grows as needed
+  '-s', `STACK_SIZE=${process.env.CHIP_STACK_SIZE || '5242880'}`, // 5MB stack (Emscripten 6 default)
   '-s', 'WASM_BIGINT',       // support passing 64 bit integers to/from JS
   '-lidbfs.js',
   '-Oz',                     // set to O0 for fast compile during development
+  // Keep function names in the wasm name section for readable stack traces.
+  ...(process.env.CHIP_DEBUG_NAMES ? ['-g2'] : []),
   '-o', jsOutFile,
   /**
    * WASM Source Maps
@@ -447,13 +473,37 @@ const flags = [
 console.log('Compiling to %s...', jsOutFile);
 console.log(`Invocation:\n${compiler} ${chalk.blue(flags.join(' '))} ${chalk.gray(sourceFiles.join(' '))}\n`);
 const preJs = `/*eslint-disable*/`;
-const args = [].concat(flags, sourceFiles);
-const build_proc = spawn(compiler, args, {stdio: 'inherit'});
+
+// The external libraries used to live one level up (../libxmp, ../FluidLite,
+// ...); they are now vendored in this repo. Rewrite a "../name/..." path to
+// "name/..." when the sibling doesn't exist but the in-repo path does.
+const repoRoot = path.resolve(__dirname, '..');
+const normalizeInput = (p) => {
+  // Rewrite include flags too: -I../libvgm -> -Ilibvgm
+  const inc = p.match(/^-I(.*)$/);
+  if (inc) {
+    const target = inc[1];
+    if (!target.startsWith('../')) return p;
+    const local = target.replace(/^\.\.\//, '');
+    const sibling = path.resolve(repoRoot, target);
+    return (!fs.existsSync(sibling) && fs.existsSync(path.resolve(repoRoot, local))) ? `-I${local}` : p;
+  }
+  if (!p.startsWith('../')) return p;
+  const local = p.replace(/^\.\.\//, '');
+  const sibling = path.resolve(repoRoot, p);
+  return (!fs.existsSync(sibling) && fs.existsSync(path.resolve(repoRoot, local))) ? local : p;
+};
+// The compiler is run from the repo root; output paths (src/chip-core.js) are
+// already relative to it.
+const args = []
+  .concat(flags.map(normalizeInput))
+  .concat(sourceFiles.map(normalizeInput));
+const build_proc = spawn(compiler, args, {stdio: 'inherit', cwd: repoRoot});
 build_proc.on('exit', function (code) {
   if (code === 0) {
     console.log(`Built ${wasmOutFile}.`);
     // Don't use --pre-js because it can get stripped out by closure.
     console.log('Prepending %s: %s', jsOutFile, preJs.trim());
-    execSync(`cat <<EOF > ${jsOutFile}\n${preJs}\n$(cat ${jsOutFile})\nEOF`);
+    execSync(`cat <<EOF > ${jsOutFile}\n${preJs}\n$(cat ${jsOutFile})\nEOF`, { cwd: repoRoot });
   }
 });

@@ -2,7 +2,7 @@ import React, { memo, useCallback, useContext } from 'react';
 import TimeSlider from './TimeSlider';
 import VolumeSlider from './VolumeSlider';
 import FavoriteButton from './FavoriteButton';
-import { REPEAT_LABELS, SHUFFLE_LABELS } from '../Sequencer';
+import { REPEAT_LABELS, REPEAT_ONE, SHUFFLE_LABELS } from '../Sequencer';
 import { UserContext } from './UserProvider';
 import DirectoryLink from './DirectoryLink';
 import { getUrlFromFilepath, pathJoin } from '../util';
@@ -26,6 +26,7 @@ function AppFooter(props) {
   const {
     // this.state.
     currentSongDurationMs,
+    currentSongMetadata,
     ejected,
     imageUrl,
     infoTexts,
@@ -64,19 +65,15 @@ function AppFooter(props) {
   const directoryLink = directoryLinkFromFilepath(songPath, isSongFolder);
   const songUrl = getUrlFromFilepath(songPath);
 
-  // The highlighted loop band is engine policy: the player reports it in ms
-  // (see Player.getLoopBandMs) and the footer only maps it onto the slider.
-  // Visual only: hiding the band never changes playback or the head fold.
-  const showLoopArea = settings?.showLoopArea ?? true;
-  const bandMs = showLoopArea ? sequencer?.getPlayer()?.getLoopBandMs?.() || null : null;
-  // Blind loop is player policy (see Player.isBlindLoop); the footer only
-  // asks, so hiding the band (a visual toggle) can never change it.
-  const isBlindLoopNow = () => !!sequencer?.getPlayer?.()?.isBlindLoop?.();
-  const loopStart = bandMs && currentSongDurationMs > 0
-    ? bandMs.startMs / currentSongDurationMs
-    : null;
-  const loopEnd = bandMs && currentSongDurationMs > 0
-    ? Math.min(bandMs.endMs / currentSongDurationMs, 1)
+  // Some formats define a loop region (intro up to intro+loop). GME exposes it
+  // as intro_length/loop_length; show it on the time slider when present.
+  const meta = currentSongMetadata || {};
+  const hasLoopRegion = currentSongDurationMs > 0 &&
+    Number.isFinite(meta.intro_length) && meta.intro_length >= 0 &&
+    Number.isFinite(meta.loop_length) && meta.loop_length > 0;
+  const loopStart = hasLoopRegion ? meta.intro_length / currentSongDurationMs : null;
+  const loopEnd = hasLoopRegion
+    ? Math.min((meta.intro_length + meta.loop_length) / currentSongDurationMs, 1)
     : null;
 
   const handleToggleInfo = useCallback((e) => {
@@ -136,9 +133,23 @@ function AppFooter(props) {
             currentSongDurationMs={currentSongDurationMs}
             loopStart={loopStart}
             loopEnd={loopEnd}
-            getIsBlindLoop={isBlindLoopNow}
-            getCurrentPositionMs={() =>
-              sequencer?.getPlayer?.()?.getDisplayPositionMs?.() ?? 0}
+            getCurrentPositionMs={() => {
+              // TODO: reevaluate this approach
+              const player = sequencer && sequencer.getPlayer();
+              if (!player) return 0;
+              const position = player.getPositionMs();
+              // The player's position keeps counting across native loops. While
+              // repeating a defined region, fold it back so the head follows the
+              // audio instead of pinning at the end. (Not while a late repeat-one
+              // is still playing out to the song end.)
+              if (hasLoopRegion && repeat === REPEAT_ONE && !player.restartAtEndPending) {
+                const loopEndMs = meta.intro_length + meta.loop_length;
+                if (position >= loopEndMs) {
+                  return meta.intro_length + ((position - meta.intro_length) % meta.loop_length);
+                }
+              }
+              return position;
+            }}
             onChange={handleTimeSliderChange}/>
           <VolumeSlider
             onChange={(e) => {

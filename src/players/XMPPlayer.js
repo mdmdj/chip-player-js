@@ -320,10 +320,6 @@ export default class XMPPlayer extends Player {
   }
 
   seekMs(seekMs) {
-    // A seek is not a loop: forget the last position so the landing can't read
-    // as a backward jump. First visits are absolute, so learning continues
-    // across the seek; only a never-linearly-visited start stays unlearned.
-    this._lastPos = -1;
     // xmp_seek_time_frame (libxmp 4.7+) is a more accurate seek; fall back to
     // xmp_seek_time on older builds (same millisecond units).
     if (this.core._xmp_seek_time_frame) {

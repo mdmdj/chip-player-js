@@ -177,8 +177,12 @@ if (USE_GME_SPC)
     set(libgme_SRCS ${libgme_SRCS}
                 Spc_Emu.h
                 Spc_Emu.cpp
+                Spc_Cpu.cpp
+                Snes_Spc.cpp
+                Spc_Dsp.cpp
                 Spc_Filter.cpp
-                Spc_Sfm.cpp
+                # Spc_Sfm.cpp is disabled: gme_sfm_type is not in GME_TYPE_LIST
+                # (blargg_config.h), so it fails to compile. SFM is unused.
                 higan/smp/smp.cpp
                 higan/dsp/dsp.cpp
                 higan/dsp/SPC_DSP.cpp

@@ -16,7 +16,13 @@ const { createProxyMiddleware } = require('http-proxy-middleware');
 const { LRUCache } = require('lru-cache');
 const path = require('path');
 const { performance } = require('perf_hooks');
-const { Canvas, loadImage } = require('skia-canvas');
+// DEV-ONLY: skia-canvas made optional (applied by dev/apply.sh)
+let Canvas, loadImage;
+try {
+  ({ Canvas, loadImage } = require('skia-canvas'));
+} catch (e) {
+  console.warn('[dev] skia-canvas unavailable; /preview disabled.');
+}
 const axios = require('axios');
 const axiosRetry = require('axios-retry').default;
 const { XMLParser } = require('fast-xml-parser');

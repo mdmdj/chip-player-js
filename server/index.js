@@ -16,25 +16,21 @@ const { createProxyMiddleware } = require('http-proxy-middleware');
 const { LRUCache } = require('lru-cache');
 const path = require('path');
 const { performance } = require('perf_hooks');
-const { Canvas: _Canvas, loadImage: _loadImage } = require('skia-canvas');
-let Canvas = _Canvas, loadImage = _loadImage;
-// DEV-BEGIN (stripped for promotion; dev-only skia-canvas fallback)
+// DEV-ONLY (overlay): make skia-canvas optional for local dev.
+let Canvas, loadImage;
 try {
   ({ Canvas, loadImage } = require('skia-canvas'));
 } catch (e) {
   console.warn('[dev] skia-canvas unavailable; /preview disabled.');
 }
-// DEV-END
 const axios = require('axios');
 const axiosRetry = require('axios-retry').default;
 const { XMLParser } = require('fast-xml-parser');
 
 const { dbStatements } = require('./database.js');
-const { requireAuth: _requireAuth, optionalAuth: _optionalAuth } = require('./middleware/auth.js');
-let requireAuth = _requireAuth, optionalAuth = _optionalAuth;
-// DEV-BEGIN (stripped for promotion; dev-only auth override)
-({ requireAuth, optionalAuth } = require(process.env.DEV_AUTH_MODULE || './middleware/auth.js'));
-// DEV-END
+// DEV-ONLY (overlay): DEV_AUTH_MODULE lets the dev bypass live in an untracked
+// file; unset in prod, so this is exactly require('./middleware/auth.js').
+const { requireAuth, optionalAuth } = require(process.env.DEV_AUTH_MODULE || './middleware/auth.js');
 const { validate } = require('./middleware/validate');
 const { SettingsSchema, FavoriteSchema, PlaybackSchema } = require('./schemas');
 

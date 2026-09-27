@@ -74,7 +74,7 @@ By default the dev app uses a silent stub `chip-core.js`. To build a real one
 
 ```sh
 ./scripts/build-subprojects.sh                 # vendored engines
-./scripts/build-libsidplayfp.sh                # SID core (official v2.9.0)
+./scripts/build-libsidplayfp.sh                # SID core (mmontag fork, needs xa65)
 node scripts/build-chip-core.js
 ```
 

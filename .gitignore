@@ -8,6 +8,8 @@ cmake-build-debug/
 *.wasm
 *.wasm.map
 *.db
+*.db-shm
+*.db-wal
 lib*.js
 libxmp/libxmp-lite-stagedir/
 public/soundfonts/
@@ -22,5 +24,8 @@ public/music
 src/config/firebaseConfig.js
 libxmp/a.out.js
 libxmp/lite/Makefile.in
+libxmp/lite/cmake/libxmp-sources.cmake
+libxmp/lite/cmake/libxmp-checks.cmake
 *.backup/
+*.dev-backup
 _ignore/

@@ -115,15 +115,6 @@ export default class SIDPlayer extends Player {
   }
 
   loadData(data, filepath, persistedSettings, subtune = 0) {
-    // DEV-ONLY: silent SID fallback when the core lacks libsidplayfp.
-    if (typeof this.core._sid_init !== 'function') {
-      this.silent = true;
-      this.metadata = { title: pathe.basename(filepath) };
-      this.subtuneDurations = [1000];
-      this.resume();
-      this.emit('playerStateUpdate', { ...this.getBasePlayerState(), isStopped: false });
-      return;
-    }
     if (!this.initialized) {
       this.core._sid_init(this.sampleRate);
       this.initialized = true;
@@ -165,12 +156,6 @@ export default class SIDPlayer extends Player {
   }
 
   processAudioInner(channels) {
-    // DEV-ONLY: silent SID fallback.
-    if (this.silent) {
-      channels[0].fill(0);
-      channels[1].fill(0);
-      return;
-    }
     if (this.paused) {
       channels[0].fill(0);
       channels[1].fill(0);
@@ -258,14 +243,10 @@ export default class SIDPlayer extends Player {
 
 
   getNumSubtunes() {
-    // DEV-ONLY: silent SID fallback.
-    if (this.silent) return 1;
     return this.core._sid_get_num_subtunes();
   }
 
   getSubtune() {
-    // DEV-ONLY: silent SID fallback.
-    if (this.silent) return 0;
     return this.core._sid_get_subtune();
   }
 
@@ -281,21 +262,15 @@ export default class SIDPlayer extends Player {
   }
 
   setTempo(val) {
-    // DEV-ONLY: silent SID fallback.
-    if (this.silent) { this.speed = val; return; }
     this.core._sid_set_speed(val);
     this.speed = val;
   }
 
   getPositionMs() {
-    // DEV-ONLY: silent SID fallback.
-    if (this.silent) return 0;
     return this.core._sid_get_position_ms();
   }
 
   getDurationMs() {
-    // DEV-ONLY: silent SID fallback.
-    if (this.silent) return 1000;
     return this.subtuneDurations[this.getSubtune()];
   }
 
@@ -336,8 +311,6 @@ export default class SIDPlayer extends Player {
 
   stop() {
     this.suspend();
-    // DEV-ONLY: silent SID fallback.
-    if (this.silent) { this.emit('playerStateUpdate', { isStopped: true }); return; }
     this.core._sid_stop();
     console.debug('SIDPlayer.stop()');
     this.emit('playerStateUpdate', { isStopped: true });

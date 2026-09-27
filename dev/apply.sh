@@ -33,13 +33,7 @@ echo "[dev]   staged server/middleware/auth.dev.js (bypass)"
 # 4. Optional skia-canvas patch for server/index.js (reversible, no backup)
 node dev/patch-server.js
 
-# 5. Dev user -> src/components/UserProvider.js (reversible, no backup)
-node dev/patch-user-provider.js
-
-# 5b. Silent SID fallback (reversible, no backup)
-node dev/patch-sid-stub.js
-
-# 5c. Browser test hooks (window.__cpDev). Staged as an untracked, gitignored
+# Browser test hooks (window.__cpDev). Staged as an untracked, gitignored
 # module and picked up by the dev webpack entry; no tracked file is patched.
 cp dev/shims/devtools.js src/chip-player-devtools.js
 echo "[dev]   staged src/chip-player-devtools.js"

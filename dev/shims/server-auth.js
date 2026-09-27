@@ -1,8 +1,10 @@
 // DEV-ONLY authentication bypass.
 //
-// Installed to `server/middleware/auth.js` by `dev/apply.sh` and removed by
-// `dev/remove.sh`. The real `server/middleware/auth.js` is tracked, so it is
-// backed up to `server/middleware/auth.js.dev-backup` on apply.
+// Staged to an untracked, gitignored `server/middleware/auth.dev.js` by
+// `dev/apply.sh`, which sets `DEV_AUTH_MODULE=./middleware/auth.dev.js` in
+// `server/.env.local`. `server/index.js` requires that module instead of
+// `./middleware/auth.js`, so the real middleware is never touched and there is
+// nothing to revert. `dev/remove.sh` deletes the staged file (and .env.local).
 //
 // This bypass:
 //   - never loads Firebase Admin or a service account file,

@@ -16,22 +16,25 @@ const { createProxyMiddleware } = require('http-proxy-middleware');
 const { LRUCache } = require('lru-cache');
 const path = require('path');
 const { performance } = require('perf_hooks');
-// DEV-ONLY: skia-canvas made optional (applied by dev/apply.sh)
-let Canvas, loadImage;
+const { Canvas: _Canvas, loadImage: _loadImage } = require('skia-canvas');
+let Canvas = _Canvas, loadImage = _loadImage;
+// DEV-BEGIN (stripped for promotion; dev-only skia-canvas fallback)
 try {
   ({ Canvas, loadImage } = require('skia-canvas'));
 } catch (e) {
   console.warn('[dev] skia-canvas unavailable; /preview disabled.');
 }
+// DEV-END
 const axios = require('axios');
 const axiosRetry = require('axios-retry').default;
 const { XMLParser } = require('fast-xml-parser');
 
 const { dbStatements } = require('./database.js');
-// DEV-ONLY (overlay): allow an alternate auth module via DEV_AUTH_MODULE so the
-// dev bypass can live in an untracked file without patching this one. Absent the
-// var, this is exactly require('./middleware/auth.js').
-const { requireAuth, optionalAuth } = require(process.env.DEV_AUTH_MODULE || './middleware/auth.js');
+const { requireAuth: _requireAuth, optionalAuth: _optionalAuth } = require('./middleware/auth.js');
+let requireAuth = _requireAuth, optionalAuth = _optionalAuth;
+// DEV-BEGIN (stripped for promotion; dev-only auth override)
+({ requireAuth, optionalAuth } = require(process.env.DEV_AUTH_MODULE || './middleware/auth.js'));
+// DEV-END
 const { validate } = require('./middleware/validate');
 const { SettingsSchema, FavoriteSchema, PlaybackSchema } = require('./schemas');
 

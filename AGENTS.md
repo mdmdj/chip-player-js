@@ -1,0 +1,574 @@
+# AGENTS.md — Sub-songs as first-class songs
+
+This file documents a feature branch and its development setup for AI agents
+(and humans) picking up the work. Read it fully before making changes.
+
+## Project
+
+**chip-player-js** is a web music player for chiptune/game audio formats
+(NSF/NSFE, SID, SPC, VGM, MOD/XM/IT/S3M, MIDI, etc.), by **Matt Montag**.
+React (class + hooks) frontend, Express + better-sqlite3 server, C/C++ player
+engines compiled to WebAssembly via Emscripten.
+
+- Upstream: `git@github.com:mmontag/chip-player-js.git` (remote `upstream`)
+- Our fork: `https://github.com/mdmdj/chip-player-js.git` (remote `origin`)
+- Working branch: `feature/subtunes-as-first-class`
+
+**Important:** Matt has personally given permission for this feature fork, and
+the goal is a merge he will accept. Match existing conventions, keep the diff
+minimal and coherent, and do not ship "slop." Read surrounding code before
+editing; mirror its style (comment tone, SQL formatting, naming, etc.).
+
+## The feature
+
+Today a "song" is a file. Some formats (NSF/NSFE, SID) contain **multiple
+songs (sub-songs / sub-tunes)** in one file. Currently sub-songs have a separate
+UI (footer `Tune N of M`, prev/next buttons), and cannot be favorited, shuffled,
+or handled like single-file songs.
+
+**Goal:** a single-file song and a sub-song are identical in the UI. A file with
+multiple sub-songs is displayed as a **"song folder"**; each sub-song can be
+favorited, looped, shuffled, shared, and (in future) playlisted.
+
+## Dev environment
+
+- Node is pinned via **`.nvmrc`** (`24.21.0`, LTS). Use `nvm use` before any
+  Node/npm command. (`better-sqlite3@12.5.0` supports 20–25, not 26.)
+- Root install: `npm install --ignore-scripts` then `npm rebuild better-sqlite3`.
+  (The unused `sqlite3` devDependency cannot build on Node 24; `--ignore-scripts`
+  skips it. Root `better-sqlite3` is needed by `scripts/build-music.js`.)
+- Server deps: `npm install` inside `server/` (builds `better-sqlite3` and
+  `skia-canvas` fine).
+- **Dev shims** live in `dev/` and are tracked so they can be committed on the
+  feature branch but wiped before PR:
+  - `./dev/apply.sh` — installs stub `src/chip-core.js`, placeholder Firebase
+    config, server auth bypass, optional-skia-canvas patch, a dev-user
+    `UserProvider` patch, a silent-SID fallback patch, seeds `users.db` /
+    `csdb.db`, writes `server/.env.local`, builds `catalog/` +
+    `server/catalog.db`.
+  - `./dev/remove.sh` — reverts everything (in-place patches via `--revert`;
+    wholly replaced files restored from `*.dev-backup`; generated files removed).
+  - `node dev/test-parsers.js` — parser harness (20 checks; synthetic buffers +
+    real files under `catalog/`).
+  - `node dev/test-build.js` — build-music round-trip on a temp catalog subdir
+    (sub-tune rows, dates, idempotency, FK-safe delete); cleans up after itself.
+  - `node dev/test-sequencer.js` — sequencer navigation with a fake player
+    (each sub-tune plays once, mixed contexts advance entry-by-entry). Uses an
+    inline Babel require hook; no new deps.
+  - `./dev/run-tests.sh` — runs all three. Dev-only, not part of the PR.
+  - `dev/README.md` documents the shims.
+- Run the app: `npm run dev` (webpack dev server on :3000, API server on :8080).
+- **Audio:** the dev stub `src/chip-core.js` is a no-op (no audio). A **real
+  chip-core was built** in this session — see "Building the real chip-core"
+  below. It is gitignored and not committed.
+
+### Building the real chip-core (committed separately from the feature)
+
+Real audio works locally. `scripts/build-subprojects.sh` + changes to
+`scripts/build-chip-core.js` build all vendored engines into
+`src/chip-core.{js,wasm}`. This work touches vendored trees and is **not part of
+the sub-tunes feature**; it is committed as `704be2f17` (WIP snapshot) and
+`61817ac30` (YM2612 fix) and must be reverted or split out before the PR. See
+"Audio engine roadmap" for what remains.
+
+Prereqs (Arch): `sudo pacman -S cmake emscripten` (emcc lands in
+`/usr/lib/emscripten`, added by `/etc/profile.d/emscripten.sh`; the script adds
+it to PATH). Then:
+
+```sh
+./scripts/build-subprojects.sh          # all vendored engines
+./scripts/build-libsidplayfp.sh         # SID core (official v2.9.0 tarball)
+node scripts/build-chip-core.js
+```
+
+Build env vars (all optional):
+- `CHIP_NO_SID=1` — skip libsidplayfp. Default already skips when the lib is
+  absent.
+- `CHIP_ASSERTIONS=2` — assertions + readable aborts (diagnostics).
+- `CHIP_DEBUG_NAMES=1` — keep wasm function names for stack traces.
+- `CHIP_MALLOC=dlmalloc|emmalloc` — allocator (default `dlmalloc`).
+- `CHIP_INITIAL_MEMORY`, `CHIP_STACK_SIZE` — heap/stack sizing.
+
+Status: **GME, libvgm, libxmp, N64 (lazyusf2), V2M, MDX, fluidlite MIDI, SID,
+libADLMIDI (OPL3 MIDI)** build and run.
+
+Vendored-tree fixes needed to build (all pre-existing upstream breakage):
+- `game-music-emu/gme/CMakeLists.txt`: exclude `Spc_Sfm.cpp` (SFM type disabled);
+  add missing `Spc_Cpu.cpp`/`Snes_Spc.cpp`/`Spc_Dsp.cpp` (needed by SPC + VRC7).
+- `game-music-emu/gme/blargg_source.h`: define `debug_printf` in the `NDEBUG`
+  branch (missing; breaks with `HAVE_ZLIB_H`).
+- `libvgm/player/CMakeLists.txt`: drop stale `player_wrapper.cpp` reference (the
+  file moved to `src/bindings/` in `cad9a5545` and was never re-added).
+- `src/bindings/libvgm-wrapper.cpp`: compat defines (`DEVID_MSM6258/6295` →
+  `DEVID_OKIM6258/6295`, `PLAYTIME_*`, drop `parentIdx`).
+- libvgm uses its own iconv charset conversion (`utils/StrUtils-CPConv_IConv.c`);
+  Emscripten's musl iconv supports the tags libvgm needs (UTF-16LE/CP1252/CP932).
+  The libvgm configure passes `-DIconv_LIBRARY=c` because CMake's `FindIconv`
+  detects iconv built into libc but then fails its `find_library(c)` check. (An
+  earlier no-op `src/bindings/cpconv-shim.c` was removed: it passed UTF-16LE
+  bytes through untouched, truncating VGM GD3 tags.)
+- `scripts/build-chip-core.js`: `--allow-multiple-definition` (GME and libvgm both
+  ship MAME YM2203/YM2608 globals); in-repo `../`→local path normalization; drop
+  dead `ALLOC_NORMAL` export; SID/SGC skip logic.
+- `src/libxmp-lite`: built directly from `libxmp/src` + lite `format.c` /
+  `mod_load.c` (the lite CMake project doesn't configure under CMake 4).
+- `src/players/{GME,XMP,MIDI}Player.js`: feature-detect fork-only APIs
+  (`gme_disable_echo`, `xmp_seek_time_frame`) and ADLMIDI bank options.
+
+**libADLMIDI (OPL3 MIDI)** is built with the **Nuked** OPL3 core, not DOSBox.
+The DOSBox core aborts in `~DosBoxOPL3` (`emscripten_builtin_free`) under this
+Emscripten build, so `build-subprojects.sh` compiles ADLMIDI with
+`ADLMIDI_DISABLE_DOSBOX_EMULATOR` and without `ADLMIDI_DISABLE_NUKED_EMULATOR`,
+and `build-chip-core.js` enables the module and passes `-DTP_ENABLE_ADLMIDI` to
+`tinyplayer.c`. The archive is built without `-flto` (global LTO corrupts its
+C++ object model). Bank selection and OPL3 playback work; `tinyplayer.c` keeps
+`adl_setNumChips` at the default 1 chip.
+
+**libvgm YM2612 core:** libvgm registers the YM2612 device (`SNDDEV_YM2612`) only
+when at least one YM2612 core is compiled, and `devDefList_YM2612` picks GPGX
+first. The GPGX core (`fmopn.c`) loads YM2612 VGMs but never advances them under
+Emscripten (position stuck at 0). Fix: `build-subprojects.sh` builds both
+`SNDEMU_YM2612_GPGX=ON` and `SNDEMU_YM2612_GENS=ON` so the device stays
+registered, and `libvgm-wrapper.cpp` forces `emuCore[0] = FCC_GENS` for the
+YM2612 device after `LoadFile` (same pattern as the SN76496→Maxim and
+YMF278B→MAME overrides). Do **not** disable GPGX alone: with no YM2612 core the
+device is unregistered and every VGM using it fails with
+`RuntimeError: null function`.
+
+**Known issue — N64 seek freeze (pre-existing, not our feature):**
+`N64Player.seekMs` → `_n64_seek_ms` → `decode_seek`
+(`src/bindings/lazyusf2-wrapper.cpp:368`) synchronously renders every sample to
+the target on the main thread, freezing the UI (felt as ~5s). GME avoids this
+with a timesliced seek (`GMEPlayer.doIncrementalSeek`, `requestIdleCallback`).
+N64 would need the same treatment.
+
+**SID:** built from the official `libsidplayfp` v2.9.0 release tarball by
+`scripts/build-libsidplayfp.sh` (not vendored; installs to `../libsidplayfp`).
+v2.9.0 is deliberate: it is the last release with the classic `ReSIDBuilder` the
+wrapper uses, and its tarball ships the generated 6502 driver `.bin` files, so
+no `xa65` is needed. **mmontag/libsidplayfp is not usable:** its
+`montag-dev-2.14` branch pins reSID submodule commits (`1a0cca72`, `13c9e853`)
+that were never pushed to the public `libsidplayfp/resid` repo, so
+`git submodule update` fails and the fork cannot be cloned reproducibly. The
+fork-only `seek()`/`setTempo()` (and reSID `sync_silently`) exist only in those
+unpushed commits. `build-chip-core.js` probes the header and defines
+`SIDPLAYFP_HAVE_SEEK=0` for the official core, so `sid_set_position_ms` and
+`sid_set_speed` are compiled to no-ops (playback position still tracks;
+seeking and speed changes do nothing until the fork's reSID is available).
+`dev/patch-sid-stub.js` (silent SID) only applies to cores without `_sid_*`
+exports and does not trigger now.
+
+`sid_set_subtune` must call `engine->load(currentTune)` after `selectSong()`:
+selectSong only marks the `SidTune`'s current song, so without the reload the
+engine keeps playing song 0 while `sid_get_subtune()` reports the requested
+index (every sub-tune sounds identical).
+
+### Dev environment gotcha
+
+The T3 Code browser-preview tab logs an Electron sandbox error
+(`Electron sandboxed_renderer.bundle.js script failed to run` /
+`Cannot destructure property 'preloadScripts' of 'binding.startupData'`) and a
+blank tab shows `chrome-error://chromewebdata/`. It still works once you
+navigate it to `http://<host>:8080` (e.g. `mms-1:8080`); drive the app there or
+verify quickly over HTTP with `curl http://localhost:8080/api/...`.
+
+**Keep tool requests small — treat this as a hard rule.** The frequent failure
+is the LLM provider rejecting an entire turn once the session context grows
+large, not the tool transport itself. Measured from `~/.local/share/opencode`
+(`opencode.log` + `opencode.db`): with `deepseek-v4.1-flash`, sessions up to
+~1.8 MB of accumulated message parts completed, while sessions past ~3 MB
+returned HTTP 400 (`AI_APICallError: Bad Request`, mid-stream) on every retry.
+Context is cumulative, so a few large tool results early poison the rest of the
+session — retrying in the same session does not recover, so start a new session
+per task. Rules:
+- `evaluate`: one step per call. No long inline scripts, big loops, or
+  returning arrays/objects of rows. Stash state on `window`/`localStorage` and
+  reuse it; return only the few scalar fields you need. If it's more than ~2-3
+  lines, split it into separate calls.
+- `snapshot`: pass `includeImage:false`; never dump the accessibility tree,
+  console, and network at once; prefer a targeted `evaluate`.
+- `read`: read a small range (`offset`/`limit`, ~40 lines) around the target;
+  `grep` for the line first. Don't re-read whole large files.
+- `bash`: redirect noisy output to a log under `/tmp/opencode` and print only a
+  few lines (`tail -5`, `grep -c`). Never `find /` or dump full build logs.
+- Session hygiene: outputs are cumulative and cannot be removed from context.
+  Never paste whole files, whole logs, large JSON, or screenshots into context;
+  prefer counts, short tails, scoped ranges, and summaries. If a turn starts
+  returning provider 400s, start a fresh session rather than retrying.
+
+Separate, rarer tool-layer flakes exist and are not this issue: the preview
+automation can drop a tab (`No active preview tab` / `evaluate failed`), and
+`pkill -f <pattern>` can match the shell running it. Re-open/re-navigate the
+preview or rerun the command when that happens.
+
+**Verifying playback from the preview.** The app exposes itself as
+`window.ChipPlayer` and the live wasm core as `window.ChipPlayer.chipCore`, so
+you can drive the exported `_*` functions directly from `evaluate` and measure
+the rendered audio instead of listening. E.g. `_sid_init(48000)`,
+`_sid_load_data`, then sum `HEAPF32` over a `_malloc`'d buffer filled by
+`_sid_render`: files/sub-tunes that are actually different give clearly
+different totals (all-equal energies usually mean selection isn't switching —
+that's how the `sid_set_subtune` bug was caught). Two preview gotchas:
+`preview_navigate` to the *same* URL may not re-instantiate the wasm, so append
+a cache-buster (`?r=2`) to force a real reload; and `Player.copyToHeap` does
+`HEAPU8.set(data, ptr)`, which silently copies nothing when `data` is an
+`ArrayBuffer` — pass a `Uint8Array` (as `Sequencer.playSongBuffer` does). Start
+direct probe sessions on a fresh page so they don't collide with the player's
+own core state.
+
+### Dev catalog fixtures
+
+`catalog/` is gitignored and user-supplied. As of this branch it holds a
+mixed-format set useful for manual testing: the Famicompo NSFE tree (many
+multi-song files), a `sid/` set, `n64/Blast Corps/` (65 `.miniusf` + one
+shared `.usflib`), `mods/` (`.S3M`), `midi/`, and a `.vgz`. Rebuild with
+`node scripts/build-music.js -n` after changing it. Note `.usflib` companions
+are intentionally not indexed but must stay next to their `.miniusf`; a
+gzipped VGM must use the `.vgz` extension (`.gz` is not recognized).
+
+## Catalog / server data model
+
+### Parsers (`scripts/metadata-parsers.js`)
+
+- `parseNSF`: songs at header `0x06` (count), `0x07` (1-based start).
+- `parseNSFe`: chunked format, tags are **forward ASCII** (`INFO`, `auth`,
+  `tlbl`, `plst`, `time`, `fade`, `NEND`), stream starts at offset 4 (no
+  embedded NSF header). `INFO.track_count` (data offset +8) is the number of
+  *physical* tracks; `plst` (byte array of physical indices) is the
+  authoritative sub-song list AND order. **This mirrors game-music-emu**
+  (`game-music-emu/gme/Nsfe_Emu.cpp:34-46,199-202`): with a non-empty playlist
+  `track_count = playlist.size()` and track N remaps to `playlist[N]`;
+  otherwise all physical tracks are used 1:1. `tlbl` gives per-track labels.
+  NSFE `first_track` is **0-based** (store as `startingSong = first + 1`).
+- `parseSID`: PSID/RSID. Strings at fixed offsets `0x16/0x36/0x56` (32 bytes
+  each). Song count word at `0x0E`, start song at `0x10`. v2+ packed
+  PAL/NTSC speed bits at `0x18`, bit i => PAL. **Do not** read strings from the
+  header offset field at `0x06` (that is the *data* offset).
+- Release dates: the formats don't have a dedicated date field, so `extractDate`
+  scrapes a year (or full date) out of free-form strings — NSF/NSFE/SID
+  `copyright` / `released` (e.g. `"1988 Konami"`, `"(C)1984 CAPCOM"`,
+  `"2008-2009"`), and VGM GD3's explicit release date. Missing parts default to
+  Jan 1 (`"2003"` -> `"2003-01-01"`). `meta.date` is stored on `music` as
+  `release_date`; `describeSubtunes` also honors a per-track `meta.trackDates`
+  (no parser emits one yet, but the resolution chain supports it).
+- Real-file counts were validated against GME semantics (e.g. Castlevania III
+  = 36 not 242; Gimmick! = 73 not 106; Gradius II plain NSF = 65 but
+  Gradius II NSFE = 16, because only NSFE has `plst`).
+
+### Schema (`scripts/build-music.js`)
+
+`music` = one row **per file** (the downloadable unit). `subtune_count`
+(denormalized) is the number of playable sub-songs (1 = single song).
+`music.release_date` is the metadata date (ISO), and `subtune.date` a
+per-sub-tune date (currently always NULL).
+
+```sql
+CREATE TABLE subtune (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  music_id INTEGER NOT NULL,
+  subtune INTEGER NOT NULL,   -- 0-based, matches player subtune index
+  title TEXT,
+  length_ms INTEGER,
+  date TEXT,                  -- per-sub-tune date, when a format provides one
+  sort_order INTEGER DEFAULT 0,
+  UNIQUE(music_id, subtune),
+  FOREIGN KEY(music_id) REFERENCES music(id)
+);
+CREATE INDEX idx_subtune_music ON subtune(music_id);
+```
+
+- Only multi-song files get `subtune` rows. A single-song file has none, so a
+  sub-song and a plain song are the same kind of thing to the client.
+- `subtune.title` is set only when the format provides a label; otherwise it is
+  `NULL` and clients fall back to `Tune N`. (`describeSubtunes` no longer invents
+  a `Song N` placeholder — that was inconsistent with the fallback.)
+- `subtune_fts` (fts5, `content='subtune'`) + `ai/ad/au` triggers mirror
+  `music_fts`, making sub-song titles searchable.
+- `processFile` clears a file's old sub-tune rows **before** the
+  `INSERT OR REPLACE` on `music` (foreign keys are enforced, so the replace
+  would otherwise fail). A `ensureColumn` shim adds `release_date`/`date` to
+  DBs created before those columns existed.
+- `--reset-db` drops child tables **before** `music` (FK order).
+- Incremental runs are idempotent (verified, including reprocessed multi-song
+  files). A `subtunes` JSON column was tried and **removed** in favor of the
+  normalized table.
+
+Verified on the real catalog: 1244 files, 621 subtune rows, 59 multi-song files,
+428 files with a parsed `release_date`.
+
+### Server API (`server/database.js`, `server/index.js`)
+
+- `getDirChildrenStmt` now returns `subtune_count`.
+- New: `searchSubtuneStmt`, `getSubtunesStmt`, `getSubtuneMetadataStmt`.
+- `/browse`:
+  - In a directory, a file with `subtune_count > 1` is `type: 'songfolder'`
+    with `count = subtune_count`, `url: null`. Client navigates to
+    `/browse/<path>` like a directory. A file/folder row's `mtime` prefers the
+    parsed `release_date` over the file system mtime.
+  - When `path` names a multi-song file, returns its sub-tunes as
+    `type: 'file'` rows with `name` (label, or `Tune N` when unlabeled),
+    `subtune`, `song_id`,
+    `durationMs`, `url = /?play=<songId>&subtune=N`. Each row reuses the parent
+    file's `size`, and `mtime` resolves **subtune date -> file `release_date` ->
+    file system mtime** (as Unix seconds).
+- `/search` unions `searchStmt` (file titles) and `searchSubtuneStmt`
+  (sub-song titles); sub-song hits carry `subtune` + `title`, and files already
+  matched at file level are de-duplicated.
+- `/metadata?path=...&subtune=N` returns `subtuneTitle`.
+- `/shuffle` and `/random` return `{path, subtune}`; a multi-song file shuffles
+  as a random sub-song.
+- `/playback` accepts `subtune`; `playbacks` gains a `subtune` column
+  (idempotent `ALTER TABLE` in `server/database.js`, also in the dev seed).
+  `/top` (global, user, and metric=favorites) groups by `(song_id, subtune)`
+  and returns `subtune`, `subtune_count`, and `subtune_title`.
+
+## Client identity model: `SongRef`
+
+A playable thing is `{ path: string, subtune: number }` (subtune 0 for
+single-song files). Helpers in `src/util.js`:
+
+- `songRef(pathOrRef, subtune = 0)` — normalize string/object/item to SongRef.
+- `songRefKey(pathOrRef, subtune = 0)` — stable identity string (NUL separator),
+  for `===`-style comparisons and React keys.
+- `songRefsEqual(a, b)`.
+
+`src/Sequencer.js` (updated):
+- `context` is an array of SongRefs; `playContext` normalizes via `songRef`.
+- `playContext(context, index = 0, subtune = null)` — `subtune` is now an
+  **optional override** for the first song (used by `?play=...&subtune=N`);
+  normally the sub-tune lives in the SongRef.
+- `playCurrentSong()` / `currContextRef()` derive the ref (shuffle-aware).
+- `playSong(songRefOrPath)` accepts a ref or bare string; sets
+  `currSongRef` (and `currSongPath` for the player/UI/metadata).
+- Emits `songRef` in `sequencerStateUpdate`.
+- `getCurrSongRef()` added.
+- **Sub-tune navigation is the sequencer's job, not the player's.** A player
+  plays exactly one song and stops (`Player.handleSongEnd` no longer chains
+  `playSubtune(next)`), so `nextSong()` advances one context entry. Every
+  sub-tune is its own SongRef/context entry, which makes a directory of MIDI
+  files, a song folder, and a mixed search/favorites context behave the same.
+  The old footer `Tune N of M` + back/forward UI is gone; `currentSongSubtune`
+  / `currentSongNumSubtunes` state, `Sequencer.prevSubtune` / `nextSubtune` /
+  `getSubtune` / `playSubtune`, and `App`'s sub-tune props were removed. The
+  only place a sub-tune index lives is the SongRef.
+
+`src/util.js`: `getMetadataUrlForFilepath(filepath, subtune = null)` appends
+`&subtune=`. `songRefListsEqual` compares two ordered SongRef lists (needed
+because `Sequencer` copies its context).
+
+## Favorites / migration notes
+
+- Favorites are stored per user as JSON `{songId, mtime, href|path, subtune}` in
+  `user_db.playlists` (type `favorites`). `songId` is the **file** hash, so the
+  sub-tune is what distinguishes entries.
+- **Old favorites keep working:** a missing `subtune` means sub-tune 0 / the
+  parent file. Add optional `subtune`; do not rewrite old rows. For a multi-song
+  file this resolves to the song-folder entry.
+- Share links are canonical as `/?play=<songId>&subtune=N`
+  (`App.getCurrentSongLink`, `App.js` startup parse). No link migration.
+- `getFavoritesStmt` decorates each item with `href`, `path`, `size`,
+  `subtuneCount`, and `subtuneTitle` (looked up by `(music_id, subtune)`). The
+  Favorites list shows the label, or `Tune N` when unlabeled; toggling
+  re-fetches so optimistic entries get the same decoration.
+- **Testing favorites in the dev app:** the server auth bypass makes the API
+  usable, but the client's own `user` state (Firebase) stays null. The
+  `dev/patch-user-provider.js` shim injects a fake `user` with `getIdToken()`
+  (uid `dev-user`, token `dev-token`), so the heart button and favorites API
+  work in the browser. It is backed up/restored by `dev/apply.sh` /
+  `dev/remove.sh`.
+
+## Current state
+
+**Done and verified:**
+1. Parsers (NSF/NSFE/SID) with sub-tune counts/labels — tested.
+2. Normalized schema (`subtune` table, `subtune_count`, `subtune_fts`) —
+   rebuilt and verified against the real catalog.
+3. Server API: `/browse` songfolder + sub-tune listing, `/search` union,
+   `/metadata` subtune title — verified via curl.
+4. `SongRef` helpers in `util.js`; `Sequencer` migrated to SongRef contexts.
+   Sub-tune navigation is sequencer-owned: the player plays one song and stops,
+   and every sub-tune is its own context entry (see `src/Sequencer.js` notes).
+5. Client migrated to SongRefs: `App.js` (`directoryListingToContext`,
+   `fetchDirectory`, `getCurrentSongLink` from `currSongRef.subtune`,
+   `songTitleKey`/`subtuneTitle` metadata), `VirtualizedList` (`songRefKey`
+   highlight, `songfolder` navigates), `Browse` (`<SONGS>` rows),
+   `Favorites`/`FavoriteButton`/`UserProvider` (keyed by `(path, subtune)`,
+   grouped under directory/song-folder headings), `Search` (sub-tune hits),
+   `AppFooter` (favorite + share link carry subtune), `LocalFiles`/`TopCharts`
+   (SongRef contexts). The footer's sub-tune-specific nav/label is gone.
+6. Server `/shuffle` and `/random` return `{path, subtune}`; a multi-song file
+   shuffles as a random sub-song. (`/random` had a latent leading-slash bug;
+   fixed.)
+7. Favorites server: `FavoriteSchema.subtune`, add/remove statements keyed by
+   `(path, subtune)` — verified via curl (add two sub-tunes + a plain file,
+   then remove one sub-tune and confirm the others remain). `getFavoritesStmt`
+   also decorates items with `size` and `subtuneTitle`, so the Favorites list
+   shows the catalog title and falls back to `Tune N`. UI-verified in the dev
+   app, including legacy favorites without `subtune` and per-sub-tune isolation.
+8. Dates and sizes: parsers scrape a release date from free-form metadata
+   (`extractDate`), stored as `music.release_date` / `subtune.date`; `/browse`
+   sub-tune rows resolve date as subtune -> file metadata -> file mtime, and
+   reuse the parent file's `size`. File/songfolder rows also prefer
+   `release_date` over mtime. `processFile` clears sub-tune rows before the
+   `music` REPLACE (FK ordering fix for incremental reprocessing).
+9. `AppFooter` shows the full song-folder path (and links into it) for
+   multi-song files; `isSongFolder` is derived from `/metadata`'s
+   `subtuneCount` (catalog) with a cached `subtuneTitle` as fallback (the dev
+   stub doesn't report sub-tunes).
+10. `playbacks.subtune` + sub-tune-aware Top Charts: `/playback` carries the
+    sub-tune, and the global/user/favorites top queries group by
+    `(song_id, subtune)`, returning `subtune`/`subtune_count`/`subtune_title`
+    so `TopCharts.js` labels and plays the exact sub-song.
+11. Downloads: `getUrlFromFilepath` encodes per path segment, so browsers name
+    downloads correctly instead of using the whole path.
+12. Real audio locally: a chip-core wasm build works (GME/libvgm/libxmp/N64/
+    V2M/MDX/fluidlite MIDI). Uncommitted, separate from the feature — see
+    "Building the real chip-core".
+
+**Caveat:** `Sequencer.playContext` copies its context, so array-identity
+checks no longer work. Compare a live context to a stored one with
+`songRefListsEqual` (used by the local-files checks in `App` and the
+`LocalFiles` highlight); compare rows with `songRefKey`.
+
+## Session hand-off notes (read me first)
+
+- **Committed feature work:** branch `feature/subtunes-as-first-class`; the
+  sub-tunes feature is squash-committed and verified (see "Current state"). The
+  audio build + dev shims are now also committed but are **not part of the
+  feature**: `704be2f17` ("Save WIP before libvgm work") snapshots the emscripten
+  build, loop/remote-dev changes, and dev shims; `61817ac30` fixes libvgm
+  YM2612. Revert or split these out before the PR. The tracked tree is otherwise
+  clean (only gitignored generated files and `*.dev-backup` remain).
+- **Build/tooling that must not ride the feature PR:** `scripts/build-subprojects.sh`,
+  `scripts/build-chip-core.js`, `scripts/build-libsidplayfp.sh`,
+  `src/bindings/{libvgm-wrapper.cpp,libsidplayfp-wrapper.cpp}`,
+  `src/tinyplayer.c`, `src/players/{GME,MIDIPlayer,N64,SID,XMP}Player.js`, the
+  vendored-tree edits (`game-music-emu/`, `libvgm/`), `dev/`, and
+  `config/webpack.config.dev.js`'s `webSocketURL`. See "Building the real
+  chip-core" and "Audio engine roadmap".
+- **Remote dev access (LAN/WSL/Tailscale):** fixed, dev tooling only (not the
+  feature). Two root causes:
+  - `scripts/start.js` built its own minimal `WebpackDevServer` options and
+    silently ignored the whole `devServer` block in
+    `config/webpack.config.dev.js`, so `allowedHosts: 'all'` never applied and
+    the WS `Host`/`Origin` check rejected remote clients (`Invalid Host/Origin
+    header`, reconnect loop). It now spreads `config.devServer`. This also makes
+    the block's `hot: false` effective (HMR off, full live reload) and enables
+    its middleware. The stale `.wasm` middleware had to be removed because it
+    served from `public/` and 404'd the emitted `static/js/chip-core.*.wasm`;
+    webpack-dev-middleware already serves it as `application/wasm`.
+  - `src/config/index.js` hardcoded `http://localhost:8080` for the dev API,
+    catalog, and soundfonts, so a remote browser called its own localhost
+    (`ERR_CONNECTION_REFUSED`). It now uses `window.location.hostname`
+    (falling back to `localhost` in Node). Restart `npm run dev` after changing
+    either file.
+- **Test audio on a remote machine:** start `npm run dev`, then browse the
+  remote host on :8080 (the Express server proxies to WDS :3000). Verified via
+  the T3 preview at `mms-1:8080`: API/wasm/catalog/soundfont requests 200, WS
+  opens, and a clicked song plays. The `/preview` route needs skia-canvas;
+  everything else is fine over Tailscale.
+- **Verified playing:** NSF/NSFE/SPC/GBS/AY (GME), VGM/VGZ/GYM/S98/DRO (libvgm,
+  including the YM2612 Gens fix), TG16/Game Boy/Neo Geo/Capcom/Konami VGZs,
+  MOD/S3M/XM/IT (libxmp-lite), N64 `.miniusf`, V2M, MDX, MIDI (fluidlite + a
+  SoundFont), SID (official core; sub-tune switching verified). Repeat-one over
+  loop regions and the slider loop band are verified.
+- **Still broken / missing:** SID seek/tempo
+  are stubbed (official core); N64 seek freezes ~5s (pre-existing). See
+  "Audio engine roadmap" for the ordered plan.
+
+## Remaining TODO / roadmap
+
+1. Testing. Dev-only harnesses now cover parsers (`dev/test-parsers.js`) and a
+   build-music round-trip (`dev/test-build.js`), run via `./dev/run-tests.sh`.
+   They are removed with `dev/` before the PR, which still ships without tests
+   (matching the repo, which has no test runner or CI). If Matt wants a durable
+   suite, the same harnesses could move to a tracked `test/` dir and run via
+   `node --test` with no new deps.
+2. Known unsupported formats (don't add to `FORMATS` without a player/parser):
+   plain `.usf` sets (only `.miniusf` is supported), PSF/PSX (`psflib` is reused
+   only by the USF loader; no PSX core), and PSM (`libxmp-lite` = it/mod/s3m/xm;
+   the files here are the MASI variant, which needs full libxmp).
+3. **Audio engine roadmap** (separate from the feature; see "Building the real
+   chip-core"). Ordered by impact × risk:
+   - **Done:** emscripten build of GME/libvgm/libxmp/N64/V2M/MDX/fluidlite; YM2612
+     fixed (force the Gens core); GME↔libvgm symbol clash masked with
+     `-Wl,--allow-multiple-definition`.
+   - **(1) SID — done (official core), fork path still open.** Built from the
+     official `libsidplayfp` v2.9.0 tarball (`scripts/build-libsidplayfp.sh`);
+     verified rendering, sub-tunes, sub-tune switching, voice mask, and voice
+     groups. `seek()`/`setTempo()` are compiled out because mmontag's fork pins
+     unpushed reSID commits (see "SID" above). To get seek/tempo parity, someone
+     must publish those reSID changes (or find the upstream PR); then point the
+     build at the fork and `SIDPLAYFP_HAVE_SEEK` flips on automatically.
+   - **(2) GME → `mmontag/game-music-emu` fork + newer libxmp, and prune GME.**
+     Restores `gme_disable_echo` / `xmp_seek_time_frame` /
+     `fluid_synth_get_active_voice_count` (all feature-detected today). While
+     there, delete the `--allow-multiple-definition` hack by not linking GME's
+     OPN copy at all (trap below).
+   - **(3) Per-engine wasm modules (isolation epic).**
+     One Emscripten `Module` per engine (own linear memory/FS) instead of one
+     flat blob with global C symbols. Matches the existing per-extension player
+     design (`Sequencer.players.find(canPlay)`, libvgm `SetDeviceOptions(FCC_*)`,
+     soundfonts via `_tp_*`) and contains the C-global "virus" at a module
+     boundary. Caveats: each module owns its heap/FS, so soundfont loading and
+     the shared visualizer (`_cqt_*`) need a plan (MIDI's soundfont FS moves with
+     the MIDI module). Prefer static per-engine modules over Emscripten
+     `SIDE_MODULE`/`dlopen` (dynamic linking is high-risk: memory growth, GOT,
+     async init, and the audio callback wants synchronous calls).
+   - **(4) libADLMIDI (MIDI OPL3) — done (Nuked core).** Enabled and playing;
+     the `~DosBoxOPL3` abort is avoided by building Nuked instead (see
+     "libADLMIDI" above). Isolation (step 3) would still shrink the blob and
+     contain its OPL cores, but is no longer required to ship OPL3 MIDI.
+   - **(5) N64 seek freeze — done.** `N64Player.seekMs` now timeslices
+      `_n64_seek_ms` in idle callbacks like GMEPlayer (pre-existing bug,
+      unrelated to the feature; committed separately).
+
+   **Traps / learnings:**
+   - `SNDDEV_YM2612` is registered only when a YM2612 core is compiled. Disabling
+     GPGX alone drops the device and every YM2612 VGM throws
+     `RuntimeError: null function`. Keep GPGX compiled and force `FCC_GENS`
+     per-device in the wrapper (see "libvgm YM2612 core" above).
+   - `--allow-multiple-definition` is luck, not safety: GME's
+     `fm.c`/`fm2612.c`/`Ym{2203,2612}_Emu` and libvgm's `fmopn.c` export the same
+     MAME OPN C globals (`ym2203_init`, `ym2612_write`, `OPNWriteMode`,
+     `FM_OPN`). C has no namespaces and static archives don't scope symbols, so
+     one copy is silently dropped. Prefer not linking the unused copy (GME only
+     needs OPN for VGM/GYM/HES, which the app routes to libvgm); `objcopy
+     --prefix-symbols` is the fallback when you can't.
+   - The repo's vendored engines are **not** what prod uses. Upstream has no
+     submodules, and both its and our `game-music-emu`/`libxmp` lack APIs the
+     build exports. Prod's shipped `chip-core.*.wasm` contains the strings
+     `sidplayfp`/`adlmidi`/`GPGX`/`Gens`/`MAME`/`FluidLite`/`OPN2`, proving it is
+     built from forks/newer versions. Don't trust the README/vendored source;
+     confirm empirically. Prod's wasm **exports are minified**, so compare
+     embedded strings plus the JS glue's `_sid_init`/`_adl_init`/… names, not the
+     wasm export table.
+   - Build/allocator: `dlmalloc` (configurable) and `INITIAL_MEMORY=128MB` vs
+     upstream's `emmalloc`/64MB. `-flto` makes duplicate-symbol collisions worse;
+     drop it for archives you are trying to keep separate.
+4. Before PR: `./dev/remove.sh`, decide whether to keep `dev/`, `.nvmrc`, and
+   `AGENTS.md` in the PR (currently tracked on the feature branch). The PR diff
+   should contain only the feature: `src/`, `scripts/{build-music,metadata-parsers}.js`,
+   `server/{database,index,schemas}.js`. Keep `config/webpack.config.dev.js`'s
+   `webSocketURL` change with the dev tooling (it's for LAN/Tailscale access),
+   not the feature.
+
+## Conventions & cautions
+
+- Comment style: explain *why*, in Matt's voice; avoid over-commenting.
+- SQL: match the existing formatting (indentation, trailing comments, prepared
+  statement style). Add prepared statements to `dbStatements`, destructure in
+  `server/index.js`.
+- Don't add comments the codebase wouldn't have; don't reformat unrelated code.
+- Templates literals: **do not put backticks inside SQL template strings**
+  (broke `build-music.js` twice via SQL comments using backticks).
+- Verify with `curl` against `localhost:8080/api/...`.
+- Dev shims that edit tracked files in place (`server/index.js`,
+  `src/components/UserProvider.js`) are patched by `dev/patch-server.js` /
+  `dev/patch-user-provider.js` and undone with `--revert`; `dev/remove.sh`
+  calls those, so feature edits in those files are preserved. Files that are
+  wholly replaced (`server/middleware/auth.js`, `src/config/firebaseConfig.js`)
+  are restored from `*.dev-backup`, so keep those backups correct. Before a PR,
+  run `./dev/remove.sh` and double-check `git diff` / `git status`.
+- The client uses React 16, react-router-dom v5, react-virtualized, lodash,
+  auto-bind. Match those.

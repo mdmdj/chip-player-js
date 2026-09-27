@@ -8,13 +8,12 @@
 # in one deterministic step.
 #
 # How it decides what is feature:
-#   * Whole dev files live under paths that never overlap feature code, so they
-#     simply never appear in the overlay-vs-feature diff (see CONVENTIONS).
-#   * Dev code inside a shared file is wrapped in additive sentinel regions:
-#         // DEV-BEGIN ... // DEV-END
-#     Promotion STRIPS those regions; because each region only adds the dev
-#     behavior, removing it restores prod behavior exactly. There is no
-#     allowlist to maintain.
+#   * Whole dev/engine AREAS are listed in dev/promote-paths.txt and skipped
+#     (directories, build scripts, bindings, vendored trees, and the 1-2 seam
+#     files whose dev delta cannot be an additive region).
+#   * Dev code inside any other (feature) file is wrapped in additive sentinel
+#     regions `// DEV-BEGIN ... // DEV-END`; promotion STRIPS them, which
+#     restores prod behavior exactly.
 #
 # Usage:
 #   ./dev/promote.sh            # dry run: show what would be promoted
@@ -25,6 +24,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 FEATURE="${PROMOTE_TARGET:-feature/subtunes-as-first-class}"
+PATHS_FILE="dev/promote-paths.txt"
 APPLY=0
 [ "${1:-}" = "--apply" ] && APPLY=1
 
@@ -47,8 +47,11 @@ FEATURE_WT="$(git worktree list --porcelain | awk -v b="refs/heads/$FEATURE" '
   $1=="worktree" { wt=$2 } $1=="branch" && $2==b { print wt }')"
 [ -n "$FEATURE_WT" ] || die "$FEATURE is not checked out in any worktree."
 
-# 2. Candidate files: differ from feature.
-mapfile -t CANDIDATES < <(git diff --name-only "$FEATURE"...HEAD -- . 2>/dev/null | sort -u)
+# 2. Candidate files: differ from feature, minus the overlay-only areas.
+mapfile -t OVERLAY < <(sed -e 's/#.*//' -e '/^[[:space:]]*$/d' "$PATHS_FILE")
+pathspec_exclusions=()
+for p in "${OVERLAY[@]}"; do pathspec_exclusions+=(":(exclude)$p"); done
+mapfile -t CANDIDATES < <(git diff --name-only "$FEATURE"...HEAD -- . "${pathspec_exclusions[@]}" 2>/dev/null | sort -u)
 
 # Strip DEV-BEGIN..DEV-END regions (inclusive) from stdin.
 strip_regions() {

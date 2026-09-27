@@ -89,6 +89,11 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
     inline Babel require hook; no new deps.
   - `./dev/run-tests.sh` — runs all three. Dev-only, not part of the PR.
   - `dev/README.md` documents the shims.
+  - `dev/shims/devtools.js` + `dev/patch-devtools.js` — install `window.__cpDev`
+    (browser test hooks: `snapshot`, `setRepeat`, `seek`, `startRecord`, ...).
+    Staged to `src/chip-player-devtools.js` and patched into `App.js` by
+    `apply.sh`; reverted + deleted by `remove.sh`. See "Repeat One / looping
+    model".
 - Run the app: `npm run dev` (webpack dev server on :3000, API server on :8080).
 - **Audio:** the dev stub `src/chip-core.js` is a no-op (no audio). A **real
   chip-core was built** in this session — see "Building the real chip-core"
@@ -474,6 +479,11 @@ because `Sequencer` copies its context).
 12. Real audio locally: a chip-core wasm build works (GME/libvgm/libxmp/N64/
     V2M/MDX/fluidlite MIDI). Uncommitted, separate from the feature — see
     "Building the real chip-core".
+13. Repeat One for VGM (libvgm) — the looping baseline. Native loop count plus a
+    band-relative "playlist position" so the head repeats the highlighted loop
+    region, and switching repeat off plays past into the fade with no head jump.
+    See "Repeat One / looping model". Verified via the t3 preview + `window.__cpDev`
+    (deep-loop toggle has `jump: 0`). Uncommitted on `dev/audio-tooling`.
 
 **Caveat:** `Sequencer.playContext` copies its context, so array-identity
 checks no longer work. Compare a live context to a stored one with
@@ -521,17 +531,21 @@ checks no longer work. Compare a live context to a stored one with
 
 ## Remaining TODO / roadmap
 
-1. Testing. Dev-only harnesses now cover parsers (`dev/test-parsers.js`) and a
+1. **Looping / Repeat One across all formats — now the top priority.** The goal
+   is one intuitive Repeat One for every format, for single files and sub-tunes,
+   with no jarring audio or visual artifacts on enable/disable. See "Repeat One /
+   looping model" below for the contract and the VGM baseline.
+2. Testing. Dev-only harnesses now cover parsers (`dev/test-parsers.js`) and a
    build-music round-trip (`dev/test-build.js`), run via `./dev/run-tests.sh`.
    They are removed with `dev/` before the PR, which still ships without tests
    (matching the repo, which has no test runner or CI). If Matt wants a durable
    suite, the same harnesses could move to a tracked `test/` dir and run via
    `node --test` with no new deps.
-2. Known unsupported formats (don't add to `FORMATS` without a player/parser):
+3. Known unsupported formats (don't add to `FORMATS` without a player/parser):
    plain `.usf` sets (only `.miniusf` is supported), PSF/PSX (`psflib` is reused
    only by the USF loader; no PSX core), and PSM (`libxmp-lite` = it/mod/s3m/xm;
    the files here are the MASI variant, which needs full libxmp).
-3. **Audio engine roadmap** (separate from the feature; see "Building the real
+4. **Audio engine roadmap** (separate from the feature; see "Building the real
    chip-core"). Ordered by impact × risk:
    - **Done:** emscripten build of GME/libvgm/libxmp/N64/V2M/MDX/fluidlite; YM2612
      fixed (force the Gens core); GME↔libvgm symbol clash masked with
@@ -595,10 +609,102 @@ checks no longer work. Compare a live context to a stored one with
    - Build/allocator: `dlmalloc` (configurable) and `INITIAL_MEMORY=128MB` vs
      upstream's `emmalloc`/64MB. `-flto` makes duplicate-symbol collisions worse;
      drop it for archives you are trying to keep separate.
-4. Before PR: the feature branch is already feature-only, so there is nothing to
+5. Before PR: the feature branch is already feature-only, so there is nothing to
    strip. Push `feature/subtunes-as-first-class` to our fork (`origin`) and open
    the PR against `mmontag:master` — never push to `upstream`, and never include
    `dev/audio-tooling`. The diff is `git diff master..feature/subtunes-as-first-class`.
+
+## Repeat One / looping model
+
+The north star for this work (top roadmap item): **one intuitive Repeat One for
+every format**, single files and sub-tunes alike, seamless on enable/disable,
+with no jarring audio or visual artifacts. Guiding principle: *loop the region
+the composer intended, as the game would play it*, using native engine looping
+wherever possible and faking it only when there is no alternative.
+
+### The two clocks
+
+Keep these separate; use each for its own purpose:
+
+- **Time playing** (`Player.getPositionMs`, absolute): includes completed loops.
+  Drives engine/fade bookkeeping and end detection.
+- **Playlist position** (`Player.getDisplayPositionMs`, single pass): what the
+  slider head and the left time label follow. It folds/advances within the loop
+  region (and into the fade when leaving). `Player` defaults it to
+  `getPositionMs`; players that can loop override it.
+
+Position/head flow: `AppFooter` polls `getDisplayPositionMs()` every 100 ms
+(`TimeSlider`), so both the head and the label come from the player. Never derive
+the displayed position in the component layer (the old `AppFooter` fold hack was
+removed).
+
+### The highlighted loop band
+
+The band on the slider is the **last loop instance that is not within the fade**
+— with the default intro + two passes + fade it is `I1 = [A+B, A+2B)`, where
+`A = intro_length` and `B = loop_length`. Rationale: give the user as long as
+possible to decide to stay, and keep the band from moving when repeat toggles.
+`AppFooter` currently always shows the band for a looping track ("for DX now");
+make it a flag later.
+
+### Repeat One contract
+
+- **Enable (any time):** loop the region natively/forever; no seek, no jump. The
+  head cycles inside the band. If enabled after the region, finish the current
+  pass first (via `restartAtEndPending` or the player's native equivalent),
+  never jump the transport backward into the loop.
+- **Disable (any time):** *play past* the loop region as if repeat was never on:
+  finish the current pass, then the fade, then end/advance. The head must be
+  **continuous across the toggle** (same display mapping before and after), then
+  run the fade tail from the band end. Never jump.
+
+### VGM (libvgm) — the working baseline
+
+- Native loop count: repeat-on = `_lvgm_set_loop_count(ctx, 0)` (0 = forever);
+  repeat-off = `max(2, curLoop+1)` so the current pass finishes and libvgm fades
+  at the next boundary. `setLooping` clears the base `restartAtEndPending`
+  (libvgm loops natively; the base late-repeat `seekMs(0)` would fight it).
+- The display mapping in `VGMPlayer.getDisplayPositionMs`: phase
+  `(abs - A) mod B` mapped as `bandStart + phase`; before the first body
+  (`abs <= A+B`) show the real lead-in; while leaving and `abs >= fadeStart`
+  (from `_lvgm_get_fade_start_ms`), run the fade tail `bandEnd + (abs -
+  fadeStart)`. Using the **same** mapping while looping and leaving is what
+  makes the toggle jump-free.
+- New wrapper exports (`libvgm-wrapper.cpp` + `build-chip-core.js`):
+  `_lvgm_get_cur_loop`, `_lvgm_get_playlist_position_ms` (`GetCurTime(0)`),
+  `_lvgm_get_fade_start_ms` (`GetTotalPlayTicks(loopCount)`). Note
+  `GetCurTime(0)` folds loops but reports the phase **from A**, i.e. within the
+  first body; it must be re-anchored at the band (that mismatch caused a bug
+  where the head looped inside I0, not the highlighted band).
+- Verified via the t3 preview + `window.__cpDev`: deep-loop toggle has `jump: 0`,
+  the head continues the current pass then wraps at the natural boundary, and the
+  song ends/advances normally. Caveats: fade is libvgm's default 4 s + 0.5 s
+  silence (could shorten on exit); the "Indefinite Playback" setting is left
+  as-is (internally repeat-on and it both map to loop count 0).
+
+### Per-format loop capability (what "loop the intended region" means for each)
+
+- **libvgm (VGM/VGZ/GYM/S98/DRO):** native region + loop count — the baseline.
+- **GME (NSF/NSFE/SPC/GBS/AY/…):** real region (`intro_length`/`loop_length`) but
+  no native loop control; today repeat restarts the *whole track* (intro
+  replays). Needs `mmontag/game-music-emu` fork work (roadmap) or a JS region
+  loop.
+- **N64/USF:** no region exposed; loop inferred from the `fade` tag
+  (`song_loops`) + an indefinite flag.
+- **SID:** no loop API at all; end only via client-side HVSC lengths.
+- **MIDI:** CC 102/103 region, only honored for "SoundFont MIDI"; fluidlite has
+  none.
+- **XMP / MDX / V2M:** no loop API; currently just stop at the engine end (the
+  sequencer reloads in Repeat One).
+
+### Dev tooling
+
+`window.__cpDev` (dev-only; `dev/shims/devtools.js` + `dev/patch-devtools.js`,
+installed by `apply.sh`, removed by `remove.sh`): `snapshot()`, `setRepeat()`,
+`cycleRepeat()`, `seek()`, `startRecord()`/`stopRecord()` (non-blocking), and
+`runTimeline()`. Use it from the t3 preview to script enable/disable timing and
+spy on player state instead of listening. Remember the preview throttles
+background timers (~½ speed), so seek near a boundary to observe short windows.
 
 ## Conventions & cautions
 

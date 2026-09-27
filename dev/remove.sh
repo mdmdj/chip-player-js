@@ -35,5 +35,10 @@ fi
 node dev/patch-server.js --revert
 node dev/patch-user-provider.js --revert
 node dev/patch-sid-stub.js --revert
+node dev/patch-devtools.js --revert
+
+# Staged devtools shim (copied by apply.sh)
+rm -f src/chip-player-devtools.js
+echo "[dev]   removed src/chip-player-devtools.js"
 
 echo "[dev] Done. (Left in place: catalog/, server/*.db. Delete manually if desired.)"

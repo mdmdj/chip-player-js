@@ -28,7 +28,6 @@ cd "$ROOT"
 
 FEATURE="${PROMOTE_TARGET:-feature/subtunes-as-first-class}"
 PATHS_FILE="dev/promote-paths.txt"
-SEAMS_FILE="dev/promote-seams.txt"
 APPLY=0
 [ "${1:-}" = "--apply" ] && APPLY=1
 
@@ -49,15 +48,6 @@ mapfile -t OVERLAY < <(sed -e 's/#.*//' -e '/^[[:space:]]*$/d' "$PATHS_FILE")
 pathspec_exclusions=()
 for p in "${OVERLAY[@]}"; do pathspec_exclusions+=(":(exclude)$p"); done
 
-# Seam allowlist: feature-owned files that may carry the accepted dev entry lines.
-declare -A SEAM=()
-if [ -f "$SEAMS_FILE" ]; then
-  while read -r line; do
-    set -- $line
-    [ -n "${1:-}" ] && SEAM["$1"]=1
-  done < <(sed -e 's/#.*//' -e '/^[[:space:]]*$/d' "$SEAMS_FILE")
-fi
-
 # 2. Candidate files: differ from feature, not overlay-only.
 mapfile -t CANDIDATES < <(
   git diff --name-only "$FEATURE"...HEAD -- . "${pathspec_exclusions[@]}" 2>/dev/null | sort -u
@@ -65,12 +55,21 @@ mapfile -t CANDIDATES < <(
 
 plan=()
 blocked=()
+skipped=()
 for f in "${CANDIDATES[@]}"; do
   [ -e "$f" ] || { plan+=("$f (deleted)"); continue; }
-  if git diff "$FEATURE"...HEAD -- "$f" | grep -qE "^[+-].*($MARKERS)"; then
-    blocked+=("$f")
-  else
+  diff="$(git diff "$FEATURE"...HEAD -- "$f")"
+  marked="$(printf '%s\n' "$diff" | grep -cE "^[+-].*($MARKERS)")"
+  changed="$(printf '%s\n' "$diff" | grep -cE '^[+-][^+-]')"
+  if [ "$marked" -eq 0 ]; then
     plan+=("$f")
+  elif [ "$marked" -ge "$changed" ]; then
+    # Every changed line is dev-marked: the overlay delta on this file is purely
+    # dev (the feature branch already has the real content). Skip, don't leak.
+    skipped+=("$f")
+  else
+    # Dev markers mixed with real changes: needs manual reconciliation.
+    blocked+=("$f")
   fi
 done
 
@@ -85,8 +84,13 @@ else
 fi
 if [ ${#blocked[@]} -gt 0 ]; then
   echo
-  echo "BLOCKED (dev markers present; move this code into dev/ or an untracked module):"
+  echo "BLOCKED (dev markers mixed with real changes; reconcile manually):"
   printf '  %s\n' "${blocked[@]}"
+fi
+if [ ${#skipped[@]} -gt 0 ]; then
+  echo
+  echo "Skipped (overlay delta is purely dev; feature branch already correct):"
+  printf '  %s\n' "${skipped[@]}"
 fi
 
 if [ ${#blocked[@]} -gt 0 ]; then

@@ -31,8 +31,6 @@ echo "[dev]   removed server/middleware/auth.dev.js"
 
 # Undo in-place patches (reversible, so feature edits are preserved)
 node dev/patch-server.js --revert
-node dev/patch-user-provider.js --revert
-node dev/patch-sid-stub.js --revert
 
 # Staged devtools shim (copied by apply.sh; untracked, no patch to revert)
 rm -f src/chip-player-devtools.js

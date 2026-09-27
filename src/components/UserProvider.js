@@ -30,18 +30,17 @@ const DEFAULT_SETTINGS = {
   showLoopArea: true,
 };
 
-// DEV-ONLY: a fake user so favorites work without Firebase (applied by dev/apply.sh).
-const DEV_USER = process.env.NODE_ENV === 'development' ? {
-  uid: 'dev-user',
-  displayName: 'Dev User',
-  email: 'dev@example.com',
-  getIdToken: async () => 'dev-token',
-} : null;
+// DEV-ONLY (dev/overlay): an inlined dev user so favorites work without
+// Firebase. REACT_APP_DEV_USER is set by the dev webpack config; in prod the
+// branch is undefined and this is null (dead-code eliminated).
+const DEV_USER = process.env.REACT_APP_DEV_USER
+  ? { ...JSON.parse(process.env.REACT_APP_DEV_USER), getIdToken: async () => 'dev-token' }
+  : null;
 
 const UserProvider = ({ children }) => {
   // Use authState hook for user state
   // const [authUser, userLoading] = useAuthState(firebase.auth());
-  const [user, setUser] = useState(DEV_USER); // Local state for user data
+  const [user, setUser] = useState(() => DEV_USER); // Local state for user data
   const [faves, setFaves] = useState(() => {
     // Restore favorites from localStorage.
     try {
@@ -68,7 +67,7 @@ const UserProvider = ({ children }) => {
 
 
   useEffect(() => {
-    // DEV-ONLY: skip Firebase when a dev user is injected.
+    // DEV-ONLY (dev/overlay): a dev user was injected; skip Firebase.
     if (DEV_USER) return;
     // Initialize Firebase
     const firebaseApp = firebaseInitializeApp(firebaseConfig);

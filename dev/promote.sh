@@ -43,6 +43,12 @@ fi
 
 git rev-parse --verify -q "$FEATURE" >/dev/null || die "branch $FEATURE not found"
 
+# The feature branch is usually checked out in a sibling worktree (so both can be
+# open at once). Operate there rather than failing on a busy branch.
+FEATURE_WT="$(git worktree list --porcelain | awk -v b="refs/heads/$FEATURE" '
+  $1=="worktree" { wt=$2 } $1=="branch" && $2==b { print wt }')"
+[ -n "$FEATURE_WT" ] || die "$FEATURE is not checked out in any worktree; check it out there first."
+
 # Overlay-only paths (git pathspecs, comments/blank stripped).
 mapfile -t OVERLAY < <(sed -e 's/#.*//' -e '/^[[:space:]]*$/d' "$PATHS_FILE")
 pathspec_exclusions=()
@@ -108,20 +114,22 @@ fi
 
 # 3. Copy the candidate files onto the feature branch and commit there.
 START_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
-git stash list >/dev/null 2>&1 || true
-git checkout "$FEATURE"
+if [ -n "$(git -C "$FEATURE_WT" status --porcelain)" ]; then
+  die "feature worktree at $FEATURE_WT is dirty; commit or stash there first."
+fi
 for f in "${CANDIDATES[@]}"; do
   if [ -e "$f" ]; then
-    git checkout "$START_BRANCH" -- "$f"
+    # Take this file's committed content from dev/overlay.
+    git show "HEAD:$f" > "$FEATURE_WT/$f"
   else
-    git rm -q --ignore-unmatch "$f" 2>/dev/null || true
+    rm -f "$FEATURE_WT/$f"
   fi
 done
-if git diff --cached --quiet && git diff --quiet; then
+if git -C "$FEATURE_WT" diff --quiet && git -C "$FEATURE_WT" diff --cached --quiet; then
   echo "promote: no changes staged; nothing to commit."
 else
-  git commit -q -m "Promote feature work from dev/overlay"
-  echo "promote: committed on $FEATURE: $(git rev-parse --short HEAD)"
+  git -C "$FEATURE_WT" add -A
+  git -C "$FEATURE_WT" commit -q -m "Promote feature work from dev/overlay"
+  echo "promote: committed on $FEATURE: $(git -C "$FEATURE_WT" rev-parse --short HEAD)"
 fi
-git checkout "$START_BRANCH"
-echo "promote: back on $START_BRANCH. Push $FEATURE when ready, then rebase dev/overlay onto it."
+echo "promote: $START_BRANCH unchanged. Push $FEATURE when ready, then rebase dev/overlay onto it."

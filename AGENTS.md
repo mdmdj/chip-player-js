@@ -589,8 +589,13 @@ because `Sequencer` copies its context).
 13. Repeat One for VGM (libvgm) — the looping baseline. Native loop count plus a
     band-relative "playlist position" so the head repeats the highlighted loop
     region, and switching repeat off plays past into the fade with no head jump.
-    See "Repeat One / looping model". Verified via the t3 preview + `window.__cpDev`
-    (deep-loop toggle has `jump: 0`). On `dev/overlay`.
+    The full toggle matrix is green (see "Repeat One test matrix"), including
+    the fixes this surfaced: the base end detector respects
+    `isPlayingIndefinitely()` (indefinite playback no longer dies at durationMs
+    when Skip Silence is on), the head no longer folds into the band with
+    repeat off / mid-fade enable, the loop count is only re-derived when
+    actually leaving a looping state, and leaving a deep repeat plays the full
+    fade (`durationExtended`) instead of ending instantly. On `dev/overlay`.
 
 **Caveat:** `Sequencer.playContext` copies its context, so array-identity
 checks no longer work. Compare a live context to a stored one with
@@ -607,7 +612,16 @@ checks no longer work. Compare a live context to a stored one with
 - **Handoff state (2026-09, read this):**
   - **Looping is now the top priority** and is treated as **feature** work (part
     of completing the sub-tunes feature), not an overlay extra. The VGM Repeat
-    One baseline is implemented and verified; see "Repeat One / looping model".
+    One baseline is implemented and the full toggle matrix is verified; see
+    "Repeat One / looping model" and the test matrix. This session fixed five
+    interaction bugs on `dev/overlay`: indefinite playback ended early under
+    Skip Silence (`469a8c78a`), the head folded into the band with repeat off
+    (`0b8d76781`) or when repeat was enabled mid-fade (`082b83cb2`), the
+    Off→All no-op toggle re-derived the loop count and jumped (`96683ba3e`),
+    and leaving a deep repeat cut the song instead of playing the fade
+    (`08e3bc86b`). GME was probed in-app and has no loop regions in this
+    catalog (whole-track restart already complies); MIDI CC 102/103 is the
+    next format.
   - **Overlay/promote system** is in place but **WIP**: `dev/promote.sh` +
     `dev/promote-paths.txt` + `DEV-BEGIN/DEV-END` regions. See "Dev overlay &
     promotion" for the mechanism and the **Known gaps** (a few shared files are
@@ -788,6 +802,42 @@ make it a flag later.
   **continuous across the toggle** (same display mapping before and after), then
   run the fade tail from the band end. Never jump.
 
+### Repeat One test matrix
+
+Every permutation below must be jump-free (head continuous at the toggle
+moment) and must not truncate the audio arc. Reference numbers are for
+`catalog/arcade-capcom/Ghosts'N_Goblins_(Arcade)/16 Hurry Up!.vgz` — A = 342,
+B = 800, band = [1142, 1942), two-pass duration = 6442, libvgm fade = 4 s +
+0.5 s silence. Toggle positions: **pre** = abs ≤ A+B (lead-in/first pass),
+**band** = fold region while looping, **tail** = abs > A+2B (fade running).
+
+| # | Transition | Toggled at | Expected | Verified |
+| - | ---------- | ---------- | -------- | -------- |
+| 1 | Off→All | any | No-op for a single track: count and head untouched | ✓ tail |
+| 2 | All→Off | any | Same code path as #1 | via #1 |
+| 3 | Off→One | pre | Fold takes over at the next band entry; no jump | ✓ |
+| 4 | Off→One | tail | Fade already running: audio finishes it and ends; capture rides the head on the tail (no fold-back) | ✓ |
+| 5 | All→One | tail | Same code path as #4 | via #4 |
+| 6 | One→Off/One→All | pre, curLoop < 2 | Count re-derived `max(2, curLoop+1)`; continuous; plays out pass + fade | ✓ curLoop 3 |
+| 7 | One→Off/One→All | deep, curLoop ≥ 2 | `durationExtended`: pass finishes, full fade + silence, ends at extended abs; display lands at 100 % (two-pass duration) | ✓ curLoop 9 → 12843 |
+| 8 | Repeat One from start | — | Head cycles in band across deep loops (abs 67541 → disp 1941 over 83 loops) | ✓ |
+| 9 | Repeat off from start | — | Head live through intro + 2 passes, then tail from bandEnd to 100 % | ✓ |
+
+Cross-cutting checks (all with Skip Silence 0 *and* None — the end detector is
+only armed when `silenceDuration >= 0`, and both arms must end the song):
+
+- Indefinite Playback on/off mirrors #3–#7 through the `setParameter` path
+  (`syncFadeTailCapture` + `applyLoopCount(wasLooping)` are shared).
+- Seek during a captured tail drops `fadeTailStartMs` (backward seek also
+  cancels libvgm's fade); a seek backward after #7 leaves `durationExtended`
+  set — benign, cleared on next load, engine still ends the song.
+- Song end/advance: engine ends (render 0) under looping/#4/#7; sequencer
+  advances and the next entry starts with fresh state.
+- Engine keeps looping through the fade (`curLoop` increments); a short loop
+  plays several iterations inside the 4 s fade (Hurry Up! ≈ 5), a long loop
+  gets cut mid-iteration (`03 Survival.vgz`). Files with no loop region
+  (`07 Easy Holiday.vgz`) end after a single pass even with indef on.
+
 ### VGM (libvgm) — the working baseline
 
 - Native loop count: repeat-on = `_lvgm_set_loop_count(ctx, 0)` (0 = forever);
@@ -824,24 +874,31 @@ make it a flag later.
   `GetCurTime(0)` folds loops but reports the phase **from A**, i.e. within the
   first body; it must be re-anchored at the band (that mismatch caused a bug
   where the head looped inside I0, not the highlighted band).
-- Verified via the t3 preview + `window.__cpDev`: deep-loop toggle has `jump: 0`,
-  the head continues the current pass then wraps at the natural boundary, and the
-  song ends/advances normally. Caveats: fade is libvgm's default 4 s + 0.5 s
-  silence (could shorten on exit); the "Indefinite Playback" setting is left
-  as-is (internally repeat-on and it both map to loop count 0).
+- Verified via the t3 preview + `window.__cpDev`: the full test matrix above is
+  green on the current build (Hurry Up!.vgz), the song ends/advances normally
+  in every case, and the next context entry starts with fresh state. Caveats:
+  fade is libvgm's default 4 s + 0.5 s silence (could shorten on exit); the
+  "Indefinite Playback" setting is left as-is (internally repeat-on and it both
+  map to loop count 0).
 
 ### Per-format loop capability (what "loop the intended region" means for each)
 
 - **libvgm (VGM/VGZ/GYM/S98/DRO):** native region + loop count — the baseline.
-- **GME (NSF/NSFE/SPC/GBS/AY/…):** real region (`intro_length`/`loop_length`) but
-  no native loop control; today repeat restarts the *whole track* (intro
-  replays). Needs `mmontag/game-music-emu` fork work (roadmap) or a JS region
-  loop.
-- **N64/USF:** no region exposed; loop inferred from the `fade` tag
-  (`song_loops`) + an indefinite flag.
+- **GME (NSF/NSFE/SPC/GBS/AY/…):** no loop region in practice for this catalog:
+  NSF has no loop field, the vendored NSFE parser ignores the NSFe `loop`
+  chunk, and the SPCs are `[n]` (non-looping) rips — probed via chip-core in
+  the live app, `intro_length`/`loop_length` stay -1. The driver loops
+  internally, so the *whole track* is the composer-intended region and
+  `restartTrack()` already satisfies the contract (restarts are seamless in
+  the same audio buffer; repeat-off plays to the natural end + JS fade).
+  Real per-track regions would need `mmontag/game-music-emu` fork work
+  (roadmap) — NSFe `loop` chunk support and/or a native loop API.
+- **N64/USF:** no region exposed; whole-track model like GME, loop inferred
+  from the `fade` tag (`song_loops`) + the indefinite flag.
 - **SID:** no loop API at all; end only via client-side HVSC lengths.
 - **MIDI:** CC 102/103 region, only honored for "SoundFont MIDI"; fluidlite has
-  none.
+  none. **Next candidate** — the only remaining format with a declared loop
+  region; plugs into the VGM display pattern directly.
 - **XMP / MDX / V2M:** no loop API; currently just stop at the engine end (the
   sequencer reloads in Repeat One).
 
@@ -850,10 +907,29 @@ make it a flag later.
 `window.__cpDev` (dev-only; `dev/shims/devtools.js`, staged as the untracked
 `src/chip-player-devtools.js` by `apply.sh` and injected via the dev webpack
 entry; deleted by `remove.sh`): `snapshot()`, `setRepeat()`, `cycleRepeat()`,
-`seek()`, `startRecord()`/`stopRecord()` (non-blocking), and `runTimeline()`. Use
-it from the t3 preview to script enable/disable timing and spy on player state
-instead of listening. Remember the preview throttles background timers (~½
-speed), so seek near a boundary to observe short windows.
+`seek()`, `play()`/`pause()`, `click(selectorOrText)` (real DOM click on a UI
+control), `setParam(id, value)` (through `App.handleParamChange`),
+`waitUntil(fn, timeoutMs)` (poll the snapshot until a condition holds),
+`startRecord()`/`stopRecord()` (non-blocking), and `runTimeline(events, opts)`
+for timed/conditional scripts. The snapshot exposes player state plus VGM
+looping fields (`curLoop`, `fadeStartMs`, `fadeTailStartMs`,
+`playlistPositionMs`). Use it from the t3 preview to script enable/disable
+timing and spy on player state instead of listening.
+
+Testing gotchas learned the hard way:
+
+- Script a whole scenario (play → wait → toggle → record) inside ONE
+  `evaluate` call; the preview host drops tabs between calls and evaluate
+  times out at 15 s, so never rely on state surviving across calls for a
+  6-second test track.
+- The tab can serve a stale bundle after edits: force `?r=N`, and confirm the
+  served build with `curl localhost:8080/static/js/bundle.js | grep -c <newSymbol>`.
+- Parameter toggles made right after `playSong`/`playContext` are overwritten
+  by `resolveParamValues` when the async load finishes — pin the setting first
+  (`userContext.settings['vgm.indefinitePlayback'] = true`) or apply it after
+  the load's `playerStateUpdate`.
+- The preview throttles background timers (~½ speed), so seek near a boundary
+  to observe short windows.
 
 ## Conventions & cautions
 

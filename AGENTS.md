@@ -792,7 +792,13 @@ make it a flag later.
 
 - Native loop count: repeat-on = `_lvgm_set_loop_count(ctx, 0)` (0 = forever);
   repeat-off = `max(2, curLoop+1)` so the current pass finishes and libvgm fades
-  at the next boundary. `setLooping` clears the base `restartAtEndPending`
+  at the next boundary — but only when actually *leaving* a looping state
+  (`applyLoopCount(wasLooping)`). The engine keeps looping through the fade
+  (curLoop keeps incrementing; a short loop plays several iterations inside the
+  fade), so re-deriving the count on a no-op transition (e.g. the Off→All
+  repeat toggle mid-tail) moves the configured fade start past the fade that is
+  already running and the head folds back into the band. `setLooping` clears the
+  base `restartAtEndPending`
   (libvgm loops natively; the base late-repeat `seekMs(0)` would fight it).
 - The display mapping in `VGMPlayer.getDisplayPositionMs`: phase
   `(abs - A) mod B` mapped as `bandStart + phase`; before the first body

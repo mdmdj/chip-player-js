@@ -274,16 +274,20 @@ export default class VGMPlayer extends Player {
   }
 
   // Repeat-one overrides the "Indefinite Playback" setting: loop the track
-  // indefinitely (0) instead of fading out after two passes.
-  applyLoopCount() {
+  // indefinitely (0) instead of fading out after two passes. `wasLooping`
+  // says whether the player was looping before this transition: only then
+  // does leaving re-derive the count (finish the in-progress pass; libvgm
+  // fades at the next boundary). Re-deriving when already not looping would
+  // push the configured fade start past a fade that is already running — the
+  // engine keeps looping through the fade, so curLoop has advanced — and a
+  // no-op repeat toggle (e.g. Off→All mid-tail) then made the head fold back
+  // into the band even though playback state hadn't changed.
+  applyLoopCount(wasLooping) {
     if (this.vgmCtx && typeof this.core._lvgm_set_loop_count === 'function') {
       const looping = this.looping || !!this.params.indefinitePlayback;
       if (looping) {
         this.core._lvgm_set_loop_count(this.vgmCtx, 0);
-      } else {
-        // Play past the loop region to the natural end. If we were repeating,
-        // let the in-progress pass finish; libvgm then fades at that boundary.
-        // Otherwise keep the default two passes.
+      } else if (wasLooping) {
         const curLoop = this.getCurLoop();
         this.core._lvgm_set_loop_count(this.vgmCtx, curLoop >= 2 ? curLoop + 1 : 2);
       }
@@ -291,12 +295,13 @@ export default class VGMPlayer extends Player {
   }
 
   setLooping(looping) {
+    const wasLooping = this.looping || !!this.params.indefinitePlayback;
     // Capture before applyLoopCount() reconfigures the loop count.
     this.syncFadeTailCapture(looping);
     super.setLooping(looping);
     // VGM loops natively; the base "late repeat" seek would fight it.
     this.restartAtEndPending = false;
-    this.applyLoopCount();
+    this.applyLoopCount(wasLooping);
   }
 
   // Indefinite Playback behaves like Repeat One: libvgm loops the track
@@ -356,7 +361,7 @@ export default class VGMPlayer extends Player {
         this.syncFadeTailCapture(value || this.looping);
         if (this.vgmCtx) this.core._lvgm_set_indefinite_playback(this.vgmCtx, value);
         // Repeat-one owns the loop count while it is active.
-        this.applyLoopCount();
+        this.applyLoopCount(wasLooping);
         break;
       }
       default:

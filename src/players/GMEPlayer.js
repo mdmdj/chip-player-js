@@ -328,6 +328,12 @@ export default class GMEPlayer extends Player {
     }
   }
 
+  // Indefinite Playback behaves like Repeat One: the engine keeps rendering
+  // past durationMs, so the base end detector must stay out of the way.
+  isPlayingIndefinitely() {
+    return this.looping || !!this.params.indefinitePlayback;
+  }
+
   restartTrack() {
     this.resetFade();
     this.silenceSamplesRemaining = 0;

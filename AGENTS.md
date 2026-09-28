@@ -779,7 +779,10 @@ make it a flag later.
 - **Enable (any time):** loop the region natively/forever; no seek, no jump. The
   head cycles inside the band. If enabled after the region, finish the current
   pass first (via `restartAtEndPending` or the player's native equivalent),
-  never jump the transport backward into the loop.
+  never jump the transport backward into the loop. If a fade is already running
+  when repeat is enabled (enabled mid-fade), the audio finishes that fade and
+  the song ends; the head must proceed through the fade region, not fold back
+  into the band — VGM captures the fade start at enable time for this.
 - **Disable (any time):** *play past* the loop region as if repeat was never on:
   finish the current pass, then the fade, then end/advance. The head must be
   **continuous across the toggle** (same display mapping before and after), then
@@ -793,10 +796,14 @@ make it a flag later.
   (libvgm loops natively; the base late-repeat `seekMs(0)` would fight it).
 - The display mapping in `VGMPlayer.getDisplayPositionMs`: phase
   `(abs - A) mod B` mapped as `bandStart + phase`; before the first body
-  (`abs <= A+B`) show the real lead-in; while leaving and `abs >= fadeStart`
+  (`abs <= A+B`) show the real lead-in; with repeat off and `abs >= fadeStart`
   (from `_lvgm_get_fade_start_ms`), run the fade tail `bandEnd + (abs -
   fadeStart)`. Using the **same** mapping while looping and leaving is what
-  makes the toggle jump-free.
+  makes the toggle jump-free. The display is NOT a pure function of the
+  absolute position: `fadeTailStartMs` is captured at enable time when looping
+  is switched on mid-fade (the loop count change makes the fade-start getter
+  meaningless), and rides the tail until the song ends/seek/loadData clears
+  it.
 - New wrapper exports (`libvgm-wrapper.cpp` + `build-chip-core.js`):
   `_lvgm_get_cur_loop`, `_lvgm_get_playlist_position_ms` (`GetCurTime(0)`),
   `_lvgm_get_fade_start_ms` (`GetTotalPlayTicks(loopCount)`). Note

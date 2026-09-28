@@ -306,6 +306,13 @@ export default class Player extends EventEmitter {
       : null;
   }
 
+  // True when the engine loops its own track (Repeat One or the player's
+  // indefinite-playback setting). The base end detector must stand down in
+  // that case: position keeps running past durationMs while the engine plays.
+  isPlayingIndefinitely() {
+    return this.looping;
+  }
+
   setSilenceDuration(seconds) {
     const val = Number(seconds);
     this.silenceDuration = isNaN(val) ? -1 : val;

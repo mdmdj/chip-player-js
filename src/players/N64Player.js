@@ -221,23 +221,8 @@ export default class N64Player extends Player {
     }
   }
 
-  setLooping(looping) {
-    super.setLooping(looping);
-    this.syncIndefinitePlayback();
-  }
-
-  // The engine flag is what actually holds the fade: Repeat One and the
-  // Indefinite Playback setting both free-run past durationMs through it (the
-  // wrapper still ends non-looping tracks itself, since it ANDs the flag with
-  // song_loops). Keep it OR'd from both sources on every transition: Repeat
-  // One alone not reaching the engine would fade-and-end each cycle and
-  // reload the whole miniusf/usflib per loop.
-  syncIndefinitePlayback() {
-    this.core._n64_set_indefinite_playback(this.looping || !!this.params.indefinitePlayback);
-  }
-
-  // Repeat One and Indefinite Playback both free-run past durationMs via the
-  // engine flag, so the base end detector must stay out of the way.
+  // Indefinite Playback behaves like Repeat One: the engine keeps rendering
+  // past durationMs, so the base end detector must stay out of the way.
   isPlayingIndefinitely() {
     return this.looping || !!this.params.indefinitePlayback;
   }

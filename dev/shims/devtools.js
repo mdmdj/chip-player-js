@@ -37,7 +37,6 @@ const snapshot = () => {
     player: p.constructor.name,
     repeat: window.ChipPlayer.state.repeat,
     looping: !!p.looping,
-    leavingLoop: !!p.leavingLoop,
     indefinitePlayback: !!(p.params && p.params.indefinitePlayback),
     paused: typeof p.isPaused === 'function' ? p.isPaused() : undefined,
     positionMs: typeof p.getPositionMs === 'function' ? p.getPositionMs() : null,

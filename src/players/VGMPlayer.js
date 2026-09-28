@@ -44,9 +44,6 @@ export default class VGMPlayer extends Player {
     this.buffer = this.core._malloc(this.bufferSize * 4 * 2);
     this.vgmCtx = this.core._lvgm_init(this.sampleRate);
     this.core._lvgm_set_yrw801_rom_path(this.vgmCtx, this.core.stringToNewUTF8(YRW801_ROM_PATH));
-    // True while a repeat-one run is winding down: the in-progress loop pass
-    // plays out to the natural fade instead of jumping to the end.
-    this.leavingLoop = false;
   }
 
   async loadData(data, filepath, persistedSettings) {
@@ -105,7 +102,6 @@ export default class VGMPlayer extends Player {
     this.resolveParamValues(persistedSettings);
     this.setTempo(persistedSettings.tempo || 1);
     this.restartAtEndPending = false;
-    this.leavingLoop = false;
     this.applyLoopCount();
     this.resume();
     this.emit('playerStateUpdate', {
@@ -164,9 +160,10 @@ export default class VGMPlayer extends Player {
   //
   // The head's phase within the loop body is (abs - A) mod B; it maps to the
   // band as bandStart + phase. The same mapping is used while looping and while
-  // leaving, so switching repeat off never makes the head jump. Leaving only
-  // changes what happens once the current pass ends (libvgm's fade start): the
-  // head then runs the fade tail from the band end instead of wrapping again.
+  // leaving, so switching repeat off never makes the head jump. When not
+  // looping, once the final pass ends (abs >= fadeStart, which equals the band
+  // end for the default two passes) the head runs the fade tail from the band
+  // end instead of wrapping again — toggle or no toggle.
   getDisplayPositionMs() {
     const abs = this.getPositionMs();
     const meta = this.metadata;
@@ -183,8 +180,7 @@ export default class VGMPlayer extends Player {
     // and the first pass through I0).
     if (abs <= bandStart) return abs;
 
-    if (!looping && this.leavingLoop &&
-        typeof this.core._lvgm_get_fade_start_ms === 'function') {
+    if (!looping && typeof this.core._lvgm_get_fade_start_ms === 'function') {
       const fadeStart = this.core._lvgm_get_fade_start_ms(this.vgmCtx);
       if (abs >= fadeStart) {
         // Fade tail: run out from the band end.
@@ -246,7 +242,6 @@ export default class VGMPlayer extends Player {
 
   seekMs(seekMs) {
     if (this.vgmCtx) {
-      this.leavingLoop = false;
       this.core._lvgm_seek_ms(this.vgmCtx, seekMs);
     }
   }
@@ -269,13 +264,9 @@ export default class VGMPlayer extends Player {
   }
 
   setLooping(looping) {
-    const wasLooping = this.looping || !!this.params.indefinitePlayback;
     super.setLooping(looping);
     // VGM loops natively; the base "late repeat" seek would fight it.
     this.restartAtEndPending = false;
-    const nowLooping = this.looping || !!this.params.indefinitePlayback;
-    this.leavingLoop = wasLooping && !nowLooping &&
-      this.getPositionMs() > (this.metadata ? this.metadata.intro_length : 0);
     this.applyLoopCount();
   }
 

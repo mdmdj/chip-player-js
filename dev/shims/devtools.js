@@ -73,6 +73,38 @@ const dev = {
     if (p) p.seekMs(ms);
     return snapshot();
   },
+  // Click through the real UI: dispatch a genuine click on the first element
+  // matching `sel` (CSS or text match like `button:contains("Repeat")`).
+  click(sel) {
+    let el = null;
+    try {
+      el = document.querySelector(sel);
+    } catch {
+      // Not a valid CSS selector; fall back to text matching.
+      const text = sel.replace(/:contains\("(.*)"\)$/, '$1');
+      el = [...document.querySelectorAll('button, [role="button"], a')]
+        .find((n) => n.textContent.trim().includes(text));
+    }
+    if (!el) return { clicked: false, sel };
+    el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+    return { clicked: true, sel, label: el.textContent.trim().slice(0, 40) };
+  },
+  // Set a player parameter through the app handler, as the UI would.
+  setParam(id, value) {
+    const app = window.ChipPlayer;
+    app.handleParamChange(id, value);
+    return snapshot();
+  },
+  // Poll `fn` until true (or `timeoutMs`); resolves to the last snapshot.
+  async waitUntil(fn, timeoutMs = 15000, intervalMs = 100) {
+    const end = performance.now() + timeoutMs;
+    while (performance.now() < end) {
+      const s = snapshot();
+      if (fn(s, dev)) return s;
+      await sleep(intervalMs);
+    }
+    return { timeout: true, ...snapshot() };
+  },
   play() {
     const p = getPlayer();
     if (p && p.resume) p.resume();

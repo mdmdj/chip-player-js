@@ -279,6 +279,12 @@ export default class VGMPlayer extends Player {
     this.applyLoopCount();
   }
 
+  // Indefinite Playback behaves like Repeat One: libvgm loops the track
+  // forever, so the base end detector must stay out of the way.
+  isPlayingIndefinitely() {
+    return this.looping || !!this.params.indefinitePlayback;
+  }
+
   getVoiceName(index) {
     // TODO: Add voice chip map like github.com/mmontag/chip-player-js/commit/a698e9b
     if (this.vgmCtx) return this.core.UTF8ToString(this.core._lvgm_get_voice_name(this.vgmCtx, index));

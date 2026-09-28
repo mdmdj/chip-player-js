@@ -38,6 +38,7 @@ const snapshot = () => {
     repeat: window.ChipPlayer.state.repeat,
     looping: !!p.looping,
     indefinitePlayback: !!(p.params && p.params.indefinitePlayback),
+    fadeTailStartMs: p.fadeTailStartMs ?? null,
     paused: typeof p.isPaused === 'function' ? p.isPaused() : undefined,
     positionMs: typeof p.getPositionMs === 'function' ? p.getPositionMs() : null,
     displayPositionMs: typeof p.getDisplayPositionMs === 'function' ? p.getDisplayPositionMs() : null,

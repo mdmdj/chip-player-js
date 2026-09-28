@@ -800,6 +800,14 @@ make it a flag later.
   already running and the head folds back into the band. `setLooping` clears the
   base `restartAtEndPending`
   (libvgm loops natively; the base late-repeat `seekMs(0)` would fight it).
+- Leaving repeat one after more than the default loop count sets
+  `durationExtended`: the position is already past the load-time duration, so
+  the base end detector (re-armed now that looping is off) would end the song
+  instantly, before the re-scheduled fade starts. `isPlayingIndefinitely()`
+  covers the flag so the current pass, the fade, and the trailing silence play
+  out and the engine's own end (render 0) ends the song. The playlist clock is
+  untouched — the display tail runs from the band end for exactly fade +
+  silence, landing at the two-pass duration (= 100%) when the song ends.
 - The display mapping in `VGMPlayer.getDisplayPositionMs`: phase
   `(abs - A) mod B` mapped as `bandStart + phase`; before the first body
   (`abs <= A+B`) show the real lead-in; with repeat off and `abs >= fadeStart`

@@ -44,6 +44,9 @@ export default class VGMPlayer extends Player {
     this.buffer = this.core._malloc(this.bufferSize * 4 * 2);
     this.vgmCtx = this.core._lvgm_init(this.sampleRate);
     this.core._lvgm_set_yrw801_rom_path(this.vgmCtx, this.core.stringToNewUTF8(YRW801_ROM_PATH));
+    // Fade start captured when repeat one / indefinite playback is enabled
+    // while a fade is already running; see syncFadeTailCapture().
+    this.fadeTailStartMs = null;
   }
 
   async loadData(data, filepath, persistedSettings) {
@@ -102,6 +105,7 @@ export default class VGMPlayer extends Player {
     this.resolveParamValues(persistedSettings);
     this.setTempo(persistedSettings.tempo || 1);
     this.restartAtEndPending = false;
+    this.fadeTailStartMs = null;
     this.applyLoopCount();
     this.resume();
     this.emit('playerStateUpdate', {
@@ -161,9 +165,15 @@ export default class VGMPlayer extends Player {
   // The head's phase within the loop body is (abs - A) mod B; it maps to the
   // band as bandStart + phase. The same mapping is used while looping and while
   // leaving, so switching repeat off never makes the head jump. When not
-  // looping, once the final pass ends (abs >= fadeStart, which equals the band
-  // end for the default two passes) the head runs the fade tail from the band
-  // end instead of wrapping again — toggle or no toggle.
+  // looping, once the fade has started (abs >= fadeStart) the head runs the
+  // fade tail from the band end instead of wrapping again — toggle or no
+  // toggle. If repeat one / indefinite playback is enabled while a fade is
+  // already running (enabled after the last non-fade loop region), the audio
+  // finishes that fade and the song ends: fadeTailStartMs (captured at enable
+  // time, before the loop count changes) keeps the head on the tail instead of
+  // folding back into the band. While looping with no captured fade, the
+  // configured fade start is meaningless (loop count 0), so only the fold
+  // applies.
   getDisplayPositionMs() {
     const abs = this.getPositionMs();
     const meta = this.metadata;
@@ -180,9 +190,10 @@ export default class VGMPlayer extends Player {
     // and the first pass through I0).
     if (abs <= bandStart) return abs;
 
-    if (!looping && typeof this.core._lvgm_get_fade_start_ms === 'function') {
-      const fadeStart = this.core._lvgm_get_fade_start_ms(this.vgmCtx);
-      if (abs >= fadeStart) {
+    if (typeof this.core._lvgm_get_fade_start_ms === 'function') {
+      const fadeStart = this.fadeTailStartMs != null ? this.fadeTailStartMs
+        : (looping ? null : this.core._lvgm_get_fade_start_ms(this.vgmCtx));
+      if (fadeStart != null && abs >= fadeStart) {
         // Fade tail: run out from the band end.
         return Math.min(bandEnd + (abs - fadeStart), this.getDurationMs());
       }
@@ -242,8 +253,24 @@ export default class VGMPlayer extends Player {
 
   seekMs(seekMs) {
     if (this.vgmCtx) {
+      // libvgm cancels a fade when seeking before its start; drop the display
+      // capture so the fold mapping takes over again.
+      this.fadeTailStartMs = null;
       this.core._lvgm_seek_ms(this.vgmCtx, seekMs);
     }
+  }
+
+  // Capture the configured fade start before the loop count changes to 0
+  // (which makes _lvgm_get_fade_start_ms meaningless). Only meaningful when a
+  // fade is actually running, i.e. repeat is enabled after the last non-fade
+  // loop region; the audio then finishes that fade and the song ends.
+  syncFadeTailCapture(looping) {
+    if (!looping || this.vgmCtx == null || this.fadeTailStartMs != null ||
+        typeof this.core._lvgm_get_fade_start_ms !== 'function')
+      return;
+    const fadeStart = this.core._lvgm_get_fade_start_ms(this.vgmCtx);
+    if (fadeStart > 0 && this.getPositionMs() >= fadeStart)
+      this.fadeTailStartMs = fadeStart;
   }
 
   // Repeat-one overrides the "Indefinite Playback" setting: loop the track
@@ -264,6 +291,8 @@ export default class VGMPlayer extends Player {
   }
 
   setLooping(looping) {
+    // Capture before applyLoopCount() reconfigures the loop count.
+    this.syncFadeTailCapture(looping);
     super.setLooping(looping);
     // VGM loops natively; the base "late repeat" seek would fight it.
     this.restartAtEndPending = false;

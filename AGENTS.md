@@ -935,11 +935,19 @@ only armed when `silenceDuration >= 0`, and both arms must end the song):
   NSF has no loop field, the vendored NSFE parser ignores the NSFe `loop`
   chunk, and the SPCs are `[n]` (non-looping) rips — probed via chip-core in
   the live app, `intro_length`/`loop_length` stay -1. The driver loops
-  internally, so the *whole track* is the composer-intended region and
-  `restartTrack()` already satisfies the contract (restarts are seamless in
-  the same audio buffer; repeat-off plays to the natural end + JS fade).
-  Real per-track regions would need `mmontag/game-music-emu` fork work
-  (roadmap) — NSFe `loop` chunk support and/or a native loop API.
+  internally, so Repeat One never restarts: the track just keeps rendering
+  past `play_length` (restarting there would cut a seamless loop with a hard
+  restart; `  restartTrack()` is only for `track_ended` one-shots). Blind-loop
+  UI: indefinite with no band, once past the track length, parks the slider
+  head at the end (it rides the first pass normally), lets the elapsed time
+  climb unbounded, and labels the duration "Looping"
+  (`AppFooter.isBlindLoopNow` + `TimeSlider`). The past-the-end condition is
+  the scoping: MIDI/XMP/SID end at their length and loop via stop + reload,
+  so they never dwell there and keep the normal slider. Toggling repeat off
+  restores the clamped head/duration (and the pending JS fade ends the song,
+  since the position is already past the length). Repeat-off plays to the
+  natural end + JS fade. Real per-track regions would need `mmontag/game-music-emu`
+  fork work (roadmap) — NSFe `loop` chunk support and/or a native loop API.
 - **N64/USF:** no region exposed; whole-track model like GME, loop inferred
   from the `fade` tag (`song_loops`) + the indefinite flag.
 - **SID:** no loop API at all; end only via client-side HVSC lengths.

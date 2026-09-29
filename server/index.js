@@ -527,7 +527,9 @@ router.get('/hvsc', cache1Hour, async (req, res) => {
   if (!sidHash) return res.status(500).send('Missing sidHash');
   const meta = getSidMetadataByHashStmt.get(sidHash);
   if (!meta) return res.status(404).send('SID not found. Wrong SID hash version?');
-  meta.image_url = await getCsdbImageUrl(meta.csdbid);
+  // The CSDb lookup is a blocking HTTPS round-trip (~1s for a miss); skip it
+  // when there is no release id to look up, so lengths don't wait on imagery.
+  if (meta.csdbid) meta.image_url = await getCsdbImageUrl(meta.csdbid);
   res.json(meta);
 });
 

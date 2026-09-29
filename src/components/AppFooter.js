@@ -26,7 +26,6 @@ function AppFooter(props) {
   const {
     // this.state.
     currentSongDurationMs,
-    currentSongMetadata,
     ejected,
     imageUrl,
     infoTexts,
@@ -64,21 +63,16 @@ function AppFooter(props) {
   const directoryLink = directoryLinkFromFilepath(songPath, isSongFolder);
   const songUrl = getUrlFromFilepath(songPath);
 
-  // Some formats define a loop region (intro up to intro+loop). GME exposes it
-  // as intro_length/loop_length; show it on the time slider when present.
-  const meta = currentSongMetadata || {};
-  const hasLoopRegion = currentSongDurationMs > 0 &&
-    Number.isFinite(meta.intro_length) && meta.intro_length >= 0 &&
-    Number.isFinite(meta.loop_length) && meta.loop_length > 0;
-  // Highlight the LAST loop instance before the fade (default playback is intro
-  // + two passes + fade). That gives the user as long as possible to decide to
-  // stay, and toggling repeat never shifts the band.
-  const lastLoopInstance = 2;
-  const loopStart = hasLoopRegion
-    ? (meta.intro_length + (lastLoopInstance - 1) * meta.loop_length) / currentSongDurationMs
+  // The highlighted loop band is engine policy: the player reports it in ms
+  // (see Player.getLoopBandMs) and the footer only maps it onto the slider.
+  // Visual only: hiding the band never changes playback or the head fold.
+  const showLoopArea = settings?.showLoopArea ?? true;
+  const bandMs = showLoopArea ? sequencer?.getPlayer()?.getLoopBandMs?.() || null : null;
+  const loopStart = bandMs && currentSongDurationMs > 0
+    ? bandMs.startMs / currentSongDurationMs
     : null;
-  const loopEnd = hasLoopRegion
-    ? Math.min((meta.intro_length + lastLoopInstance * meta.loop_length) / currentSongDurationMs, 1)
+  const loopEnd = bandMs && currentSongDurationMs > 0
+    ? Math.min(bandMs.endMs / currentSongDurationMs, 1)
     : null;
 
   const handleToggleInfo = useCallback((e) => {

@@ -107,6 +107,12 @@ are handled by listing the file as overlay-only. At final PR prep these are the
 "1–2 lines" to remove by hand. (`src/components/UserProvider.js` can be
 region-stripped, but is currently listed for safety.)
 
+Because the file is path-listed, `promote.sh` also skips the feature work that
+lands here: the `?play=` handler's `subtuneCount` injection into `__chipConfig`
+must be carried to the feature branch by hand at the same time. (Its counterpart,
+`m.subtune_count` in `getSongByIdStmt`, lives in `server/database.js` and
+promotes normally.)
+
 ### Known gaps (handoff state)
 
 - `dev/promote-paths.txt` still names a few individual shared files

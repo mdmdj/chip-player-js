@@ -100,7 +100,7 @@ export default class SIDPlayer extends Player {
     });
   }
 
-  loadData(data, filepath, persistedSettings, subtune = 0) {
+  async loadData(data, filepath, persistedSettings, subtune = 0) {
     if (!this.initialized) {
       this.core._sid_init(this.sampleRate);
       this.initialized = true;
@@ -156,10 +156,11 @@ export default class SIDPlayer extends Player {
       this.lastHeapBuffer = this.core.HEAPU8.buffer;
     }
 
-    let samplesWritten = this.core._sid_render(this.bufferL, this.bufferR, this.bufferSize);
+    const samplesWritten = this.core._sid_render(this.bufferL, this.bufferR, this.bufferSize);
     // Repeat One behaves like indefinite playback: the driver loops
     // internally and the HVSC length is just metadata, so keep rendering past
-    // it. The tail detector below decides when an ending tail gets restarted.
+    // it. No silence watchdog yet -- ground truth first; a tune that ends in
+    // silence will play silence until repeat is switched off.
     if (samplesWritten === 0 ||
         (!this.isPlayingIndefinitely() && this.getPositionMs() > this.subtuneDurations[this.getSubtune()])) {
       this.handleSongEnd();

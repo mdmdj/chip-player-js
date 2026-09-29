@@ -785,8 +785,20 @@ The band on the slider is the **last loop instance that is not within the fade**
 — with the default intro + two passes + fade it is `I1 = [A+B, A+2B)`, where
 `A = intro_length` and `B = loop_length`. Rationale: give the user as long as
 possible to decide to stay, and keep the band from moving when repeat toggles.
-`AppFooter` currently always shows the band for a looping track ("for DX now");
-make it a flag later.
+`AppFooter` shows the band when the track defines a loop region, gated by the
+Global Settings "Show Loop Area" toggle (default on; visual only — hiding the
+band never changes playback or the head fold).
+
+**Done — the band math used to be engine policy in a component.**
+`AppFooter.js` had `const lastLoopInstance = 2`, which is libvgm's
+`pCfg.loopCount = 2` (`libvgm-wrapper.cpp`) restated as a magic number in the
+view layer. The computation now lives behind the player method
+`getLoopBandMs()` returning `{ startMs, endMs }`, and `AppFooter` only maps ms
+to the slider's 0..1. The base `Player` holds the generic implementation over
+the shared `intro_length`/`loop_length` vocabulary (VGM maps its region into
+those field names, so no override is needed today); engines whose loop
+semantics differ override it. `VGMPlayer.getDisplayPositionMs` reads the same
+hook instead of recomputing the band.
 
 ### Repeat One contract
 
@@ -801,6 +813,41 @@ make it a flag later.
   finish the current pass, then the fade, then end/advance. The head must be
   **continuous across the toggle** (same display mapping before and after), then
   run the fade tail from the band end. Never jump.
+
+### Code placement (what may know about what)
+
+The engine-specific loop policy lives in the engine's own player class; only
+polymorphic hooks reach the shared layers. Keep it that way — the layering is
+the whole defense of the design.
+
+| Layer | May know about engines? | Loop surface |
+| ------ | ------------------------ | ------------ |
+| `Sequencer.js` | no | none; only `setLooping(repeat === REPEAT_ONE)` (pre-existing) |
+| `src/components/` | no | none; `getDisplayPositionMs()` ms -> slider 0..1 |
+| `Player.js` (base) | no | `getLoopEndMs()`, `getDisplayPositionMs()` (defaults to `getPositionMs`), `isPlayingIndefinitely()` (defaults to `this.looping`) |
+| `XxxPlayer.js` | yes, only itself | overrides the above |
+| `src/bindings/*-wrapper.cpp` | yes, only itself | capability-neutral getters/setters; no policy |
+
+Two rules that keep it honest:
+
+- **The base class must not name a param or an engine.** Base
+  `isPlayingIndefinitely()` deliberately returns only `this.looping`; the
+  `indefinitePlayback` param is OR'd in by the players that have it. Don't
+  promote that param into the base.
+- **The metadata vocabulary is GME's and pre-existing** (`intro_length` /
+  `loop_length`, read off `gme_info_t`). `VGMPlayer` maps libvgm's
+  `loopStart`/`loopEnd` into those field names rather than inventing a schema,
+  which is what lets one generic base method and one component read a single
+  shape.
+
+**TODO — `restartAtEndPending` is a half-landed mechanism.** The base honors it
+in `processAudio` (only when the position reaches the duration), but no engine
+currently leaves it set: `VGMPlayer` clears it in `setLooping` (libvgm loops
+natively, so the late `seekMs(0)` would fight it), and `GMEPlayer` restarts the
+track itself in its `playIndefinitely` block, making it partly redundant. Either
+wire it to a player that actually needs the "finish the song, then restart"
+behavior, or drop it from the base until one does. "Who consumes this?" is a
+fair review question and "nobody yet" is a weak answer.
 
 ### Repeat One test matrix
 
@@ -901,6 +948,27 @@ only armed when `silenceDuration >= 0`, and both arms must end the song):
   region; plugs into the VGM display pattern directly.
 - **XMP / MDX / V2M:** no loop API; currently just stop at the engine end (the
   sequencer reloads in Repeat One).
+
+**Where Repeat One actually works today (audit, 2026-09).** GME and VGM are
+seamless. Everything else falls through the engine's own end -> `stop()` ->
+`Sequencer.advanceSong` (which leaves `currIdx` alone under `REPEAT_ONE`) ->
+re-fetch + reload, i.e. a stop, a network fetch, a decode gap, and a jump to
+0:00. This is the behavior prod has today, so the *floor* for a format we have
+not converted is "no worse than prod" — but the user-facing promise of the
+feature only holds for the two engines above.
+
+| Player | Repeat One mechanism | Seamless? |
+| ------ | -------------------- | --------- |
+| `GMEPlayer` | in-buffer `restartTrack()` | yes |
+| `VGMPlayer` | native libvgm loop count | yes |
+| `N64Player` | engine ends at `song_len` -> reload | no; also the "engine keeps rendering past durationMs" comment on `isPlayingIndefinitely()` is wrong — Repeat One never sets the engine flag |
+| `SIDPlayer`, `XMPPlayer`, `MDXPlayer`, `V2MPlayer`, `MIDIPlayer` | engine end -> stop -> reload | no |
+
+The fallback ladder to apply per engine, in order: **native region loop ->
+in-buffer restart -> stop + reload**. Tier 1 is done (VGM), tier 2 is done
+(GME). Tier 3 is the stop + reload every remaining player is on, and it also
+re-fetches the whole file per cycle — for a sub-tune that is the entire
+multi-song NSF, every loop.
 
 ### Dev tooling
 

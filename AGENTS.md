@@ -169,6 +169,11 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
     hooks: `snapshot`, `setRepeat`, `seek`, `startRecord`, ...) and polls for
     `window.ChipPlayer`. See "Repeat One / looping model".
 - Run the app: `npm run dev` (webpack dev server on :3000, API server on :8080).
+  The API server must run with `NODE_ENV=development` (as `npm run server`
+  does): without it Express serves the raw `public/` template with literal
+  `%PUBLIC_URL%` instead of proxying HTML from WDS, and manifest/icons 500.
+  `ps` won't show the env, so check
+  `curl -s localhost:8080/ | grep -c PUBLIC_URL` (0 = healthy).
 - **Audio:** the dev stub `src/chip-core.js` is a no-op (no audio). A **real
   chip-core was built** in this session — see "Building the real chip-core"
   below. It is gitignored and not committed.
@@ -528,6 +533,12 @@ because `Sequencer` copies its context).
   file this resolves to the song-folder entry.
 - Share links are canonical as `/?play=<songId>&subtune=N`
   (`App.getCurrentSongLink`, `App.js` startup parse). No link migration.
+  A link into a multi-song file lands inside the virtual song folder with the
+  sub-song selected: the server injects `subtuneCount` into `__chipConfig`
+  (omitted for single-song files), so the client branches without probing.
+  The footer copy button uses one `songLink` for href and clipboard, and
+  `handleCopyLink` falls back to `execCommand` where `navigator.clipboard`
+  is unavailable (plain-http remote hosts).
 - `getFavoritesStmt` decorates each item with `href`, `path`, `size`,
   `subtuneCount`, and `subtuneTitle` (looked up by `(music_id, subtune)`). The
   Favorites list shows the label, or `Tune N` when unlabeled; toggling

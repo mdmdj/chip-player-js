@@ -120,12 +120,12 @@ export default class GMEPlayer extends Player {
     if (playIndefinitely) {
       // GME has no loop API, and once it reports the track ended gme_play only
       // produces silence. Restart the track to loop it (repeat-one or the
-      // Indefinite Playback setting). Tracks without a defined loop region
-      // restart right at the track length instead of waiting for GME's silence
-      // detection to end them.
-      const hasLoopRegion = this.metadata && this.metadata.loop_length > 0;
-      const reachedLength = this.getDurationMs() > 0 && this.getPositionMs() >= this.getDurationMs();
-      if (trackEnded || (!hasLoopRegion && reachedLength)) {
+      // Indefinite Playback setting). Looping chip drivers (e.g. NSF) never
+      // report track ended; they loop internally, so there is nothing to
+      // restart -- letting them run is the seamless case. Never restart at
+      // the track length: that would cut a seamlessly looping driver with a
+      // hard restart.
+      if (trackEnded) {
         this.restartTrack();
         trackEnded = false;
       }

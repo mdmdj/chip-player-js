@@ -163,8 +163,8 @@ export default class VGMPlayer extends Player {
 
   // The "playlist" position: what the slider head and left time label follow.
   // getPositionMs() stays the absolute "time playing" (it includes completed
-  // loops). The highlighted band on the slider is the LAST loop instance before
-  // the fade (I1 = [A+B, A+2B)), so the head cycles there too.
+  // loops). The head cycles inside the highlighted band (see getLoopBandMs),
+  // so the head repeats the region instead of running on.
   //
   // The head's phase within the loop body is (abs - A) mod B; it maps to the
   // band as bandStart + phase. The same mapping is used while looping and while
@@ -186,8 +186,10 @@ export default class VGMPlayer extends Player {
     if (!this.vgmCtx || !(A >= 0) || !(B > 0) || abs == null)
       return abs;
 
-    const bandStart = A + B;
-    const bandEnd = A + 2 * B;
+    const band = this.getLoopBandMs();
+    if (!band) return abs;
+    const bandStart = band.startMs;
+    const bandEnd = band.endMs;
     const looping = this.looping || !!this.params.indefinitePlayback;
 
     // Before the first loop body is reached, show the real lead-in (the intro

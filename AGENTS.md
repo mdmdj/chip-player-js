@@ -950,27 +950,33 @@ only armed when `silenceDuration >= 0`, and both arms must end the song):
   fork work (roadmap) — NSFe `loop` chunk support and/or a native loop API.
 - **N64/USF:** no region exposed; whole-track model like GME, loop inferred
   from the `fade` tag (`song_loops`) + the indefinite flag.
-- **SID:** no loop API at all; end only via client-side HVSC lengths.
+- **SID:** no loop API at all; end only via client-side HVSC lengths. Under
+  Repeat One the driver free-runs past the HVSC length and a `detectSongEnd`
+  toggle (default on) restarts tails that go quiet *and* static for a full
+  `END_WINDOW_SEC` window, tripping from one window before the HVSC length (the listed end is
+  approximate; anything earlier stays gated so quiet intros can't false-fire)
+  (probed: bodies 0.03-0.16 mean-abs, tails ≤0.0012) — pure JS, no wasm change.
 - **MIDI:** CC 102/103 region, only honored for "SoundFont MIDI"; fluidlite has
   none. **Next candidate** — the only remaining format with a declared loop
   region; plugs into the VGM display pattern directly.
 - **XMP / MDX / V2M:** no loop API; currently just stop at the engine end (the
   sequencer reloads in Repeat One).
 
-**Where Repeat One actually works today (audit, 2026-09).** GME and VGM are
-seamless. Everything else falls through the engine's own end -> `stop()` ->
+**Where Repeat One actually works today (audit, 2026-09).** GME, VGM, and SID
+are seamless. Everything else falls through the engine's own end -> `stop()` ->
 `Sequencer.advanceSong` (which leaves `currIdx` alone under `REPEAT_ONE`) ->
 re-fetch + reload, i.e. a stop, a network fetch, a decode gap, and a jump to
 0:00. This is the behavior prod has today, so the *floor* for a format we have
 not converted is "no worse than prod" — but the user-facing promise of the
-feature only holds for the two engines above.
+feature only holds for the three engines above.
 
 | Player | Repeat One mechanism | Seamless? |
 | ------ | -------------------- | --------- |
 | `GMEPlayer` | in-buffer `restartTrack()` | yes |
 | `VGMPlayer` | native libvgm loop count | yes |
+| `SIDPlayer` | free-run past HVSC length + `detectSongEnd` tail restart | yes |
 | `N64Player` | engine ends at `song_len` -> reload | no; also the "engine keeps rendering past durationMs" comment on `isPlayingIndefinitely()` is wrong — Repeat One never sets the engine flag |
-| `SIDPlayer`, `XMPPlayer`, `MDXPlayer`, `V2MPlayer`, `MIDIPlayer` | engine end -> stop -> reload | no |
+| `XMPPlayer`, `MDXPlayer`, `V2MPlayer`, `MIDIPlayer` | engine end -> stop -> reload | no |
 
 The fallback ladder to apply per engine, in order: **native region loop ->
 in-buffer restart -> stop + reload**. Tier 1 is done (VGM), tier 2 is done

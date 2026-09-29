@@ -74,6 +74,10 @@ const UserProvider = ({ children }) => {
   // DEV-END
 
   useEffect(() => {
+    // DEV-BEGIN (stripped for promotion; skip Firebase when the dev user is
+    // injected, so onAuthStateChanged(null) can't overwrite it)
+    if (DEV_USER) return;
+    // DEV-END
     // Initialize Firebase
     const firebaseApp = firebaseInitializeApp(firebaseConfig);
     const auth = getAuth(firebaseApp);

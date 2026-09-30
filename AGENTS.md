@@ -1055,11 +1055,24 @@ only armed when `silenceDuration >= 0`, and both arms must end the song):
   ending with notes keeps its exact timing.
 - **MDX:** native infinite loop + exact region (see the MDX subsection above);
   seamless, with a slider band.
-- **XMP / V2M:** no loop API; currently just stop at the engine end (the
-  sequencer reloads in Repeat One).
+- **XMP (MOD/XM/IT/S3M):** native loop count (`xmp_play_buffer`'s loop
+  param: 0 = forever, N = stop after N scan-end passes). Repeat One sets 0,
+  repeat-off restores 1 (today's single pass); leaving deep sets
+  `max(1, curLoop+1)` from the engine's `loop_count` so the current pass
+  finishes, like VGM's `applyLoopCount`. The engine clock is positional, so
+  it wraps into the loop on its own — no band (placing it needs the loop
+  start in ms, which libxmp doesn't expose), no fold, no blind parking; the
+  head truthfully sweeps intro + loop and jumps back per pass. Catalog loop
+  census: only TECHTRIS.MOD (11→1), 01-Title.xm (13→1), Bgm01.xm (43→10)
+  and zuma.it (23→0) loop (single-outer-loop each; IT effects are numeric,
+  B=2 — an ASCII decode misses them); everything else plays straight
+  through. Verified in-app via `__cpDev` on Bgm01 (native wrap past the
+  scan end, leave-deep arms count 3 at depth 2).
+- **V2M:** no loop points in the format (fixed-length synth render); stays
+  stop + reload, the lone tier-3 engine.
 
 **Where Repeat One actually works today (audit, 2026-09).** GME, VGM, SID, N64,
-MDX, and MIDI are seamless. Everything else falls through the engine's own end -> `stop()` ->
+MDX, MIDI, and XMP are seamless. Everything else falls through the engine's own end -> `stop()` ->
 `Sequencer.advanceSong` (which leaves `currIdx` alone under `REPEAT_ONE`) ->
 re-fetch + reload, i.e. a stop, a network fetch, a decode gap, and a jump to
 0:00. This is the behavior prod has today, so the *floor* for a format we have
@@ -1074,10 +1087,12 @@ feature only holds for the engines above.
 | `N64Player` | engine indefinite flag OR'd from Repeat One + `detectSongEnd` tail restart | yes |
 | `MDXPlayer` | native `mdx_set_max_loop(0)` + exact band | yes |
 | `MIDIPlayer` | JS event-loop wrap to second-pass start + shared band fold | yes |
-| `XMPPlayer`, `V2MPlayer` | engine end -> stop -> reload | no |
+| `XMPPlayer` | native libxmp loop count (0 = forever); positional clock wraps on its own, no band | yes |
+| `V2MPlayer` | engine end -> stop -> reload | no |
 
 The fallback ladder to apply per engine, in order: **native region loop ->
-in-buffer restart -> stop + reload**. Tier 1 is done (VGM, MDX), tier 2 is done
+in-buffer restart -> stop + reload**. Tier 1 is done (VGM, MDX, XMP-native
+loop count), tier 2 is done
 (GME, N64, SID-tail-restart). Tier 3 is the stop + reload every remaining player is on, and it also
 re-fetches the whole file per cycle — for a sub-tune that is the entire
 multi-song NSF, every loop.

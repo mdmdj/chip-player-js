@@ -965,8 +965,13 @@ only armed when `silenceDuration >= 0`, and both arms must end the song):
   since the position is already past the length). Repeat-off plays to the
   natural end + JS fade. Real per-track regions would need `mmontag/game-music-emu`
   fork work (roadmap) — NSFe `loop` chunk support and/or a native loop API.
-- **N64/USF:** no region exposed; whole-track model like GME, loop inferred
-  from the `fade` tag (`song_loops`) + the indefinite flag.
+- **N64/USF:** whole-track model like GME, loop inferred from the `fade` tag
+  (`song_loops`) + the indefinite flag. Under Repeat One the engine flag is
+  OR'd from Repeat One and the setting (so looping tracks free-run past
+  `durationMs` instead of fading and reloading per cycle), and a SID-style
+  `detectSongEnd` tail restart (default on) re-runs one-shots whose content has
+  ended in-buffer via seek-to-0. Non-looping tracks (`fade` explicitly 0) still
+  end via the engine and reload per cycle.
 - **SID:** no loop API at all; end only via client-side HVSC lengths. Under
   Repeat One the driver free-runs past the HVSC length and a `detectSongEnd`
   toggle (default on) restarts tails that go quiet *and* static for a full
@@ -979,8 +984,8 @@ only armed when `silenceDuration >= 0`, and both arms must end the song):
 - **XMP / MDX / V2M:** no loop API; currently just stop at the engine end (the
   sequencer reloads in Repeat One).
 
-**Where Repeat One actually works today (audit, 2026-09).** GME, VGM, and SID
-are seamless. Everything else falls through the engine's own end -> `stop()` ->
+**Where Repeat One actually works today (audit, 2026-09).** GME, VGM, SID, and
+N64 are seamless. Everything else falls through the engine's own end -> `stop()` ->
 `Sequencer.advanceSong` (which leaves `currIdx` alone under `REPEAT_ONE`) ->
 re-fetch + reload, i.e. a stop, a network fetch, a decode gap, and a jump to
 0:00. This is the behavior prod has today, so the *floor* for a format we have
@@ -992,12 +997,12 @@ feature only holds for the three engines above.
 | `GMEPlayer` | in-buffer `restartTrack()` | yes |
 | `VGMPlayer` | native libvgm loop count | yes |
 | `SIDPlayer` | free-run past HVSC length + `detectSongEnd` tail restart | yes |
-| `N64Player` | engine ends at `song_len` -> reload | no; also the "engine keeps rendering past durationMs" comment on `isPlayingIndefinitely()` is wrong — Repeat One never sets the engine flag |
+| `N64Player` | engine indefinite flag OR'd from Repeat One + `detectSongEnd` tail restart | yes |
 | `XMPPlayer`, `MDXPlayer`, `V2MPlayer`, `MIDIPlayer` | engine end -> stop -> reload | no |
 
 The fallback ladder to apply per engine, in order: **native region loop ->
 in-buffer restart -> stop + reload**. Tier 1 is done (VGM), tier 2 is done
-(GME). Tier 3 is the stop + reload every remaining player is on, and it also
+(GME, N64, SID-tail-restart). Tier 3 is the stop + reload every remaining player is on, and it also
 re-fetches the whole file per cycle — for a sub-tune that is the entire
 multi-song NSF, every loop.
 
@@ -1014,6 +1019,17 @@ for timed/conditional scripts. The snapshot exposes player state plus VGM
 looping fields (`curLoop`, `fadeStartMs`, `fadeTailStartMs`,
 `playlistPositionMs`). Use it from the t3 preview to script enable/disable
 timing and spy on player state instead of listening.
+
+The Settings tab has a dev-only **End Detector (dev)** section at the bottom
+(all in `DEV-BEGIN/DEV-END` regions): live sliders for the SID/N64 tail
+detector thresholds (`quietMean`, `staticRange`, `windowSec`, `tapStep`) plus
+a position/trip/window-means readout. The players take an optional `tuning`
+override (`updateEndDetector`, `getEndDetectTripAtMs`; null keeps the tuned
+constants, so the seam is behavior-neutral in prod); the constructor routes
+both methods through a live `endTuning` store, and `setEndTuning` /
+`getEndDetectorState` (region-only, the panel's only callers) drive it.
+Sliders apply instantly; Reset clears back to the constants. When the active
+player has no end detector the panel renders nothing (a `console.debug` only).
 
 Testing gotchas learned the hard way:
 

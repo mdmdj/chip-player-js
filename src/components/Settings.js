@@ -22,19 +22,65 @@ const silenceOptions = [
   { value: 5, label: '5 seconds' },
 ];
 
-const normalizationOptions = [
-  { value: 'off', label: 'Off' },
-  { value: 'auto', label: 'Auto (by context)' },
-  { value: 'song', label: 'Per song' },
-  { value: 'album', label: 'Per folder (album)' },
-];
-
-const normalizationTargetOptions = [
-  { value: -23, label: 'Quiet (-23 LUFS)' },
-  { value: -18, label: 'Balanced (-18 LUFS)' },
-  { value: -14, label: 'Loud (-14 LUFS)' },
-];
-
+// DEV-BEGIN (stripped for promotion; dev-only end-detector tuning panel. Only
+// the SID/N64 players expose getEndDetectorState; this component and its usage
+// below strip together, leaving production untouched.)
+function EndDetectorTuning({ sequencer }) {
+  const [, setTick] = React.useState(0);
+  React.useEffect(() => {
+    const timer = setInterval(() => setTick(n => n + 1), 500);
+    return () => clearInterval(timer);
+  }, []);
+  const player = sequencer?.getPlayer?.();
+  if (!player || typeof player.getEndDetectorState !== 'function') {
+    console.debug('[dev] EndDetectorTuning: no end detector on %s.',
+      player?.name || 'no player');
+    return null;
+  }
+  const state = player.getEndDetectorState();
+  const tune = (patch) => {
+    player.setEndTuning(patch);
+    setTick(n => n + 1);
+  };
+  const slider = (key, label, min, max, step, decimals) => (
+    <span key={key} className='PlayerParams-param'>
+      <label htmlFor={`endTune-${key}`} className="PlayerParams-label">
+        {label}:{' '}
+      </label>
+      <input
+        id={`endTune-${key}`}
+        type='range'
+        min={min} max={max} step={step}
+        value={state[key]}
+        onInput={(e) => tune({ [key]: parseFloat(e.target.value) })}
+        onChange={(e) => tune({ [key]: parseFloat(e.target.value) })}
+      />
+      {' '}
+      {state[key].toFixed(decimals)}
+    </span>
+  );
+  return (
+    <div>
+      <h3>End Detector (dev)</h3>
+      {slider('quietMean', 'Quiet mean', 0, 0.05, 0.0005, 4)}
+      {slider('staticRange', 'Static range', 0, 0.01, 0.0001, 4)}
+      {slider('windowSec', 'Window (s)', 2, 12, 1, 0)}
+      {slider('tapStep', 'Tap step', 1, 32, 1, 0)}
+      <span className='PlayerParams-param'>
+        <button className="box-button" onClick={() => tune(null)}>
+          Reset tuning
+        </button>
+      </span>
+      <div>
+        pos {Math.round(state.positionMs)} ms / trip {Math.round(state.tripAtMs)} ms
+      </div>
+      <div>
+        window [{state.windowMeans.map(m => m.toFixed(4)).join(', ')}]
+      </div>
+    </div>
+  );
+}
+// DEV-END
 
 function Settings(props) {
   const {
@@ -155,47 +201,9 @@ function Settings(props) {
           Show Loop Area
         </label>
       </span>
-      <span className='PlayerParams-param'>
-        <label
-          htmlFor='volumeNormalization'
-          title='ReplayGain-style level matching. "Per folder" keeps an album at one gain.'
-          className="PlayerParams-label-wide">
-          Volume Normalization:{' '}
-        </label>
-        <select
-          id='volumeNormalization'
-          onChange={handleNormalizationChange}
-          value={volumeNormalization}>
-          {normalizationOptions.map(option =>
-            <option key={option.value} value={option.value}>{option.label}</option>
-          )}
-        </select>
-      </span>
-      {volumeNormalization !== 'off' &&
-        <span className='PlayerParams-param'>
-          <label
-            htmlFor='normalizationTarget'
-            title='Integrated loudness target. Quiet leaves more headroom; Loud matches streaming players but may limit peaks.'
-            className="PlayerParams-label-wide">
-            Loudness Target:{' '}
-          </label>
-          <select
-            id='normalizationTarget'
-            onChange={handleNormalizationTargetChange}
-            value={normalizationTarget}>
-            {normalizationTargetOptions.map(option =>
-              <option key={option.value} value={option.value}>{option.label}</option>
-            )}
-          </select>
-        </span>}
-      {normalizationStatus &&
-        <div className='PlayerParams-hint'>
-          {normalizationStatus}
-          {' '}
-          <span title='Static gain is capped so the track does not clip at 100% volume; very dynamic songs may still end up below the target.'>
-            (peak-capped)
-          </span>
-        </div>}
+      {/* DEV-BEGIN (stripped for promotion; dev-only end-detector tuning) */}
+      <EndDetectorTuning sequencer={sequencer} />
+      {/* DEV-END */}
     </div>
   );
 }

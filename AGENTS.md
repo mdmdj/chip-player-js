@@ -642,9 +642,11 @@ checks no longer work. Compare a live context to a stored one with
     and leaving a deep repeat cut the song instead of playing the fade
     (`08e3bc86b`). GME was probed in-app and has no loop regions in this
     catalog (whole-track restart already complies). **MDX is now seamless too**
-    (native loop + exact band; see "MDX (mdxmini)"), leaving **MIDI CC 102/103**
-    as the next format. GME/MDX/`durationExtended`/`getLoopBandMs` all feed the
-    shared `Player` hooks; keep engine policy in the engine's own player class.
+    (native loop + exact band; see "MDX (mdxmini)"), and **MIDI is now seamless
+    too** (JS event-loop wrap + shared band; see the per-format table),
+    leaving XMP/V2M on stop + reload. GME/MDX/`durationExtended`/
+    `getLoopBandMs` all feed the shared `Player` hooks; keep engine policy in
+    the engine's own player class.
   - **Overlay/promote system** is in place but **WIP**: `dev/promote.sh` +
     `dev/promote-paths.txt` + `DEV-BEGIN/DEV-END` regions. See "Dev overlay &
     promotion" for the mechanism and the **Known gaps** (a few shared files are
@@ -871,12 +873,13 @@ Two rules that keep it honest:
 
 **TODO — `restartAtEndPending` is a half-landed mechanism.** The base honors it
 in `processAudio` (only when the position reaches the duration), but no engine
-currently leaves it set: `VGMPlayer` clears it in `setLooping` (libvgm loops
-natively, so the late `seekMs(0)` would fight it), and `GMEPlayer` restarts the
-track itself in its `playIndefinitely` block, making it partly redundant. Either
-wire it to a player that actually needs the "finish the song, then restart"
-behavior, or drop it from the base until one does. "Who consumes this?" is a
-fair review question and "nobody yet" is a weak answer.
+currently leaves it set: `VGMPlayer`/`MDXPlayer`/`MIDIPlayer` all clear it in
+`setLooping` (native/JS-wrap looping would fight the late `seekMs(0)`), and
+`GMEPlayer` restarts the track itself in its `playIndefinitely` block, making
+it partly redundant. Either wire it to a player that actually needs the
+"finish the song, then restart" behavior, or drop it from the base until one
+does. "Who consumes this?" is a fair review question and "nobody yet" is a
+weak answer.
 
 ### Repeat One test matrix
 
@@ -1032,16 +1035,31 @@ only armed when `silenceDuration >= 0`, and both arms must end the song):
   `END_WINDOW_SEC` window, tripping from one window before the HVSC length (the listed end is
   approximate; anything earlier stays gated so quiet intros can't false-fire)
   (probed: bodies 0.03-0.16 mean-abs, tails ≤0.0012) — pure JS, no wasm change.
-- **MIDI:** CC 102/103 region, only honored for "SoundFont MIDI"; fluidlite has
-  none. **Next candidate** — the only remaining format with a declared loop
-  region; plugs into the VGM display pattern directly.
+- **MIDI:** CC 102/103 region (N64; start left implicit at 0, count ignored)
+  and CC 110/111 (HMI Descent loop track), honored for every file whose
+  markers exist — not just the SoundFont MIDI path. Parsed at load time in
+  `midi-helpers` (`findLoopRange` + two-pass `getLoopedEvents`, same shape as
+  a two-pass libvgm track), so no catalog work was needed. Repeat One wraps
+  the JS event loop to the second-pass start with ringing-note cutoff and
+  silent state restore (no panic); the head folds into the band via the
+  shared `getLoopBandMs`, with no fade tail (past the band the song ends).
+  Lone CC111 (RPG Maker: loop to song end) expands the same way. Verified on
+  the catalog set (Mario Kart 64 [0, 58348], Descent Game01 [100, 200194])
+  via `dev/test-midi-loops.js` (in `dev/run-tests.sh`). The piano roll parses
+  the same expanded list (`MIDIFile.getPlaybackEvents`, shared with the
+  audio engine), so it stays populated through the second pass and across
+  Repeat-One wraps instead of ending at the first loop point. Post-loop
+  content with no notes (controller cleanup, converter track padding like
+  Gyrocopter's END_OF_TRACK a full loop past the loop end) attaches at the
+  loop end instead of inflating the duration with dead air; a composed
+  ending with notes keeps its exact timing.
 - **MDX:** native infinite loop + exact region (see the MDX subsection above);
   seamless, with a slider band.
 - **XMP / V2M:** no loop API; currently just stop at the engine end (the
   sequencer reloads in Repeat One).
 
 **Where Repeat One actually works today (audit, 2026-09).** GME, VGM, SID, N64,
-and MDX are seamless. Everything else falls through the engine's own end -> `stop()` ->
+MDX, and MIDI are seamless. Everything else falls through the engine's own end -> `stop()` ->
 `Sequencer.advanceSong` (which leaves `currIdx` alone under `REPEAT_ONE`) ->
 re-fetch + reload, i.e. a stop, a network fetch, a decode gap, and a jump to
 0:00. This is the behavior prod has today, so the *floor* for a format we have
@@ -1055,7 +1073,8 @@ feature only holds for the engines above.
 | `SIDPlayer` | free-run past HVSC length + `detectSongEnd` tail restart | yes |
 | `N64Player` | engine indefinite flag OR'd from Repeat One + `detectSongEnd` tail restart | yes |
 | `MDXPlayer` | native `mdx_set_max_loop(0)` + exact band | yes |
-| `XMPPlayer`, `V2MPlayer`, `MIDIPlayer` | engine end -> stop -> reload | no |
+| `MIDIPlayer` | JS event-loop wrap to second-pass start + shared band fold | yes |
+| `XMPPlayer`, `V2MPlayer` | engine end -> stop -> reload | no |
 
 The fallback ladder to apply per engine, in order: **native region loop ->
 in-buffer restart -> stop + reload**. Tier 1 is done (VGM, MDX), tier 2 is done

@@ -22,6 +22,65 @@ const silenceOptions = [
   { value: 5, label: '5 seconds' },
 ];
 
+// DEV-BEGIN (stripped for promotion; dev-only end-detector tuning panel. Only
+// the SID/N64 players expose getEndDetectorState; this component and its usage
+// below strip together, leaving production untouched.)
+function EndDetectorTuning({ sequencer }) {
+  const [, setTick] = React.useState(0);
+  React.useEffect(() => {
+    const timer = setInterval(() => setTick(n => n + 1), 500);
+    return () => clearInterval(timer);
+  }, []);
+  const player = sequencer?.getPlayer?.();
+  if (!player || typeof player.getEndDetectorState !== 'function') {
+    console.debug('[dev] EndDetectorTuning: no end detector on %s.',
+      player?.name || 'no player');
+    return null;
+  }
+  const state = player.getEndDetectorState();
+  const tune = (patch) => {
+    player.setEndTuning(patch);
+    setTick(n => n + 1);
+  };
+  const slider = (key, label, min, max, step, decimals) => (
+    <span key={key} className='PlayerParams-param'>
+      <label htmlFor={`endTune-${key}`} className="PlayerParams-label">
+        {label}:{' '}
+      </label>
+      <input
+        id={`endTune-${key}`}
+        type='range'
+        min={min} max={max} step={step}
+        value={state[key]}
+        onInput={(e) => tune({ [key]: parseFloat(e.target.value) })}
+        onChange={(e) => tune({ [key]: parseFloat(e.target.value) })}
+      />
+      {' '}
+      {state[key].toFixed(decimals)}
+    </span>
+  );
+  return (
+    <div>
+      <h3>End Detector (dev)</h3>
+      {slider('quietMean', 'Quiet mean', 0, 0.05, 0.0005, 4)}
+      {slider('staticRange', 'Static range', 0, 0.01, 0.0001, 4)}
+      {slider('windowSec', 'Window (s)', 2, 12, 1, 0)}
+      {slider('tapStep', 'Tap step', 1, 32, 1, 0)}
+      <span className='PlayerParams-param'>
+        <button className="box-button" onClick={() => tune(null)}>
+          Reset tuning
+        </button>
+      </span>
+      <div>
+        pos {Math.round(state.positionMs)} ms / trip {Math.round(state.tripAtMs)} ms
+      </div>
+      <div>
+        window [{state.windowMeans.map(m => m.toFixed(4)).join(', ')}]
+      </div>
+    </div>
+  );
+}
+// DEV-END
 
 function Settings(props) {
   const {
@@ -114,6 +173,9 @@ function Settings(props) {
           Show Loop Area
         </label>
       </span>
+      {/* DEV-BEGIN (stripped for promotion; dev-only end-detector tuning) */}
+      <EndDetectorTuning sequencer={sequencer} />
+      {/* DEV-END */}
     </div>
   );
 }

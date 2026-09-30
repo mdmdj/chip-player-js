@@ -613,6 +613,10 @@ because `Sequencer` copies its context).
     repeat off / mid-fade enable, the loop count is only re-derived when
     actually leaving a looping state, and leaving a deep repeat plays the full
     fade (`durationExtended`) instead of ending instantly. On `dev/overlay`.
+14. MDX Repeat One: native engine loop (`mdx_set_max_loop(0)`) plus an exact
+    loop band from new `mdxmini` loop-point getters; two engine fixes (fade-end
+    latch, microsecond-accurate position) came out of it. See "MDX (mdxmini)".
+    On `dev/overlay`.
 
 **Caveat:** `Sequencer.playContext` copies its context, so array-identity
 checks no longer work. Compare a live context to a stored one with
@@ -637,8 +641,10 @@ checks no longer work. Compare a live context to a stored one with
     Off→All no-op toggle re-derived the loop count and jumped (`96683ba3e`),
     and leaving a deep repeat cut the song instead of playing the fade
     (`08e3bc86b`). GME was probed in-app and has no loop regions in this
-    catalog (whole-track restart already complies); MIDI CC 102/103 is the
-    next format.
+    catalog (whole-track restart already complies). **MDX is now seamless too**
+    (native loop + exact band; see "MDX (mdxmini)"), leaving **MIDI CC 102/103**
+    as the next format. GME/MDX/`durationExtended`/`getLoopBandMs` all feed the
+    shared `Player` hooks; keep engine policy in the engine's own player class.
   - **Overlay/promote system** is in place but **WIP**: `dev/promote.sh` +
     `dev/promote-paths.txt` + `DEV-BEGIN/DEV-END` regions. See "Dev overlay &
     promotion" for the mechanism and the **Known gaps** (a few shared files are
@@ -680,7 +686,8 @@ checks no longer work. Compare a live context to a stored one with
   including the YM2612 Gens fix), TG16/Game Boy/Neo Geo/Capcom/Konami VGZs,
   MOD/S3M/XM/IT (libxmp-lite), N64 `.miniusf`, V2M, MDX, MIDI (fluidlite + a
   SoundFont), SID (mmontag fork; sub-tune switching verified). Repeat-one over
-  loop regions and the slider loop band are verified.
+  loop regions and the slider loop band are verified, including MDX's native
+  built-in loop (see "MDX (mdxmini)").
 - **Still broken / missing:** SID `seek()` to a non-zero position (fork WIP and
   tune-dependent: some tunes resume after a brief dip, others stay silent; a
   seek before first render hangs; seek-to-0 works); N64 seek freezes ~5s while
@@ -743,6 +750,11 @@ checks no longer work. Compare a live context to a stored one with
    - **(5) N64 seek freeze — done.** `N64Player.seekMs` now timeslices
       `_n64_seek_ms` in idle callbacks like GMEPlayer (pre-existing bug,
       unrelated to the feature; committed separately).
+   - **(6) MDX loop region, native Repeat One, seek accuracy — done.**
+      `mdxmini` records exact loop points and loops natively via
+      `mdx_set_max_loop`; the fade end is now latched and `position_ms`
+      accumulates microseconds so seeks are frame-accurate. All overlay-only
+      (vendored tree + `build-chip-core.js`); see "MDX (mdxmini)".
 
    **Traps / learnings:**
    - `SNDDEV_YM2612` is registered only when a YM2612 core is compiled. Disabling
@@ -945,6 +957,48 @@ only armed when `silenceDuration >= 0`, and both arms must end the song):
   "Indefinite Playback" setting is left as-is (internally repeat-on and it both
   map to loop count 0).
 
+### MDX (mdxmini) — native loop with an exact region
+
+- **Native loop.** mdxmini already loops the song's built-in infinite loop
+  (a per-track backward jump executed on `MDX_DATA_END`) and `mdx_set_max_loop`
+  caps how many times it plays before fading; **0 = forever**. So MDX has the
+  same lever as libvgm with no wrapper to write. `MDXPlayer` now defaults to
+  **two passes** (`DEFAULT_LOOP_COUNT = 2`) — the library default is three, but
+  two matches libvgm and the app's `getLoopBandMs` model, so MDX reuses the
+  generic band/fold.
+- **Exact region, no guessing.** The parser records the engine's `elapsed_time`
+  when the song as a whole completes its 1st and 2nd loop (min
+  `infinite_loop_times` across tracks still playing). New getters
+  `mdx_get_loop_start_ms` / `mdx_get_loop_length_ms` expose intro/loop in ms
+  (valid only immediately after `mdx_get_length`, which is what runs the parse
+  and then resets playback state). `_readLoopRegion` reads them once at load and
+  maps them onto `metadata.intro_length`/`loop_length`, exactly as
+  `VGMPlayer` maps libvgm. An earlier idea — deriving the region from
+  `get_length(k)` differences plus a fade estimate — was abandoned: the fade
+  length depends on the end tempo, so the intro would be off by many seconds.
+- **Player.** `MDXPlayer` mirrors `VGMPlayer`: `setLooping` drives
+  `_mdx_set_max_loop` (0 while repeating, else `max(2, curLoop+1)` when actually
+  leaving so the current pass finishes and the engine fades), `getDisplayPositionMs`
+  folds the head into the band and runs the fade tail on exit, and
+  `isPlayingIndefinitely()` covers `durationExtended`. Feature-detected: a core
+  without the loop getters still loops natively (`_mdx_set_max_loop` is an
+  upstream export) but shows the blind-loop UI instead of a band.
+- **Two engine bugs this surfaced (both fixed in `mdxmini/`, overlay-only).**
+  (1) The fade end only returned `FALSE` without latching, so `master_volume`
+  kept decrementing past 0; a seek that advanced frames into/through a fade then
+  drove it negative and the `== 0` end test never fired again — the song looped
+  forever. Now the fade end latches `all_track_finished` and reinit clears
+  `fade_out`. (2) `position_ms` accumulated `frame_microsec / 1000`, discarding
+  up to a third of each frame; seeks therefore overshot by seconds and raced the
+  engine past loop boundaries, starting the fade early. A `position_us`
+  microsecond accumulator makes seeks (and the display) frame-accurate.
+- Verified via `window.__cpDev` on `catalog/mdx/G2MST6.MDX` (A = 34 603,
+  B = 34 603, band = [69 206, 103 809], two-pass duration = 107 000): boundary
+  crossings keep the engine's loop counter incrementing with `fade_out` 0 (no
+  stop/reload), the head folds in the band, enable during the lead-in and
+  disable at depth are both jump-free, a deep leave fades and ends/advances, and
+  the leave-then-seek sequence that used to hang now ends.
+
 ### Per-format loop capability (what "loop the intended region" means for each)
 
 - **libvgm (VGM/VGZ/GYM/S98/DRO):** native region + loop count — the baseline.
@@ -981,16 +1035,18 @@ only armed when `silenceDuration >= 0`, and both arms must end the song):
 - **MIDI:** CC 102/103 region, only honored for "SoundFont MIDI"; fluidlite has
   none. **Next candidate** — the only remaining format with a declared loop
   region; plugs into the VGM display pattern directly.
-- **XMP / MDX / V2M:** no loop API; currently just stop at the engine end (the
+- **MDX:** native infinite loop + exact region (see the MDX subsection above);
+  seamless, with a slider band.
+- **XMP / V2M:** no loop API; currently just stop at the engine end (the
   sequencer reloads in Repeat One).
 
-**Where Repeat One actually works today (audit, 2026-09).** GME, VGM, SID, and
-N64 are seamless. Everything else falls through the engine's own end -> `stop()` ->
+**Where Repeat One actually works today (audit, 2026-09).** GME, VGM, SID, N64,
+and MDX are seamless. Everything else falls through the engine's own end -> `stop()` ->
 `Sequencer.advanceSong` (which leaves `currIdx` alone under `REPEAT_ONE`) ->
 re-fetch + reload, i.e. a stop, a network fetch, a decode gap, and a jump to
 0:00. This is the behavior prod has today, so the *floor* for a format we have
 not converted is "no worse than prod" — but the user-facing promise of the
-feature only holds for the three engines above.
+feature only holds for the engines above.
 
 | Player | Repeat One mechanism | Seamless? |
 | ------ | -------------------- | --------- |
@@ -998,10 +1054,11 @@ feature only holds for the three engines above.
 | `VGMPlayer` | native libvgm loop count | yes |
 | `SIDPlayer` | free-run past HVSC length + `detectSongEnd` tail restart | yes |
 | `N64Player` | engine indefinite flag OR'd from Repeat One + `detectSongEnd` tail restart | yes |
-| `XMPPlayer`, `MDXPlayer`, `V2MPlayer`, `MIDIPlayer` | engine end -> stop -> reload | no |
+| `MDXPlayer` | native `mdx_set_max_loop(0)` + exact band | yes |
+| `XMPPlayer`, `V2MPlayer`, `MIDIPlayer` | engine end -> stop -> reload | no |
 
 The fallback ladder to apply per engine, in order: **native region loop ->
-in-buffer restart -> stop + reload**. Tier 1 is done (VGM), tier 2 is done
+in-buffer restart -> stop + reload**. Tier 1 is done (VGM, MDX), tier 2 is done
 (GME, N64, SID-tail-restart). Tier 3 is the stop + reload every remaining player is on, and it also
 re-fetches the whole file per cycle — for a sub-tune that is the entire
 multi-song NSF, every loop.

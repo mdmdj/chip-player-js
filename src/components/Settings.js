@@ -22,20 +22,65 @@ const silenceOptions = [
   { value: 5, label: '5 seconds' },
 ];
 
-const milkdropMeshOptions = [
-  { value: '32x24', label: 'Low (32 x 24)' },
-  { value: '48x36', label: 'Balanced (48 x 36)' },
-  { value: '64x48', label: 'High (64 x 48)' },
-  { value: '96x72', label: 'Ultra (96 x 72)' },
-];
-
-const milkdropResolutionOptions = [
-  { value: 0.5, label: '50%' },
-  { value: 1, label: '100%' },
-  { value: 1.5, label: '150%' },
-  { value: 2, label: '200%' },
-];
-
+// DEV-BEGIN (stripped for promotion; dev-only end-detector tuning panel. Only
+// the SID/N64 players expose getEndDetectorState; this component and its usage
+// below strip together, leaving production untouched.)
+function EndDetectorTuning({ sequencer }) {
+  const [, setTick] = React.useState(0);
+  React.useEffect(() => {
+    const timer = setInterval(() => setTick(n => n + 1), 500);
+    return () => clearInterval(timer);
+  }, []);
+  const player = sequencer?.getPlayer?.();
+  if (!player || typeof player.getEndDetectorState !== 'function') {
+    console.debug('[dev] EndDetectorTuning: no end detector on %s.',
+      player?.name || 'no player');
+    return null;
+  }
+  const state = player.getEndDetectorState();
+  const tune = (patch) => {
+    player.setEndTuning(patch);
+    setTick(n => n + 1);
+  };
+  const slider = (key, label, min, max, step, decimals) => (
+    <span key={key} className='PlayerParams-param'>
+      <label htmlFor={`endTune-${key}`} className="PlayerParams-label">
+        {label}:{' '}
+      </label>
+      <input
+        id={`endTune-${key}`}
+        type='range'
+        min={min} max={max} step={step}
+        value={state[key]}
+        onInput={(e) => tune({ [key]: parseFloat(e.target.value) })}
+        onChange={(e) => tune({ [key]: parseFloat(e.target.value) })}
+      />
+      {' '}
+      {state[key].toFixed(decimals)}
+    </span>
+  );
+  return (
+    <div>
+      <h3>End Detector (dev)</h3>
+      {slider('quietMean', 'Quiet mean', 0, 0.05, 0.0005, 4)}
+      {slider('staticRange', 'Static range', 0, 0.01, 0.0001, 4)}
+      {slider('windowSec', 'Window (s)', 2, 12, 1, 0)}
+      {slider('tapStep', 'Tap step', 1, 32, 1, 0)}
+      <span className='PlayerParams-param'>
+        <button className="box-button" onClick={() => tune(null)}>
+          Reset tuning
+        </button>
+      </span>
+      <div>
+        pos {Math.round(state.positionMs)} ms / trip {Math.round(state.tripAtMs)} ms
+      </div>
+      <div>
+        window [{state.windowMeans.map(m => m.toFixed(4)).join(', ')}]
+      </div>
+    </div>
+  );
+}
+// DEV-END
 
 function Settings(props) {
   const {
@@ -144,37 +189,9 @@ function Settings(props) {
           Show Loop Area
         </label>
       </span>
-      {milkdropActive &&
-        <React.Fragment>
-          <h3>MilkDrop</h3>
-          <span className='PlayerParams-param'>
-            <label htmlFor='milkdropMesh' title='Simulation mesh resolution. Lower is faster.' className="PlayerParams-label-wide">
-              Mesh:{' '}
-            </label>
-            <select
-              id='milkdropMesh'
-              onChange={handleMilkdropMeshChange}
-              value={milkdropMesh}>
-              {milkdropMeshOptions.map(option =>
-                <option key={option.value} value={option.value}>{option.label}</option>
-              )}
-            </select>
-          </span>
-          <span className='PlayerParams-param'>
-            <label htmlFor='milkdropResolution' title='Render resolution. Lower is faster.' className="PlayerParams-label-wide">
-              Resolution:{' '}
-            </label>
-            <select
-              id='milkdropResolution'
-              onChange={handleMilkdropResolutionChange}
-              value={milkdropResolution}>
-              {milkdropResolutionOptions.map(option =>
-                <option key={option.value} value={option.value}>{option.label}</option>
-              )}
-            </select>
-          </span>
-        </React.Fragment>
-      }
+      {/* DEV-BEGIN (stripped for promotion; dev-only end-detector tuning) */}
+      <EndDetectorTuning sequencer={sequencer} />
+      {/* DEV-END */}
     </div>
   );
 }

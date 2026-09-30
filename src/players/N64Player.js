@@ -14,6 +14,18 @@ const INT16_MAX = 32767; // 2^15 - 1
 // in idle-time chunks (like GMEPlayer) instead of one long freeze.
 const SEEK_INCREMENT_MS = 1000;
 
+// Tail-end detector tuning, mirrored from SIDPlayer (probed 2026-09 on SID
+// output, mean-abs per second): music bodies run 0.03-0.16 while ended tails
+// sit at or below ~0.001, so the level gate separates them by 6x or more and
+// the stillness gate (frozen second-means) suppresses quiet-but-alive
+// passages. N64 output is normalized the same way (int16 full-scale), but the
+// levels have not been probed on USF content yet -- verify before trusting the
+// trip on quiet game mixes. Window mirrors GME's 6s silence rule.
+const END_QUIET_MEAN = 0.004;
+const END_STATIC_RANGE = 0.001;
+const END_WINDOW_SEC = 6;
+const END_TAP_STEP = 7;
+
 export default class N64Player extends Player {
   paramDefs = [
     {
@@ -46,6 +58,33 @@ export default class N64Player extends Player {
     this.buffer = this.core._malloc(this.bufferSize * 4); // 2 ch, 16-bit
     this.seekRequestId = null;
     this.seekTargetMs = null;
+    this.resetEndDetector();
+    // DEV-BEGIN (stripped for promotion; route the end detector through the
+    // live dev tuning store; production calls the methods directly)
+    this.endTuning = null;
+    const baseUpdateEndDetector = this.updateEndDetector;
+    const baseEndDetectTripAtMs = this.getEndDetectTripAtMs;
+    this.updateEndDetector = (channels) => baseUpdateEndDetector(channels, this.endTuning);
+    this.getEndDetectTripAtMs = () => baseEndDetectTripAtMs(this.endTuning);
+    // DEV-END
+  }
+
+  resetEndDetector() {
+    this.endSecMeans = [];
+    this.endSecSum = 0;
+    this.endSecFrames = 0;
+    this.endDetectTripAtMs = null;
+  }
+
+  // Start of the end-detection trip window, cached per track: durations only
+  // change on load, which resets the detector, so there is no per-callback
+  // lookup.
+  getEndDetectTripAtMs(tuning = null) {
+    const windowSec = tuning?.windowSec ?? END_WINDOW_SEC;
+    if (this.endDetectTripAtMs == null) {
+      this.endDetectTripAtMs = Math.max(0, (this.getDurationMs() || 0) - windowSec * 1000);
+    }
+    return this.endDetectTripAtMs;
   }
 
   loadData(data, filename, persistedSettings) {
@@ -53,6 +92,7 @@ export default class N64Player extends Player {
     // rather than loading bytes from memory like other players.
     cancelIdleCallback(this.seekRequestId);
     this.seekTargetMs = null;
+    this.resetEndDetector();
     let err;
     this.filepathMeta = Player.metadataFromFilepath(filename);
 
@@ -185,6 +225,32 @@ export default class N64Player extends Player {
     return hi - lo < staticRange;
   }
 
+  // DEV-BEGIN (stripped for promotion; live end-detector tuning for the
+  // dev-only Settings section, its only caller. The constructor routes the
+  // detector through the live store; production keeps the tuned constants.)
+  setEndTuning(patch) {
+    this.endTuning = patch ? { ...(this.endTuning || {}), ...patch } : null;
+    this.resetEndDetector();
+  }
+
+  getEndTuning() {
+    return {
+      quietMean: this.endTuning?.quietMean ?? END_QUIET_MEAN,
+      staticRange: this.endTuning?.staticRange ?? END_STATIC_RANGE,
+      windowSec: this.endTuning?.windowSec ?? END_WINDOW_SEC,
+      tapStep: this.endTuning?.tapStep ?? END_TAP_STEP,
+    };
+  }
+
+  getEndDetectorState() {
+    return {
+      ...this.getEndTuning(),
+      positionMs: this.getPositionMs(),
+      tripAtMs: this.getEndDetectTripAtMs(),
+      windowMeans: [...this.endSecMeans],
+    };
+  }
+  // DEV-END
 
   // In-buffer restart for the Repeat One tail detector (like GME's
   // restartTrack): seek-to-0 re-runs the emulator from the top without
@@ -218,6 +284,7 @@ export default class N64Player extends Player {
   seekMs(positionMs) {
     cancelIdleCallback(this.seekRequestId);
     this.seekTargetMs = positionMs;
+    this.resetEndDetector();
     if (positionMs < this.getPositionMs()) {
       // Seeking backward restarts the tune; do that once up front.
       this.core._n64_seek_ms(0);
@@ -253,8 +320,23 @@ export default class N64Player extends Player {
     }
   }
 
-  // Indefinite Playback behaves like Repeat One: the engine keeps rendering
-  // past durationMs, so the base end detector must stay out of the way.
+  setLooping(looping) {
+    super.setLooping(looping);
+    this.syncIndefinitePlayback();
+  }
+
+  // The engine flag is what actually holds the fade: Repeat One and the
+  // Indefinite Playback setting both free-run past durationMs through it (the
+  // wrapper still ends non-looping tracks itself, since it ANDs the flag with
+  // song_loops). Keep it OR'd from both sources on every transition -- Repeat
+  // One alone never reaching the engine is what used to fade-and-end each
+  // cycle and reload the whole miniusf/usflib per loop.
+  syncIndefinitePlayback() {
+    this.core._n64_set_indefinite_playback(this.looping || !!this.params.indefinitePlayback);
+  }
+
+  // Repeat One and Indefinite Playback both free-run past durationMs via the
+  // engine flag, so the base end detector must stay out of the way.
   isPlayingIndefinitely() {
     return this.looping || !!this.params.indefinitePlayback;
   }

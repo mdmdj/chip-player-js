@@ -46,14 +46,10 @@ libADLMIDI/**
 # to the feature branch alongside promotion.
 server/index.js
 
-# Engine feature-detection + remote-dev tweaks on shared files. These exist
-# because our fork engines export APIs the vendored ones don't (or to reach the
-# dev API over LAN); they are engine/dev plumbing, not the feature. TODO: wrap
-# the dev deltas below in DEV-BEGIN/DEV-END regions and drop these entries --
-# each currently also strands Repeat-One feature work (MIDI wrap, XMP lever +
-# learn). src/config/index.js is dev-only throughout (no feature to convert).
-# (Delisted already: N64Player and UserProvider region-strip cleanly.
-# server/index.js stays listed per the seam note above.)
+# Engine feature-detection + remote-dev tweaks on shared files. Only
+# src/config/index.js remains: dev-only throughout (LAN hostname over
+# localhost), correctly listed. MIDIPlayer (2 ADLMIDI guards) and XMPPlayer
+# (1 seek_time_frame fallback) needed no regions -- both hunks are portable
+# compat that behaves identically against upstream cores, so they delisted
+# cleanly with their loop feature.
 src/config/index.js
-src/players/MIDIPlayer.js
-src/players/XMPPlayer.js

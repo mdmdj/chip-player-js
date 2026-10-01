@@ -16,10 +16,13 @@ config/webpack.config.dev.js
 scripts/start.js
 
 # Audio-engine build/tooling (real, but engine plumbing, not the feature).
+# Only the SID wrapper is listed: it needs our fork SID core, which upstream
+# cannot build. libvgm-wrapper.cpp promotes (loop functions + build fixes;
+# its YM2612-Gens force is a DEV region and strips out).
 scripts/build-subprojects.sh
 scripts/build-chip-core.js
 scripts/build-libsidplayfp.sh
-src/bindings/**
+src/bindings/libsidplayfp-wrapper.cpp
 src/tinyplayer.c
 game-music-emu/**
 libvgm/**

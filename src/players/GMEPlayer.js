@@ -359,7 +359,7 @@ export default class GMEPlayer extends Player {
         break;
       case 'disableEcho':
         this.params[id] = !!value;
-        // gme_disable_echo is a fork-only API; older builds omit it.
+        // gme_disable_echo is a 0.6.4+ API; older builds omit it.
         if (this.gmeCtx && core._gme_disable_echo) core._gme_disable_echo(this.gmeCtx, value ? 1 : 0);
         break;
       case 'enableAccuracy':

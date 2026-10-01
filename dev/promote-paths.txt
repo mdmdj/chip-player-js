@@ -24,6 +24,14 @@ src/tinyplayer.c
 game-music-emu/**
 libvgm/**
 libxmp/**
+# Vendored engine trees with no current diff, listed so future fixes here can
+# never leak into the PR by default (cf. mdxmini, which did).
+mdxmini/**
+psflib/**
+lazyusf2/**
+farbrausch-v2m/**
+fluidlite/**
+libADLMIDI/**
 
 # The two "seam" files. Their overlay-vs-feature delta is only the dev seam,
 # which cannot be an additive region (prod must still load the real module):
@@ -40,7 +48,10 @@ src/components/UserProvider.js
 # because our fork engines export APIs the vendored ones don't (or to reach the
 # dev API over LAN); they are engine/dev plumbing, not the feature. TODO: wrap
 # their dev deltas in DEV-BEGIN/DEV-END regions and drop these entries.
+# (N64Player and UserProvider already region-strip cleanly, so they are NOT
+# listed: N64Player promotes whole, UserProvider promotes its showLoopArea
+# default. server/index.js stays listed: its subtuneCount injection must be
+# hand-carried, and its DEV_AUTH_MODULE/skia seams can't be regions.)
 src/config/index.js
 src/players/MIDIPlayer.js
-src/players/N64Player.js
 src/players/XMPPlayer.js

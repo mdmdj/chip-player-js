@@ -92,10 +92,13 @@ function check(name, fn) {
 check('TECHTRIS-like stream learns [8000, 96000) at the 11->1 jump', () => {
   const { p } = makePlayer(96000);
   assert.strictEqual(p.getLoopBandMs(), null);
+  let emits = 0;
+  p.on('playerStateUpdate', (s) => { if (!s.isStopped) emits++; });
   drive(p, p.core, orders([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 1, 2, 3], 8000));
   assert.strictEqual(p.metadata.intro_length, 8000);
   assert.strictEqual(p.metadata.loop_length, 88000);
   assert.deepStrictEqual(p.getLoopBandMs(), { startMs: 8000, endMs: 96000 });
+  assert.strictEqual(emits, 1);
 });
 
 check('straight file never learns a band', () => {
@@ -127,6 +130,16 @@ check('seek freezes learning for the rest of the song', () => {
   drive(p, p.core, orders([20, 21, 22, 3, 4], 8000).map((f, i) => ({ ...f, time: 100000 + i * 8000 })));
   assert.strictEqual(p.metadata.intro_length, undefined);
   assert.strictEqual(p.getLoopBandMs(), null);
+});
+
+check('loop from the very start learns nothing (zuma-like, 23->0)', () => {
+  const { p } = makePlayer(200000);
+  let emits = 0;
+  p.on('playerStateUpdate', (s) => { if (!s.isStopped) emits++; });
+  drive(p, p.core, orders([0, 1, 2, 3, 23, 0, 1], 8000));
+  assert.strictEqual(p.metadata.intro_length, undefined);
+  assert.strictEqual(p.getLoopBandMs(), null);
+  assert.strictEqual(emits, 0);
 });
 
 check('learning runs with repeat off (band ready if repeat engages later)', () => {

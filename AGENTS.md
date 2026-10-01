@@ -121,16 +121,13 @@ promotes normally.)
   leakage. `dev/promote-paths.txt` now excludes every vendored tree
   (mdxmini fixes were leaking into the plan before) and no longer lists
   `N64Player`/`UserProvider` (both region-strip cleanly).
-- Remaining path-listed strands (genuine TODOs): `src/players/MIDIPlayer.js`
-  (feature: loop region/fold/setLooping; dev: 2 ADLMIDI fork guards) and
-  `src/players/XMPPlayer.js` (feature: loop lever/learn/band; dev: 1
-  `seek_time_frame` fallback) need their dev hunks wrapped in
-  `DEV-BEGIN/DEV-END` regions, then delisting. `src/config/index.js` is
-  dev-only throughout (LAN hostname) and correctly listed. `server/index.js`
-  stays listed (DEV_AUTH_MODULE/skia seams) plus two hand items: the
-  `?play=` handler's `subtuneCount` injection (feature, carry by hand with
-  the promoted `getSongByIdStmt` column) and an unrelated HVSC `csdbid`
-  perf guard (stays out).
+- Remaining path-listed files are intentional: `src/config/index.js` is
+  dev-only throughout (LAN hostname) and `server/index.js` stays listed
+  (DEV_AUTH_MODULE/skia seams) plus two hand items: the `?play=` handler's
+  `subtuneCount` injection (feature, carry by hand with the promoted
+  `getSongByIdStmt` column) and an unrelated HVSC `csdbid` perf guard
+  (stays out). MIDIPlayer/XMPPlayer needed no regions after all — their
+  fork/API guards are portable compat — so they delisted whole.
 - After the reverted libvgm attempt, the working tree is clean and VGM/looping
   work (see "Building the real chip-core").
 

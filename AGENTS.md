@@ -1066,8 +1066,11 @@ only armed when `silenceDuration >= 0`, and both arms must end the song):
   (`learnLoopFromOrder`, ~25 lines, no new exports/rebuild/parser), and the
   first backward order jump resolves the loop start exactly, tempo changes
   included. It marks the repeating span [loopStart, trackEnd) from the first
-  loop end on (single-pass duration never rescales); any seek freezes
-  learning for the song, and files without a backward jump keep today's UI.
+  loop end on (single-pass duration never rescales; learning also fires the
+  one `playerStateUpdate` that re-renders the footer, since the band appears
+  mid-song); any seek freezes learning for the song, a from-the-start loop
+  learns nothing (full-span highlight says nothing), and files without a
+  backward jump keep today's UI.
   Catalog loop census: only TECHTRIS.MOD (11→1), 01-Title.xm (13→1), Bgm01.xm
   (43→10) and zuma.it (23→0) loop (single-outer-loop each; IT effects are
   numeric, B=2 — an ASCII decode misses them); everything else plays straight

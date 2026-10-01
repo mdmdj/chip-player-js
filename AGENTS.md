@@ -248,8 +248,9 @@ Vendored-tree fixes needed to build (all pre-existing upstream breakage):
   detects iconv built into libc but then fails its `find_library(c)` check. (An
   earlier no-op `src/bindings/cpconv-shim.c` was removed: it passed UTF-16LE
   bytes through untouched, truncating VGM GD3 tags.)
-- `scripts/build-chip-core.js`: `--allow-multiple-definition` (GME and libvgm both
-  ship MAME YM2203/YM2608 globals); in-repo `../`→local path normalization; drop
+- `scripts/build-chip-core.js`: duplicate-symbol tripwire over linked archives
+  (fails loudly on clashes; `--allow-multiple-definition` stays as
+  belt-and-braces); in-repo `../`→local path normalization; drop
   dead `ALLOC_NORMAL` export; SID/SGC skip logic.
 - `src/libxmp-lite`: built directly from `libxmp/src` + lite `format.c` /
   `mod_load.c` (the lite CMake project doesn't configure under CMake 4).
@@ -760,12 +761,11 @@ checks no longer work. Compare a live context to a stored one with
       same, so this is faithful, not our regression; an upstream fix is still
       needed for the slider / `?t=` links to be trustworthy on SID. Also pin the
       fork branch to a commit for reproducible builds.
-   - **(2) GME → `mmontag/game-music-emu` fork + newer libxmp, and prune GME.**
+    - **(2) GME → `mmontag/game-music-emu` fork + newer libxmp, and prune GME.**
      Restores `gme_disable_echo` / `xmp_seek_time_frame` (both feature-detected
      with call sites, neither exported). `fluid_synth_get_active_voice_count`
-     has neither a call site nor an export today. While there, delete the
-     `--allow-multiple-definition` hack by not linking GME's OPN copy at all
-     (trap below).
+     has neither a call site nor an export today. The prune half is done:
+     our GME build compiles no VGM/GYM/HES/KSS (see "libvgm YM2612 core").
    - **(3) Per-engine wasm modules (isolation epic).**
      One Emscripten `Module` per engine (own linear memory/FS) instead of one
      flat blob with global C symbols. Matches the existing per-extension player
@@ -794,13 +794,14 @@ checks no longer work. Compare a live context to a stored one with
      GPGX alone drops the device and every YM2612 VGM throws
      `RuntimeError: null function`. Keep GPGX compiled and force `FCC_GENS`
      per-device in the wrapper (see "libvgm YM2612 core" above).
-   - `--allow-multiple-definition` is luck, not safety: GME's
-     `fm.c`/`fm2612.c`/`Ym{2203,2612}_Emu` and libvgm's `fmopn.c` export the same
-     MAME OPN C globals (`ym2203_init`, `ym2612_write`, `OPNWriteMode`,
-     `FM_OPN`). C has no namespaces and static archives don't scope symbols, so
-     one copy is silently dropped. Prefer not linking the unused copy (GME only
-     needs OPN for VGM/GYM/HES, which the app routes to libvgm); `objcopy
-     --prefix-symbols` is the fallback when you can't.
+   - `--allow-multiple-definition` is luck, not safety: it once silently kept
+     GME's MAME `ym2612_write` over libvgm's and hung YM2612 playback (see
+     "libvgm YM2612 core"). Fixed by pruning GME's OPN objects (below), and
+     `scripts/build-chip-core.js` now runs a duplicate-symbol tripwire
+     (`checkDuplicateSymbols`, over `emnm` of every linked archive) that fails
+     the build loudly on any strong-symbol clash instead of shipping luck.
+     `objcopy --prefix-symbols` remains the fallback when two copies are both
+     genuinely needed.
    - The repo's vendored engines are **not** what prod uses. Upstream has no
      submodules, and both its and our `game-music-emu`/`libxmp` lack APIs the
      build exports. Prod's shipped `chip-core.*.wasm` contains the strings

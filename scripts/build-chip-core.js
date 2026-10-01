@@ -473,7 +473,6 @@ const flags = [
 ];
 
 console.log('Compiling to %s...', jsOutFile);
-console.log(`Invocation:\n${compiler} ${chalk.blue(flags.join(' '))} ${chalk.gray(sourceFiles.join(' '))}\n`);
 const preJs = `/*eslint-disable*/`;
 
 // The external libraries used to live one level up (../libxmp, ../FluidLite,
@@ -500,6 +499,7 @@ const normalizeInput = (p) => {
 const args = []
   .concat(flags.map(normalizeInput))
   .concat(sourceFiles.map(normalizeInput));
+console.log(`Normalized invocation:\n${compiler} ${chalk.blue(args.join(' '))}\n`);
 const build_proc = spawn(compiler, args, {stdio: 'inherit', cwd: repoRoot});
 build_proc.on('exit', function (code) {
   if (code === 0) {

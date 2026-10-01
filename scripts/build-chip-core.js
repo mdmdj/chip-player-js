@@ -500,6 +500,42 @@ const args = []
   .concat(flags.map(normalizeInput))
   .concat(sourceFiles.map(normalizeInput));
 console.log(`Normalized invocation:\n${compiler} ${chalk.blue(args.join(' '))}\n`);
+checkDuplicateSymbols(args.filter(a => a.endsWith('.a')));
+// Duplicate-symbol tripwire: every linked archive must own its strong C/C++
+// globals uniquely. GME and libvgm once both exported MAME OPN symbols and
+// --allow-multiple-definition silently kept GME's copy, hanging YM2612
+// playback with no error anywhere (see AGENTS.md "libvgm YM2612 core").
+// Fail loudly here instead of shipping luck. (Weak symbols resolve
+// deterministically, so only strong `T` definitions are checked.)
+function checkDuplicateSymbols(archives) {
+  let listings;
+  try {
+    listings = archives.map(a => ({
+      archive: a,
+      symbols: execSync(`emnm "${a}"`, { cwd: repoRoot }).toString().split('\n')
+        .filter(line => / [T] /.test(` ${line} `))
+        .map(line => line.trim().split(/\s+/).pop()),
+    }));
+  } catch (e) {
+    console.warn(chalk.yellow('check-duplicate-symbols: emnm unavailable, skipping'));
+    return;
+  }
+  const owners = new Map();
+  for (const { archive, symbols } of listings) {
+    for (const sym of new Set(symbols)) {
+      if (!owners.has(sym)) owners.set(sym, []);
+      owners.get(sym).push(archive);
+    }
+  }
+  const dupes = [...owners.entries()].filter(([, owners]) => owners.length > 1);
+  if (dupes.length > 0) {
+    throw new Error(
+      'Duplicate strong symbols across linked archives (refusing to ship linker luck):\n' +
+      dupes.map(([sym, owners]) => `  ${sym}: ${owners.join(', ')}`).join('\n')
+    );
+  }
+  console.log(`check-duplicate-symbols: ${archives.length} archives, no clashes.`);
+}
 const build_proc = spawn(compiler, args, {stdio: 'inherit', cwd: repoRoot});
 build_proc.on('exit', function (code) {
   if (code === 0) {

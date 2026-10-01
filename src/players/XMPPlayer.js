@@ -235,11 +235,19 @@ export default class XMPPlayer extends Player {
     }
     if (!this._orderFirstSeen.has(pos)) {
       this._orderFirstSeen.set(pos, this._positionMs);
-    } else if (pos < this._lastPos && this.metadata) {
+    } else if (pos < this._lastPos && this.metadata && this.metadata.intro_length == null) {
       const loopStartMs = this._orderFirstSeen.get(pos);
-      if (loopStartMs >= 0 && loopStartMs < this._durationMs) {
+      // A loop from the very start spans the whole track, so highlighting
+      // it says nothing -- the repeat indicator already covers that case.
+      if (loopStartMs > 0 && loopStartMs < this._durationMs) {
         this.metadata.intro_length = loopStartMs;
         this.metadata.loop_length = this._durationMs - loopStartMs;
+        // The band appears mid-song, after the footer already rendered
+        // without one -- tell the app to re-render it. Once per song.
+        this.emit('playerStateUpdate', {
+          ...this.getBasePlayerState(),
+          isStopped: false,
+        });
       }
     }
     this._lastPos = pos;

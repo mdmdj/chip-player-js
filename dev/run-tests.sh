@@ -14,3 +14,6 @@ node "$DIR/test-sequencer.js" 2>/dev/null
 echo
 echo "== midi loops =="
 node "$DIR/test-midi-loops.js" 2>/dev/null
+echo
+echo "== xmp loops =="
+node "$DIR/test-xmp-loops.js" 2>/dev/null

@@ -33,25 +33,24 @@ farbrausch-v2m/**
 fluidlite/**
 libADLMIDI/**
 
-# The two "seam" files. Their overlay-vs-feature delta is only the dev seam,
+# The one "seam" file. Its overlay-vs-feature delta is only the dev seam,
 # which cannot be an additive region (prod must still load the real module):
-#   server/index.js              -> DEV_AUTH_MODULE require fallback + skia try/catch
-#   src/components/UserProvider.js -> (kept here only if region-stripping is not
-#                                     used for it; see notes below)
-# Promote leaves these at the feature branch's version. If feature work must
-# change them, do it directly on the feature branch (or convert the seam to a
-# DEV-BEGIN/DEV-END region first).
+#   server/index.js -> DEV_AUTH_MODULE require fallback + skia try/catch
+# Promote leaves this at the feature branch's version. If feature work must
+# change it, do it directly on the feature branch (or convert the seam to a
+# DEV-BEGIN/DEV-END region first). NOTE: its ?play= handler's subtuneCount
+# injection is feature work in a path-listed file and must be hand-carried
+# to the feature branch alongside promotion.
 server/index.js
-src/components/UserProvider.js
 
 # Engine feature-detection + remote-dev tweaks on shared files. These exist
 # because our fork engines export APIs the vendored ones don't (or to reach the
 # dev API over LAN); they are engine/dev plumbing, not the feature. TODO: wrap
-# their dev deltas in DEV-BEGIN/DEV-END regions and drop these entries.
-# (N64Player and UserProvider already region-strip cleanly, so they are NOT
-# listed: N64Player promotes whole, UserProvider promotes its showLoopArea
-# default. server/index.js stays listed: its subtuneCount injection must be
-# hand-carried, and its DEV_AUTH_MODULE/skia seams can't be regions.)
+# the dev deltas below in DEV-BEGIN/DEV-END regions and drop these entries --
+# each currently also strands Repeat-One feature work (MIDI wrap, XMP lever +
+# learn). src/config/index.js is dev-only throughout (no feature to convert).
+# (Delisted already: N64Player and UserProvider region-strip cleanly.
+# server/index.js stays listed per the seam note above.)
 src/config/index.js
 src/players/MIDIPlayer.js
 src/players/XMPPlayer.js

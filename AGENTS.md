@@ -267,20 +267,24 @@ C++ object model). Bank selection and OPL3 playback work; `tinyplayer.c` keeps
 
 **libvgm YM2612 core:** libvgm registers the YM2612 device (`SNDDEV_YM2612`) only
 when at least one YM2612 core is compiled, and `devDefList_YM2612` picks GPGX
-first. The GPGX core (`fmopn.c`) loads YM2612 VGMs but never advances them under
-Emscripten (position stuck at 0). Fix: `build-subprojects.sh` builds both
-`SNDEMU_YM2612_GPGX=ON` and `SNDEMU_YM2612_GENS=ON` so the device stays
-registered, and `libvgm-wrapper.cpp` forces `emuCore[0] = FCC_GENS` for the
-YM2612 device after `LoadFile` (same pattern as the SN76496→Maxim and
-YMF278B→MAME overrides). Do **not** disable GPGX alone: with no YM2612 core the
-device is unregistered and every VGM using it fails with
-`RuntimeError: null function`. A/B verified 2026-10 (Green Hill Zone, same
-bytes as prod): with the force, position advances and FM voices play; with
-it disabled (`#if 0` + relink), position sits at 0 for 40s while a control
-VGM advances normally. The force is required in our toolchain, but prod
-shows no stall with both cores compiled, so it stays a `DEV-BEGIN/DEV-END`
-region (overlay-only) until proven upstream-safe; the loop functions,
-compat defines and parentIdx removal promote normally.
+first. Do **not** disable GPGX alone: with no YM2612 core the device is
+unregistered and every VGM using it fails with `RuntimeError: null function`.
+
+Root-caused 2026-10 (was misdiagnosed as a broken GPGX core): GME and libvgm
+both export the MAME OPN C globals (`ym2612_write`, `ym2203_write`, …) and our
+link order put `libgme.a` first, so `--allow-multiple-definition` silently
+kept **GME's** MAME `ym2612_write` — which libvgm's YM2612 interface then
+called on a libvgm `FM_OPN` struct. Position stuck at 0, zero buffers, and a
+direct `_lvgm_render` kills the tab (the wasm-ld `function signature
+mismatch: ym2612_write` warning said it all along). It reproduced natively
+nowhere because native links never combined the two archives. Fix, matching
+the roadmap's prune-GME direction: our GME build compiles no VGM/GYM/HES/KSS
+(the app routes those to libvgm; `USE_GME_*=OFF` in `build-subprojects.sh`
+plus `ym2413.c`/`Sms_Apu`/`Z80` kept unconditional for NSF/SGC), so the
+duplicates are gone by construction — verified zero `ym*write` collisions
+between the archives. The Gens force this replaced is deleted (GPGX was never
+broken); YM2612 loop verification through any core is valid anyway, since all
+loop state is `PlayerA`-level and core-independent.
 
 **Known issue — N64 seek freeze (pre-existing, not our feature):**
 `N64Player.seekMs` → `_n64_seek_ms` → `decode_seek`

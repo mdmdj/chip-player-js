@@ -90,8 +90,8 @@ const chipModules = [
       '_gme_open_data',
       '_gme_ignore_silence',
       '_gme_set_tempo',
-      '_gme_seek_scaled', // seek_scaled and tell_scaled exist in
-      '_gme_tell_scaled', // github.com/mmontag/game-music-emu fork
+      '_gme_seek_scaled', // also in upstream GME; only disable_echo below is fork-only
+      '_gme_tell_scaled',
       '_gme_set_fade',
       '_gme_voice_name',
       '_gme_set_stereo_depth',

@@ -53,6 +53,15 @@ export default class XMPPlayer extends Player {
     // Loop passes to hand libxmp for the current state (xmp_play_buffer's
     // loop count; 0 = forever). 1 ends at the scan end, like before.
     this._loopCount = 1;
+    // Learned loop band: order -> first-visit frame time. The band needs
+    // the loop start in ms, which libxmp doesn't expose -- but every
+    // order's first visit is observable, so the first backward order jump
+    // (the engine's own loop) resolves it exactly, tempo changes included.
+    // Any seek freezes learning for the rest of the song (a seek into the
+    // loop would otherwise mislabel the landing as the loop start).
+    this._orderFirstSeen = new Map();
+    this._lastPos = -1;
+    this._seekHappened = false;
     this.buffer = this.core._malloc(this.bufferSize * 16); // i16
     this.infoTexts = [];
   }
@@ -171,7 +180,7 @@ export default class XMPPlayer extends Player {
     // Fresh timeline: order first-visits (for the learned loop band) start over.
     this._orderFirstSeen = new Map();
     this._lastPos = -1;
-    this._skipOrder = null;
+    this._seekHappened = false;
 
     this.resolveParamValues(persistedSettings);
     this.setTempo(persistedSettings.tempo || 1);
@@ -214,6 +223,28 @@ export default class XMPPlayer extends Player {
     return this._positionMs;
   }
 
+  // Record each order's first visit; the first backward order jump is the
+  // engine looping, and its target's first-visit time is the loop start.
+  // The band is the repeating span [loopStart, trackEnd), shown from the
+  // first loop end on. Files without a backward jump never learn one and
+  // keep today's UI.
+  learnLoopFromOrder(pos) {
+    if (!this._orderFirstSeen || this._seekHappened) {
+      this._lastPos = pos;
+      return;
+    }
+    if (!this._orderFirstSeen.has(pos)) {
+      this._orderFirstSeen.set(pos, this._positionMs);
+    } else if (pos < this._lastPos && this.metadata) {
+      const loopStartMs = this._orderFirstSeen.get(pos);
+      if (loopStartMs >= 0 && loopStartMs < this._durationMs) {
+        this.metadata.intro_length = loopStartMs;
+        this.metadata.loop_length = this._durationMs - loopStartMs;
+      }
+    }
+    this._lastPos = pos;
+  }
+
   // Repeat One loops natively: libxmp's own play-buffer loop count (0 =
   // forever) keeps the engine replaying its loop seamlessly instead of
   // stopping at the scan end. The engine clock is positional, so it wraps
@@ -241,6 +272,20 @@ export default class XMPPlayer extends Player {
     return this.core.getValue(this.infoPtr + 14 * 4, 'i32') || 0; // loop_count
   }
 
+  // The repeating span itself, learned at the first backward order jump.
+  // Unlike the base two-pass band, this marks the loop content: XMP keeps
+  // the single-pass duration and the positional clock revisits this span on
+  // every pass, so there is no "last pass" to highlight.
+  getLoopBandMs() {
+    const meta = this.metadata;
+    if (!meta || !(meta.intro_length >= 0) || !(meta.loop_length > 0)) return null;
+    const durationMs = this.getDurationMs();
+    const endMs = durationMs > 0
+      ? Math.min(meta.intro_length + meta.loop_length, durationMs)
+      : meta.intro_length + meta.loop_length;
+    return endMs > meta.intro_length ? { startMs: meta.intro_length, endMs } : null;
+  }
+
   getDurationMs() {
     return this._durationMs;
   }
@@ -255,6 +300,9 @@ export default class XMPPlayer extends Player {
   }
 
   seekMs(seekMs) {
+    // A seek into the loop would mislabel the landing as the loop start, so
+    // it freezes band learning for the rest of the song (safe floor: no band).
+    this._seekHappened = true;
     // xmp_seek_time_frame (libxmp 4.7+) is a more accurate seek; fall back to
     // xmp_seek_time on older builds (same millisecond units).
     if (this.core._xmp_seek_time_frame) {

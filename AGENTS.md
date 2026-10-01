@@ -274,7 +274,13 @@ registered, and `libvgm-wrapper.cpp` forces `emuCore[0] = FCC_GENS` for the
 YM2612 device after `LoadFile` (same pattern as the SN76496→Maxim and
 YMF278B→MAME overrides). Do **not** disable GPGX alone: with no YM2612 core the
 device is unregistered and every VGM using it fails with
-`RuntimeError: null function`.
+`RuntimeError: null function`. A/B verified 2026-10 (Green Hill Zone, same
+bytes as prod): with the force, position advances and FM voices play; with
+it disabled (`#if 0` + relink), position sits at 0 for 40s while a control
+VGM advances normally. The force is required in our toolchain, but prod
+shows no stall with both cores compiled, so it stays a `DEV-BEGIN/DEV-END`
+region (overlay-only) until proven upstream-safe; the loop functions,
+compat defines and parentIdx removal promote normally.
 
 **Known issue — N64 seek freeze (pre-existing, not our feature):**
 `N64Player.seekMs` → `_n64_seek_ms` → `decode_seek`

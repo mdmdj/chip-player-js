@@ -90,12 +90,12 @@ const chipModules = [
       '_gme_open_data',
       '_gme_ignore_silence',
       '_gme_set_tempo',
-      '_gme_seek_scaled', // also in upstream GME; only disable_echo below is fork-only
+      '_gme_seek_scaled', // also in upstream GME; only disable_echo below is 0.6.4+
       '_gme_tell_scaled',
       '_gme_set_fade',
       '_gme_voice_name',
       '_gme_set_stereo_depth',
-      // '_gme_disable_echo', // fork-only API; not in the vendored game-music-emu
+      // '_gme_disable_echo', // 0.6.4+ API; not in the vendored 2018 game-music-emu
       '_gme_enable_accuracy',
     ],
     flags: [

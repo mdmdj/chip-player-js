@@ -123,13 +123,40 @@ check('first backward jump wins (Bgm01-like, skips then 43->10)', () => {
   assert.deepStrictEqual(p.getLoopBandMs(), { startMs: 80000, endMs: 291840 });
 });
 
-check('seek freezes learning for the rest of the song', () => {
-  const { p } = makePlayer(200000);
+check('seek then natural loop still learns with the pre-seek start time', () => {
+  const { p } = makePlayer(96000);
+  let emits = 0;
+  p.on('playerStateUpdate', (s) => { if (!s.isStopped) emits++; });
   drive(p, p.core, orders([0, 1, 2, 3, 4, 5], 8000));
   p.seekMs(50000);
-  drive(p, p.core, orders([20, 21, 22, 3, 4], 8000).map((f, i) => ({ ...f, time: 100000 + i * 8000 })));
+  drive(p, p.core, orders([6, 7, 8, 9, 10, 11, 1, 2], 8000)
+    .map((f, i) => ({ ...f, time: 50000 + i * 8000 })));
+  // order 1 was visited pre-seek at t=8000: learning succeeds anyway.
+  assert.strictEqual(p.metadata.intro_length, 8000);
+  assert.strictEqual(p.metadata.loop_length, 88000);
+  assert.strictEqual(emits, 1);
+});
+
+check('backward seek landing fakes no band', () => {
+  const { p } = makePlayer(200000);
+  drive(p, p.core, orders([0, 1, 2, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40], 8000));
+  p.seekMs(40000); // lands back on order 5: discontinuity, not a loop
+  drive(p, p.core, [{ pos: 5, time: 40000 }, { pos: 5, time: 40800 }, { pos: 6, time: 48000 }]);
   assert.strictEqual(p.metadata.intro_length, undefined);
   assert.strictEqual(p.getLoopBandMs(), null);
+});
+
+check('seek-skipped loop start stays unlearned, never corrupt', () => {
+  const { p } = makePlayer(200000);
+  let emits = 0;
+  p.on('playerStateUpdate', (s) => { if (!s.isStopped) emits++; });
+  drive(p, p.core, orders([0, 1, 2], 8000));
+  p.seekMs(160000); // lands past the loop (target order 8 never visited)
+  drive(p, p.core, [{ pos: 20, time: 160000 }, { pos: 21, time: 168000 }, { pos: 22, time: 176000 },
+    { pos: 8, time: 184000 }, { pos: 8, time: 184800 }, { pos: 9, time: 192000 }]);
+  assert.strictEqual(p.metadata.intro_length, undefined);
+  assert.strictEqual(p.getLoopBandMs(), null);
+  assert.strictEqual(emits, 0);
 });
 
 check('loop from the very start learns nothing (zuma-like, 23->0)', () => {

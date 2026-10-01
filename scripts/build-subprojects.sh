@@ -63,15 +63,21 @@ SELECTED=("$@")
 
 build_gme() {
   echo "== game-music-emu =="
-  # Full GME chip set (default). VGM/GYM are also present here even though
-  # libvgm normally handles them: disabling them leaves NSF's VRC7 (ym2413,
-  # Z80) undefined, because GME's CMake gates those shared sources behind the
-  # VGM/GYM block. The resulting duplicate FM symbols are tolerated at link
-  # time with --allow-multiple-definition (see build-chip-core.js).
+  # Pruned to the formats our app routes to GME (NSF/NSFE/SPC/AY/GBS, plus
+  # SAP/SGC which stay compilable but unrouted): VGM/GYM/HES/KSS are OFF
+  # because libvgm owns all OPN/OPL emulation, and leaving their sources in
+  # silently duplicates FM symbols at link time (libgme.a winning over
+  # libvgm's cores -- see --allow-multiple-definition). NSF's VRC7 (ym2413.c)
+  # is unconditional in gme/CMakeLists.txt so pruning is safe; the linker
+  # will name anything else it still needs.
   configure game-music-emu \
     -DBUILD_SHARED_LIBS=OFF \
     -DENABLE_UBSAN=OFF \
     -DUSE_GME_SGC=ON \
+    -DUSE_GME_VGM=OFF \
+    -DUSE_GME_GYM=OFF \
+    -DUSE_GME_HES=OFF \
+    -DUSE_GME_KSS=OFF \
     -DZLIB_LIBRARY="$EM_ZLIB_LIB" -DZLIB_INCLUDE_DIR="$EM_ZLIB_INC"
   ( cd game-music-emu/build && emmake make -j"$(nproc)" )
   echo "   -> game-music-emu/build/gme/libgme.a"
@@ -156,12 +162,15 @@ build_libvgm() {
   # enabled, and the GPGX core (fmopn.c) is what leaves YM2612 VGMs (e.g. the
   # gym set) stuck at position 0 under Emscripten. With both built, libvgm picks
   # the first matching core, which is Gens.
+  # SNDEMU_YM2612_NUKED must ALSO stay ON: 2612intf.h unconditionally enables
+  # EC_YM2612_NUKED, so its object references nukedopn2_* and nothing links
+  # without the ym3438 core archive member.
   # Iconv_LIBRARY=c: CMake's FindIconv detects iconv built into libc but then
   # fails its find_library(c) check; satisfy it so libvgm uses real charset
   # conversion (musl iconv supports UTF-16LE/CP1252/CP932).
   configure libvgm -DBUILD_LIBEMU=ON -DBUILD_LIBPLAYER=ON \
     -DBUILD_PLAYER=OFF -DBUILD_VGM2WAV=OFF -DBUILD_TESTS=OFF -DUSE_SANITIZERS=OFF \
-    -DSNDEMU_YM2612_GENS=ON -DSNDEMU_YM2612_GPGX=ON \
+    -DSNDEMU_YM2612_GENS=ON -DSNDEMU_YM2612_GPGX=ON -DSNDEMU_YM2612_NUKED=ON \
     -DIconv_LIBRARY=c \
     -DZLIB_LIBRARY="$zlibLib" -DZLIB_INCLUDE_DIR="$zlibInc"
   ( cd libvgm/build && emmake make -j"$(nproc)" )

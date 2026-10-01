@@ -302,23 +302,9 @@ UINT8 lvgm_load_data(lvgm_player *player, const UINT8 *data, const UINT32 size) 
     }
   }
 
-  // DEV-BEGIN (stripped for promotion; force the Gens YM2612 core: the
-  // default GPGX core leaves YM2612 VGMs stuck at position 0 under our
-  // Emscripten build (verified A/B: stock GPGX sticks, Gens plays). GPGX is
-  // built alongside Gens so libvgm still registers the YM2612 device.
-  // Unknown whether upstream's toolchain reproduces the stall, so this
-  // stays local until proven there; everything else in this file promotes.
-  for (int instance = 0; instance < 2; instance++) {
-    devOptID = PLR_DEV_ID(DEVID_YM2612, instance);
-    retVal = base->GetDeviceOptions(devOptID, devOpts);
-    if (!(retVal & 0x80)) {
-      if (devOpts.emuCore[0] != FCC_GENS) {
-        devOpts.emuCore[0] = FCC_GENS;
-        base->SetDeviceOptions(devOptID, devOpts);
-      }
-    }
-  }
-  // DEV-END
+  // NOTE: no per-device core override here. (A Gens YM2612 force lived here
+  // briefly while a GME/libvgm ym2612_write symbol collision made GPGX look
+  // broken; pruning GME's OPN objects fixed the real cause. See AGENTS.md.)
 
   voices.clear();
   chips.clear();

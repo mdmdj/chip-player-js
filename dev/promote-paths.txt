@@ -25,8 +25,8 @@ game-music-emu/**
 libvgm/**
 libxmp/**
 # Vendored engine trees with no current diff, listed so future fixes here can
-# never leak into the PR by default (cf. mdxmini, which did).
-mdxmini/**
+# never leak into the PR by default. (mdxmini is deliberately NOT listed: its
+# 4 changed files are pure loop feature + bug fixes and promote with the PR.)
 psflib/**
 lazyusf2/**
 farbrausch-v2m/**

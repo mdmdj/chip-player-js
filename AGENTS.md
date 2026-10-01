@@ -69,8 +69,8 @@ parent** without leaking overlay content. The intended path is a single button:
 `promote.sh` requires a clean overlay tree, then, for every file that differs
 from the feature branch, it:
 - skips anything listed in `dev/promote-paths.txt` (overlay-only **areas**:
-  `dev/**`, the engine build scripts, `src/bindings/**`, vendored trees, and the
-  few "seam" files),
+  `dev/**`, the engine build scripts, `src/bindings/libsidplayfp-wrapper.cpp`,
+  vendored trees, and the few "seam" files),
 - strips `DEV-BEGIN … DEV-END` regions from the rest,
 - promotes only files whose stripped content still differs from the feature
   branch (i.e. real feature work).
@@ -98,14 +98,45 @@ share the feature state.
   over a path-list entry. "Additive" is the key property: do not put code inside
   a region that prod also needs.
 
-### The 1–2 hard-coded seams
+### What promotes and what does not — how to judge
 
-A few seams genuinely cannot be additive regions, because prod must still load
-the real module while dev loads an alternative *instead of* it. These live in
-`server/index.js` (`DEV_AUTH_MODULE` require fallback; skia-canvas try/catch) and
-are handled by listing the file as overlay-only. At final PR prep these are the
-"1–2 lines" to remove by hand. (`src/components/UserProvider.js` can be
-region-stripped, but is currently listed for safety.)
+Three buckets. When unsure, ask rather than guess: a wrong call either leaks
+dev tooling into Matt's review or strands feature work on the overlay.
+
+1. **Personal dev tooling → never promotes.** Anything that exists for our
+   working style rather than the product: everything under `dev/` (shims,
+   harnesses, `promote.sh` itself), `AGENTS.md`, `.nvmrc`, the LAN-hostname
+   tweak in `src/config/index.js`, `DEV_AUTH_MODULE`/skia seams, the SID
+   silent-stub era hacks. Rule of thumb: if Matt would have to *remove* it
+   to run his own setup, it stays out. Upstream has its own dev tooling;
+   ours is not compatible with his by design.
+2. **Short-term hacks to get it working → do not promote; fix properly or
+   drop.** Markers: hard-coded values that only hold locally, disabled code
+   (`#if 0`), duplicated logic that should live in one place, workarounds
+   whose root cause is unknown. Either promote the real fix (e.g. pruning
+   GME's OPN objects instead of forcing a core per-device) or leave the hack
+   overlay-only. Never promote a hack "temporarily".
+3. **Legit feature work and bug fixes → promote.** The test from the 2026-10
+   audits: *does it improve the user experience, and is it compatible with
+   upstream?* Sub-tune folders/identity/sharing, Repeat One per format,
+   loop bands, the piano-roll expansion, the `?play=` songfolder landing —
+   all feature. Compatible bug fixes ride along: the mdxmini fade/position
+   latches, the `parentIdx` removal (upstream master doesn't compile without
+   it), the `Spc_Sfm`/`Spc_Cpu` build fixes, the OPL3-bank guards. Vendored
+   engine *sources* promote only as minimal, obviously-correct fixes; our
+   build *scripts* and core *selection* (which cores/flags we compile) never
+   do — Matt builds his own way. Compat shims that degrade gracefully
+upstream (XMP seek fallback, ADLMIDI guards) promote as-is; behavior that
+only makes sense against our core (SID wrapper, our core *selection*) stays
+out.
+
+### The 1 hard-coded seam
+
+One seam genuinely cannot be an additive region, because prod must still load
+the real module while dev loads an alternative *instead of* it:
+`server/index.js` (`DEV_AUTH_MODULE` require fallback; skia-canvas try/catch)
+is listed as overlay-only. At final PR prep these are the "1–2 lines" to
+remove by hand.
 
 Because the file is path-listed, `promote.sh` also skips the feature work that
 lands here: the `?play=` handler's `subtuneCount` injection into `__chipConfig`
@@ -116,11 +147,12 @@ promotes normally.)
 ### Known gaps (handoff state)
 
 - Divergence audit 2026-10: `master..dev/overlay` is 73 files; every one is
-  classified. The promote dry run (19 files) was reviewed hunk-by-hunk
+  classified. The promote dry run (26 files) was reviewed hunk-by-hunk
   (plus two subagent passes): all promoted content is feature, no dev
   leakage. `dev/promote-paths.txt` now excludes every vendored tree
   (mdxmini fixes were leaking into the plan before) and no longer lists
-  `N64Player`/`UserProvider` (both region-strip cleanly).
+  `N64Player`/`UserProvider`/`MIDIPlayer`/`XMPPlayer` (all promote cleanly:
+  regions strip, portable guards ride along).
 - Remaining path-listed files are intentional: `src/config/index.js` is
   dev-only throughout (LAN hostname) and `server/index.js` stays listed
   (DEV_AUTH_MODULE/skia seams) plus two hand items: the `?play=` handler's
@@ -218,17 +250,15 @@ Build env vars (all optional):
 Status: **GME, libvgm, libxmp, N64 (lazyusf2), V2M, MDX, fluidlite MIDI, SID,
 libADLMIDI (OPL3 MIDI)** build and run.
 
-Provenance warning (2026-10): the running `src/chip-core.wasm` was linked
-2026-09-30 from out-of-band `../` sibling clones that have since been
-deleted — NOT from the in-repo trees below. The version forensics point at
-newer-than-vendored siblings (notably libxmp: the built seek semantics
-differ from vendored 4.5, which the XMP slider relies on). All in-repo
-`.a` archives still exist, so a pure relink (`node
-scripts/build-chip-core.js` with siblings absent, normalizing to in-repo)
-restores provenance with zero recompilation — but expect behavior deltas
-(newer→4.5.0 libxmp seek, unknown libvgm pin→stale tree) and re-verify the
-loop matrices after. The `../` remotes were never recorded, so re-cloning
-today would fetch different code: do not reintroduce siblings.
+Provenance note (2026-10, resolved): the running `src/chip-core.wasm` was
+once linked from out-of-band `../` sibling clones, then purely relinked from
+the in-repo trees (byte-identical across runs — deterministic). Sibling
+remotes were never recorded; do not reintroduce siblings. Known in-repo
+behavior deltas vs the old build: libxmp is 4.5.0 (positional clock and
+`loop_count` verified; `seek_time` semantics are 4.5's), libvgm is the stale
+vendored tree (durations/fade math differ from newer; `GetCurLoop` never
+counts — deep-leave is position-based), GME is the 2018 tree (no
+`disable_echo`; everything used is feature-detected).
 
 Vendored-tree fixes needed to build (all pre-existing upstream breakage):
 - `game-music-emu/gme/CMakeLists.txt`: exclude `Spc_Sfm.cpp` (SFM type disabled);
@@ -251,7 +281,7 @@ Vendored-tree fixes needed to build (all pre-existing upstream breakage):
   dead `ALLOC_NORMAL` export; SID/SGC skip logic.
 - `src/libxmp-lite`: built directly from `libxmp/src` + lite `format.c` /
   `mod_load.c` (the lite CMake project doesn't configure under CMake 4).
-- `src/players/{GME,XMP,MIDI}Player.js`: feature-detect fork-only APIs
+- `src/players/{GME,XMP,MIDI}Player.js`: feature-detect newer APIs
   (`gme_disable_echo`, `xmp_seek_time_frame`) and ADLMIDI bank options.
 
 **libADLMIDI (OPL3 MIDI)** is built with the **Nuked** OPL3 core, not DOSBox.
@@ -666,15 +696,16 @@ checks no longer work. Compare a live context to a stored one with
     interaction bugs on `dev/overlay`: indefinite playback ended early under
     Skip Silence (`469a8c78a`), the head folded into the band with repeat off
     (`0b8d76781`) or when repeat was enabled mid-fade (`082b83cb2`), the
-    Off→All no-op toggle re-derived the loop count and jumped (`96683ba3e`),
-    and leaving a deep repeat cut the song instead of playing the fade
-    (`08e3bc86b`). GME was probed in-app and has no loop regions in this
-    catalog (whole-track restart already complies). **MDX is now seamless too**
-    (native loop + exact band; see "MDX (mdxmini)"), and **MIDI is now seamless
-    too** (JS event-loop wrap + shared band; see the per-format table),
-    leaving XMP/V2M on stop + reload. GME/MDX/`durationExtended`/
-    `getLoopBandMs` all feed the shared `Player` hooks; keep engine policy in
-    the engine's own player class.
+     Off→All no-op toggle re-derived the loop count and jumped (`96683ba3e`),
+     and leaving a deep repeat cut the song instead of playing the fade
+     (`08e3bc86b`). GME was probed in-app and has no loop regions in this
+     catalog (whole-track restart already complies). **MDX is now seamless too**
+     (native loop + exact band; see "MDX (mdxmini)"), and **MIDI is now seamless
+     too** (JS event-loop wrap + shared band; see the per-format table),
+     **XMP is now seamless too** (native loop count + learned band), leaving
+     V2M alone on stop + reload. GME/MDX/`durationExtended`/
+     `getLoopBandMs` all feed the shared `Player` hooks; keep engine policy in
+     the engine's own player class.
   - **Overlay/promote system** is in place but **WIP**: `dev/promote.sh` +
     `dev/promote-paths.txt` + `DEV-BEGIN/DEV-END` regions. See "Dev overlay &
     promotion" for the mechanism and the **Known gaps** (a few shared files are
@@ -758,9 +789,11 @@ checks no longer work. Compare a live context to a stored one with
       same, so this is faithful, not our regression; an upstream fix is still
       needed for the slider / `?t=` links to be trustworthy on SID. Also pin the
       fork branch to a commit for reproducible builds.
-    - **(2) GME → `mmontag/game-music-emu` fork + newer libxmp, and prune GME.**
-     Restores `gme_disable_echo` / `xmp_seek_time_frame` (both feature-detected
-     with call sites, neither exported). `fluid_synth_get_active_voice_count`
+    - **(2) Newer GME (upstream ≥0.6.4) + newer libxmp, and prune GME.**
+     Upstream 0.6.4 already has `gme_disable_echo`/`seek_scaled` (confirmed
+     via Matt's change notes and live probes of his core — stop chasing the
+     fork question; if our stuff works with 0.6.4, that is far enough).
+     `fluid_synth_get_active_voice_count`
      has neither a call site nor an export today. The prune half is done:
      our GME build compiles no VGM/GYM/HES/KSS (see "libvgm YM2612 core").
    - **(3) Per-engine wasm modules (isolation epic).**
@@ -1044,13 +1077,14 @@ only armed when `silenceDuration >= 0`, and both arms must end the song):
   UI: indefinite with no band, once past the track length, parks the slider
   head at the end (it rides the first pass normally), lets the elapsed time
   climb unbounded, and labels the duration "Looping"
-  (`AppFooter.isBlindLoopNow` + `TimeSlider`). The past-the-end condition is
-  the scoping: MIDI/XMP/SID end at their length and loop via stop + reload,
-  so they never dwell there and keep the normal slider. Toggling repeat off
-  restores the clamped head/duration (and the pending JS fade ends the song,
-  since the position is already past the length). Repeat-off plays to the
-  natural end + JS fade. Real per-track regions would need `mmontag/game-music-emu`
-  fork work (roadmap) — NSFe `loop` chunk support and/or a native loop API.
+   (`AppFooter.isBlindLoopNow` + `TimeSlider`). The past-the-end condition is
+   the scoping: SID ends at its length and loops via stop + reload, so it
+   never dwells there and keeps the normal slider (MIDI and XMP used to be in
+   this group before they got native looping). Toggling repeat off
+   restores the clamped head/duration (and the pending JS fade ends the song,
+   since the position is already past the length). Repeat-off plays to the
+   natural end + JS fade. Real per-track regions would need GME-side work
+   (roadmap) — NSFe `loop` chunk support and/or a native loop API.
 - **N64/USF:** whole-track model like GME, loop inferred from the `fade` tag
   (`song_loops`) + the indefinite flag. Under Repeat One the engine flag is
   OR'd from Repeat One and the setting (so looping tracks free-run past

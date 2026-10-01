@@ -57,11 +57,14 @@ export default class XMPPlayer extends Player {
     // the loop start in ms, which libxmp doesn't expose -- but every
     // order's first visit is observable, so the first backward order jump
     // (the engine's own loop) resolves it exactly, tempo changes included.
-    // Any seek freezes learning for the rest of the song (a seek into the
-    // loop would otherwise mislabel the landing as the loop start).
+    // First-visit times are absolute song times, so seeks can't corrupt
+    // them; the only unlearnable case is a backward jump onto an order the
+    // linear flow never visited (a seek landing past the loop, or a skipped
+    // region), whose true start is unknowable -- that visit is skipped so a
+    // loop-end time can never become a loop start.
     this._orderFirstSeen = new Map();
     this._lastPos = -1;
-    this._seekHappened = false;
+    this._skipOrder = null;
     this.buffer = this.core._malloc(this.bufferSize * 16); // i16
     this.infoTexts = [];
   }
@@ -180,7 +183,7 @@ export default class XMPPlayer extends Player {
     // Fresh timeline: order first-visits (for the learned loop band) start over.
     this._orderFirstSeen = new Map();
     this._lastPos = -1;
-    this._seekHappened = false;
+    this._skipOrder = null;
 
     this.resolveParamValues(persistedSettings);
     this.setTempo(persistedSettings.tempo || 1);
@@ -229,25 +232,37 @@ export default class XMPPlayer extends Player {
   // first loop end on. Files without a backward jump never learn one and
   // keep today's UI.
   learnLoopFromOrder(pos) {
-    if (!this._orderFirstSeen || this._seekHappened) {
+    const seen = this._orderFirstSeen;
+    if (!seen) {
       this._lastPos = pos;
       return;
     }
-    if (!this._orderFirstSeen.has(pos)) {
-      this._orderFirstSeen.set(pos, this._positionMs);
-    } else if (pos < this._lastPos && this.metadata && this.metadata.intro_length == null) {
-      const loopStartMs = this._orderFirstSeen.get(pos);
-      // A loop from the very start spans the whole track, so highlighting
-      // it says nothing -- the repeat indicator already covers that case.
-      if (loopStartMs > 0 && loopStartMs < this._durationMs) {
-        this.metadata.intro_length = loopStartMs;
-        this.metadata.loop_length = this._durationMs - loopStartMs;
-        // The band appears mid-song, after the footer already rendered
-        // without one -- tell the app to re-render it. Once per song.
-        this.emit('playerStateUpdate', {
-          ...this.getBasePlayerState(),
-          isStopped: false,
-        });
+    if (this._skipOrder != null && pos !== this._skipOrder) this._skipOrder = null;
+    if (this._skipOrder == null) {
+      if (!seen.has(pos)) {
+        if (pos < this._lastPos) {
+          // Backward jump onto a never-visited order: arrival from outside
+          // the linear flow, true start unknown -- skip recording this
+          // visit (and the ones that follow it) so the loop-end time can't
+          // become the loop start. Learning simply never fires here.
+          this._skipOrder = pos;
+        } else {
+          seen.set(pos, this._positionMs);
+        }
+      } else if (pos < this._lastPos && this.metadata && this.metadata.intro_length == null) {
+        const loopStartMs = seen.get(pos);
+        // A loop from the very start spans the whole track, so highlighting
+        // it says nothing -- the repeat indicator already covers that case.
+        if (loopStartMs > 0 && loopStartMs < this._durationMs) {
+          this.metadata.intro_length = loopStartMs;
+          this.metadata.loop_length = this._durationMs - loopStartMs;
+          // The band appears mid-song, after the footer already rendered
+          // without one -- tell the app to re-render it. Once per song.
+          this.emit('playerStateUpdate', {
+            ...this.getBasePlayerState(),
+            isStopped: false,
+          });
+        }
       }
     }
     this._lastPos = pos;
@@ -308,9 +323,13 @@ export default class XMPPlayer extends Player {
   }
 
   seekMs(seekMs) {
-    // A seek into the loop would mislabel the landing as the loop start, so
-    // it freezes band learning for the rest of the song (safe floor: no band).
-    this._seekHappened = true;
+    // A seek is a transport discontinuity, not a loop: forget the last
+    // position so the landing can't read as a backward jump. First-visit
+    // times are absolute, so earlier entries stay valid and learning
+    // continues (and still succeeds when the loop replays from before its
+    // start); only a loop whose start was never linearly visited stays
+    // unlearned, by the skip rule in learnLoopFromOrder.
+    this._lastPos = -1;
     // xmp_seek_time_frame (libxmp 4.7+) is a more accurate seek; fall back to
     // xmp_seek_time on older builds (same millisecond units).
     if (this.core._xmp_seek_time_frame) {

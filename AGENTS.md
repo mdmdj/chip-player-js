@@ -213,6 +213,18 @@ Build env vars (all optional):
 Status: **GME, libvgm, libxmp, N64 (lazyusf2), V2M, MDX, fluidlite MIDI, SID,
 libADLMIDI (OPL3 MIDI)** build and run.
 
+Provenance warning (2026-10): the running `src/chip-core.wasm` was linked
+2026-09-30 from out-of-band `../` sibling clones that have since been
+deleted — NOT from the in-repo trees below. The version forensics point at
+newer-than-vendored siblings (notably libxmp: the built seek semantics
+differ from vendored 4.5, which the XMP slider relies on). All in-repo
+`.a` archives still exist, so a pure relink (`node
+scripts/build-chip-core.js` with siblings absent, normalizing to in-repo)
+restores provenance with zero recompilation — but expect behavior deltas
+(newer→4.5.0 libxmp seek, unknown libvgm pin→stale tree) and re-verify the
+loop matrices after. The `../` remotes were never recorded, so re-cloning
+today would fetch different code: do not reintroduce siblings.
+
 Vendored-tree fixes needed to build (all pre-existing upstream breakage):
 - `game-music-emu/gme/CMakeLists.txt`: exclude `Spc_Sfm.cpp` (SFM type disabled);
   add missing `Spc_Cpu.cpp`/`Snes_Spc.cpp`/`Spc_Dsp.cpp` (needed by SPC + VRC7).
@@ -731,10 +743,11 @@ checks no longer work. Compare a live context to a stored one with
       needed for the slider / `?t=` links to be trustworthy on SID. Also pin the
       fork branch to a commit for reproducible builds.
    - **(2) GME → `mmontag/game-music-emu` fork + newer libxmp, and prune GME.**
-     Restores `gme_disable_echo` / `xmp_seek_time_frame` /
-     `fluid_synth_get_active_voice_count` (all feature-detected today). While
-     there, delete the `--allow-multiple-definition` hack by not linking GME's
-     OPN copy at all (trap below).
+     Restores `gme_disable_echo` / `xmp_seek_time_frame` (both feature-detected
+     with call sites, neither exported). `fluid_synth_get_active_voice_count`
+     has neither a call site nor an export today. While there, delete the
+     `--allow-multiple-definition` hack by not linking GME's OPN copy at all
+     (trap below).
    - **(3) Per-engine wasm modules (isolation epic).**
      One Emscripten `Module` per engine (own linear memory/FS) instead of one
      flat blob with global C symbols. Matches the existing per-extension player

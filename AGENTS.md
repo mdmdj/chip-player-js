@@ -1060,14 +1060,21 @@ only armed when `silenceDuration >= 0`, and both arms must end the song):
   repeat-off restores 1 (today's single pass); leaving deep sets
   `max(1, curLoop+1)` from the engine's `loop_count` so the current pass
   finishes, like VGM's `applyLoopCount`. The engine clock is positional, so
-  it wraps into the loop on its own — no band (placing it needs the loop
-  start in ms, which libxmp doesn't expose), no fold, no blind parking; the
-  head truthfully sweeps intro + loop and jumps back per pass. Catalog loop
-  census: only TECHTRIS.MOD (11→1), 01-Title.xm (13→1), Bgm01.xm (43→10)
-  and zuma.it (23→0) loop (single-outer-loop each; IT effects are numeric,
-  B=2 — an ASCII decode misses them); everything else plays straight
+  it wraps into the loop on its own — no fold, no blind parking; the head
+  truthfully sweeps intro + loop and jumps back per pass. The band is
+  *learned*, not probed: every order's first-visit frame time is recorded
+  (`learnLoopFromOrder`, ~25 lines, no new exports/rebuild/parser), and the
+  first backward order jump resolves the loop start exactly, tempo changes
+  included. It marks the repeating span [loopStart, trackEnd) from the first
+  loop end on (single-pass duration never rescales); any seek freezes
+  learning for the song, and files without a backward jump keep today's UI.
+  Catalog loop census: only TECHTRIS.MOD (11→1), 01-Title.xm (13→1), Bgm01.xm
+  (43→10) and zuma.it (23→0) loop (single-outer-loop each; IT effects are
+  numeric, B=2 — an ASCII decode misses them); everything else plays straight
   through. Verified in-app via `__cpDev` on Bgm01 (native wrap past the
-  scan end, leave-deep arms count 3 at depth 2).
+  scan end, leave-deep arms count 3 at depth 2) and TECHTRIS (band
+  [3940, 80700] learned live), plus a fake-core harness
+  (`dev/test-xmp-loops.js`, in `dev/run-tests.sh`).
 - **V2M:** no loop points in the format (fixed-length synth render); stays
   stop + reload, the lone tier-3 engine.
 

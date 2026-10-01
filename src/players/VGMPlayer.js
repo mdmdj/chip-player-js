@@ -295,7 +295,14 @@ export default class VGMPlayer extends Player {
         this.core._lvgm_set_loop_count(this.vgmCtx, 0);
       } else if (wasLooping) {
         const curLoop = this.getCurLoop();
-        const count = curLoop >= 2 ? curLoop + 1 : 2;
+        // Engine loop mirrors differ across libvgm versions (older trees
+        // never count past the first pass), so deep is decided by position
+        // too: already past the normal two-pass end means leaving deep
+        // regardless of what the mirror says.
+        const band = this.getLoopBandMs();
+        const absNow = this.getPositionMs() || 0;
+        const deep = curLoop >= 2 || (band != null && absNow >= band.endMs);
+        const count = deep ? Math.max(2, curLoop + 1) : 2;
         this.core._lvgm_set_loop_count(this.vgmCtx, count);
         // Leaving a deep repeat: the position is already past the two-pass
         // duration the wrapper reports, so the base end detector (armed again
@@ -305,7 +312,7 @@ export default class VGMPlayer extends Player {
         // The playlist clock needs no change: the display tail runs from the
         // band end for exactly fade + silence, which lands it at the two-pass
         // duration (= 100%) when the song actually ends.
-        if (curLoop >= 2)
+        if (deep)
           this.durationExtended = true;
       }
     }

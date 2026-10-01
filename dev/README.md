@@ -95,7 +95,10 @@ are removed with the rest of `dev/` before the PR.
 node dev/test-parsers.js    # parser edge cases + real files under catalog/
 node dev/test-build.js      # build-music round-trip (synthetic subdir, cleans up)
 node dev/test-sequencer.js  # sequencer sub-tune navigation with a fake player
-./dev/run-tests.sh          # all three
+node dev/test-midi-loops.js # MIDI loop regions (N64/HMI), Repeat-One wrap, roll parity
+node dev/test-xmp-loops.js  # XMP loop lever + learned band on scripted frame streams
+node dev/test-devtools.js   # __cpDev stall-watch state machine (frozen/paused/song-change)
+./dev/run-tests.sh          # all six
 ```
 
 `test-build.js` writes a temp subdir under `catalog/`, runs the builder filtered

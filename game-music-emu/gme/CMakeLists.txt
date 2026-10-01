@@ -46,38 +46,51 @@ if (USE_GME_AY OR USE_GME_KSS)
 endif()
 
 # so is Ym2612_Emu
+# NOTE (chip-player-js): our app routes VGM/GYM/HES/KSS/SAP/SGC elsewhere (or
+# nowhere) and libvgm owns all OPN/OPL emulation, so the OPN/OPL sources that
+# used to live here are gone (they duplicated libvgm's symbols and silently
+# won or lost the link; see --allow-multiple-definition). The one exception
+# is ym2413.c, which NSF's VRC7 (Nes_Vrc7_Apu.cpp) needs directly: it stays
+# unconditional. Disable the unused format emus via USE_GME_VGM=OFF etc. in
+# scripts/build-subprojects.sh.
+set(libgme_SRCS ${libgme_SRCS}
+            ym2413.c
+            Sms_Apu.cpp
+            Z80_Cpu.cpp
+            Sms_Fm_Apu.cpp
+            Ym2413_Emu.cpp
+    )
 if (USE_GME_VGM OR USE_GME_GYM)
     set(libgme_SRCS ${libgme_SRCS}
 #                Ym2612_Emu.cpp
-                fm2612.c
-                fm.c
-                fmopl.cpp
-                ymdeltat.cpp
-                Ym2612_Emu_MAME.cpp
-                Ymf262_Emu.cpp
-                dbopl.cpp
+#                fm2612.c
+#                fm.c
+#                fmopl.cpp
+#                ymdeltat.cpp
+#                Ym2612_Emu_MAME.cpp
+#                Ymf262_Emu.cpp
+#                dbopl.cpp
                 # not sure this is the optimal location for this:
                 # it might belong in some special "OPL" definition or something
-                Ym3812_Emu.cpp
-                Ym2610b_Emu.cpp
-                Ym2608_Emu.cpp
+#                Ym3812_Emu.cpp
+#                Ym2610b_Emu.cpp
+#                Ym2608_Emu.cpp
                 # these two probably should really have a special case, since
                 # I know this is used in the NES VRC7 chip as well as the
                 # Japanese SMS/Mark III FM module
-                Ym2413_Emu.cpp
-                ym2413.c
-                Sms_Fm_Apu.cpp
-                Ym2151_Emu.cpp
-                ym2151.c
-                Ym2203_Emu.cpp
-                Ymz280b_Emu.cpp
-                ymz280b.c
+#                Ym2413_Emu.cpp
+#                Sms_Fm_Apu.cpp
+#                Ym2151_Emu.cpp
+#                ym2151.c
+#                Ym2203_Emu.cpp
+#                Ymz280b_Emu.cpp
+#                ymz280b.c
 # done in MAME
 #                Ym2612_Emu.cpp
-                Z80_Cpu.cpp
+#                Z80_Cpu.cpp
                 # Extremely unsure this goes here
-                SegaPcm_Emu.cpp
-                segapcm.c
+#                SegaPcm_Emu.cpp
+#                segapcm.c
         )
 endif()
 

@@ -17,3 +17,6 @@ node "$DIR/test-midi-loops.js" 2>/dev/null
 echo
 echo "== xmp loops =="
 node "$DIR/test-xmp-loops.js" 2>/dev/null
+echo
+echo "== devtools stall watch =="
+node "$DIR/test-devtools.js" 2>/dev/null

@@ -113,6 +113,51 @@ const dev = {
     const p = getPlayer();
     if (p && p.pause) p.pause();
   },
+  // Stall watchdog: engines that wedge stop advancing positionMs while
+  // still "playing" (e.g. the GPGX YM2612 stall: position frozen at 0 with
+  // the tab alive). startStallWatch() polls in the background and warns the
+  // moment a freeze is detected, with the file/position attached, instead of
+  // silently sitting at 0. stopStallWatch() ends it. The latest verdict also
+  // rides on every snapshot() as `stall`.
+  startStallWatch(intervalMs = 2000, frozenMs = 6000) {
+    dev.stopStallWatch();
+    dev._stall = { armed: true, lastPos: null, lastT: 0, fired: false };
+    dev._stallTimer = setInterval(() => dev._stallCheck(intervalMs, frozenMs), intervalMs);
+    return 'watching for stalls';
+  },
+  stopStallWatch() {
+    if (dev._stallTimer) clearInterval(dev._stallTimer);
+    dev._stallTimer = null;
+    if (dev._stall) dev._stall.armed = false;
+    return 'stall watch stopped';
+  },
+  _stallCheck(intervalMs, frozenMs) {
+    const s = snapshot();
+    const st = dev._stall;
+    if (!st || !st.armed) return s;
+    const songKey = (s.metadata && (s.metadata.title || '')) + '@' + (s.durationMs || 0);
+    if (songKey !== st.songKey) {
+      // New song (or reload): re-arm silently.
+      dev._stall = { armed: true, songKey, lastPos: s.positionMs, lastT: performance.now(), fired: false };
+      return { ...s, stall: { stalled: false } };
+    }
+    const now = performance.now();
+    if (!s.paused && s.positionMs != null && s.positionMs === st.lastPos &&
+        now - st.lastT >= frozenMs && (s.durationMs || 0) > (s.positionMs || 0)) {
+      if (!st.fired) {
+        st.fired = true;
+        console.warn('[dev] STALL? position frozen at %s ms for %s ms (player %s, repeat %s)',
+          s.positionMs, Math.round(now - st.lastT), s.player, s.repeat);
+      }
+      return { ...s, stall: { stalled: true, frozenMs: Math.round(now - st.lastT) } };
+    }
+    if (s.positionMs !== st.lastPos) {
+      st.lastPos = s.positionMs;
+      st.lastT = now;
+      st.fired = false;
+    }
+    return { ...s, stall: { stalled: false } };
+  },
   // Sample the state every `intervalMs` for `durationMs`.
   async record(durationMs, intervalMs = 100) {
     const samples = [];

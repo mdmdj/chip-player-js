@@ -90,8 +90,13 @@ module.exports = {
     // that loads this config. src/index.js assigns it to window.ChipCoreBuildInfo,
     // so a shipped build can be asked what it was built from from the console,
     // and the literal is greppable in the bundle.
+    //
+    // Double stringify on purpose: DefinePlugin substitutes a string value as a
+    // *code fragment*, so a single JSON.stringify() lands an object literal in
+    // the bundle and window.ChipCoreBuildInfo ends up an object rather than the
+    // JSON text its documented JSON.parse() console recipe expects.
     new webpack.DefinePlugin({
-      __BUILD_INFO__: JSON.stringify(require('../scripts/build-info').buildInfo()),
+      __BUILD_INFO__: JSON.stringify(JSON.stringify(require('../scripts/build-info').buildInfo())),
     }),
     new ESLintPlugin({
       context: paths.appSrc,

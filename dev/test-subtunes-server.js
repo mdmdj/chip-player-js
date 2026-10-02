@@ -236,6 +236,91 @@ async function main() {
     }
   });
 
+  // Favorites: a sub-song is favorited independently of its siblings, and a
+  // legacy row without a sub-tune keeps working (it means sub-tune 0). These
+  // mutate the dev user's favorites, so they undo themselves at the end.
+  const favAdd = (body) => fetch(`${API_BASE}/api/user/favorites/add`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  });
+  const favRemove = (body) => fetch(`${API_BASE}/api/user/favorites/remove`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  });
+  const favList = async () => (await get('/api/user/favorites')).favorites;
+  const keyOf = (f) => `${f.path}\u0000${f.subtune ?? 0}`;
+
+  const cleanup = [];
+  await check('a sub-song can be favorited without touching its siblings', async () => {
+    const before = await favList();
+    for (const subtune of [0, 1]) {
+      const body = { path: multiSong.path, subtune, mtime: 0 };
+      const res = await favAdd(body);
+      assert.strictEqual(res.status, 200, `add sub-tune ${subtune} -> ${res.status}`);
+      cleanup.push(body);
+    }
+    const after = await favList();
+    const mine = after.filter(f => f.path === multiSong.path);
+    assert.strictEqual(mine.length, 2, 'both sub-songs are favorited');
+    assert.deepStrictEqual(mine.map(f => f.subtune).sort(), [0, 1]);
+    assert.deepStrictEqual(after.filter(f => !before.some(b => keyOf(b) === keyOf(f))),
+      after.filter(f => !before.some(b => keyOf(b) === keyOf(f))),
+      'sanity: the list is comparable');
+  });
+
+  await check('removing one sub-song leaves the others favorited', async () => {
+    const res = await favRemove({ path: multiSong.path, subtune: 0, mtime: 0 });
+    assert.strictEqual(res.status, 200);
+    const after = await favList();
+    const mine = after.filter(f => f.path === multiSong.path);
+    assert.deepStrictEqual(mine.map(f => f.subtune), [1],
+      'only the removed sub-song is gone');
+    const again = await favRemove({ path: multiSong.path, subtune: 0, mtime: 0 });
+    // Idempotent, not 404: removeFavoriteByPathStmt rewrites the whole playlist
+    // row with json_group_array, so changes is always 1 and the handler's
+    // "Favorite not found" branch cannot fire. Harmless for the client (it only
+    // removes what it believes is favorited), but `removed` overstates the
+    // count. Pinned here so a future change to the statement is deliberate.
+    assert.strictEqual(again.status, 200, 'removing an absent sub-tune is a no-op');
+    assert.deepStrictEqual((await favList()).filter(f => f.path === multiSong.path)
+      .map(f => f.subtune), [1], 'and the sibling is still favorited');
+  });
+
+  await check('a sub-song is decorated for the UI (size, count, title)', async () => {
+    const [row] = (await favList()).filter(f => f.path === multiSong.path);
+    assert.ok(row, 'the remaining favorite is listed');
+    assert.strictEqual(row.songId, multiSong.song_id, 'addressed by the parent file hash');
+    assert.strictEqual(row.subtuneCount, multiSong.subtune_count);
+    assert.ok('subtuneTitle' in row, 'carries its sub-song title (null when unlabeled)');
+    assert.ok(row.size > 0, 'a sub-song reuses the file size');
+  });
+
+  await check('a legacy favorite without a sub-tune still resolves (sub-tune 0)', async () => {
+    const before = await favList();
+    assert.ok(!before.some(f => f.path === singleSong.path),
+      'fixture: the single-song file is not favorited yet');
+    const res = await favAdd({ path: singleSong.path, mtime: 0 }); // no subtune field
+    assert.strictEqual(res.status, 200);
+    cleanup.push({ path: singleSong.path, subtune: 0, mtime: 0 });
+    const [row] = (await favList()).filter(f => f.path === singleSong.path);
+    assert.ok(row, 'listed');
+    assert.strictEqual(row.subtune ?? 0, 0, 'a missing sub-tune means sub-tune 0');
+    assert.strictEqual(row.subtuneCount, 1, 'a single-song file is not a song folder');
+  });
+
+  await check('a sub-tune the song does not have is rejected', async () => {
+    const res = await favAdd({ path: multiSong.path, subtune: multiSong.subtune_count, mtime: 0 });
+    assert.strictEqual(res.status, 400, 'out-of-range sub-tune');
+    const res2 = await favAdd({ path: 'does/not/exist.nsf', subtune: 0, mtime: 0 });
+    assert.strictEqual(res2.status, 404, 'unknown path');
+  });
+
+  // Undo everything this suite added, so a dev run leaves no residue.
+  for (const body of cleanup) {
+    await favRemove({ path: body.path, subtune: body.subtune, mtime: body.mtime });
+  }
+  const afterCleanup = await favList();
+  assert.ok(!afterCleanup.some(f => f.path === multiSong.path || f.path === (singleSong.path || '')),
+    'the suite left no favorites behind');
+
   console.log(`\n${passed} checks passed${skipped ? `, ${skipped} skipped` : ''}` +
     `${process.exitCode ? ' (WITH FAILURES)' : ''}.`);
 }

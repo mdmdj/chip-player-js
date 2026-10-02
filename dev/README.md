@@ -54,11 +54,9 @@ The bypass supports two modes via `DEV_AUTH_MODE`:
 - `bypass` (default): every authenticated request uses `dev-user`.
 - `proxy`: uses the `x-dev-uid` request header.
 
-`optionalAuth` only sets a user when an `Authorization` header is present. To
-make the client's favorite buttons work, `patch-user-provider.js` injects a
-fake `user` (uid `dev-user`, `getIdToken() -> 'dev-token'`); the bypass ignores
-the token. `DEV_AUTH_MODE=proxy` is unused by the client today but kept for a
-future header-based shim.
+`optionalAuth` only sets a user when an `Authorization` header is present.
+`DEV_AUTH_MODE=proxy` is unused by the client today but kept for a future
+header-based shim.
 
 ## Test fixtures
 
@@ -83,8 +81,8 @@ node scripts/build-chip-core.js
 ```
 
 This writes `src/chip-core.{js,wasm}` (gitignored) which the app loads instead
-of the stub. `dev/patch-sid-stub.js` keeps SID files silent-but-harmless on
-cores built without libsidplayfp; with the real SID core it is a no-op.
+of the stub. Re-running `dev/apply.sh` overwrites a real build with the stub
+again, so build after applying.
 
 ## Tests
 

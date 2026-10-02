@@ -244,6 +244,11 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
     `track_ended` versus an internally looping driver). Two `xfail`s, both
     confirmed in-app: the VGM indefinite-playback fade (a known limit, see the
     decision below) and the unguarded `lvgm_get_cur_loop` sentinel.
+  - `node dev/test-v2m-loops.js` — the bottom rung of the ladder: V2M has no
+    loop points and no loop API, so the engine ends, the song stops, and the
+    sequencer either advances or re-loads. Pins the tier-3 contract (no band, no
+    late-restart seek, the base detector standing down under Repeat One) rather
+    than rendering.
   - `node dev/test-midi-loops.js`, `node dev/test-xmp-loops.js` — loop-region
     harnesses for the MIDI and XMP Repeat One work. The MIDI one also *builds*
     minimal SMFs (`buildMidi`) for the edge shapes, so they do not depend on a
@@ -259,6 +264,7 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
     row with no sub-tune). It mutates the dev user's favorites and undoes them.
     Skips cleanly if the server or the catalog is absent.
   - `node dev/test-songrefs.js` — the `SongRef` identity model in `src/util.js`.
+  - `node dev/test-devtools.js` — the `__cpDev` stall-watch latch.
   - `./dev/run-tests.sh` — runs all of the above. Dev-only, not part of the PR.
   - `dev/README.md` documents the shims.
   - Two tracked seams keep the untracked overrides loadable without touching
@@ -838,8 +844,9 @@ because `Sequencer` copies its context).
     fade (`durationExtended`) instead of ending instantly. On `dev/overlay`.
 14. MDX Repeat One: native engine loop (`mdx_set_max_loop(0)`) plus an exact
     loop band from new `mdxmini` loop-point getters; two engine fixes (fade-end
-    latch, microsecond-accurate position) came out of it. See "MDX (mdxmini)".
-    On `dev/overlay`.
+    latch, microsecond-accurate position) came out of it, plus the fade-tail
+    capture ported from VGM so enabling Repeat One mid-fade keeps the head on
+    the tail. See "MDX (mdxmini)". On `dev/overlay`.
 
 **Caveat:** `Sequencer.playContext` copies its context, so array-identity
 checks no longer work. Compare a live context to a stored one with
@@ -942,7 +949,9 @@ checks no longer work. Compare a live context to a stored one with
     defect, but the precondition is "no file loaded" (nothing to loop) and the
     next `loadData` → `resolveParamValues` → `setParameter('indefinitePlayback',
     false)` → `SetLoopCount(2)` resets it. Masked by call ordering, not design;
-    worth the 1-line guard, not worth describing as a hang.
+    worth the 1-line guard, not worth describing as a hang. Now pinned by an
+    `xfail` in `dev/test-v2m-loops.js`'s sibling `dev/test-vgm-loops.js` (the
+    fake models the export's `UINT32` truncation, so the consequence is visible).
   - **Not fixed on purpose:** the remaining ~20 candidates were either cosmetic,
     guarded behind a zero-width window in this catalog, or required speculative
     defensive code. Full list is in this session's transcript, not here.
@@ -1042,9 +1051,11 @@ checks no longer work. Compare a live context to a stored one with
   - **Dev shims are untracked-stage, not tracked patches** (no more
     `*.dev-backup` / `--revert` for auth/UserProvider). `dev/apply.sh` /
     `dev/remove.sh` manage them; `git status` stays clean after apply.
-  - The PR was last promoted at commit `51cf89a1e` on the feature branch, then
-    reset to `d44899faf` during the promote rework. Re-run `./dev/promote.sh`
-    (dry run first) to see the current feature delta.
+  - The feature branch is at `a99ae9ef8` and the trees are in sync: both branches
+    are pushed to `origin`, and `dev/overlay` differs from the feature branch by
+    DEV regions only. `dev/promote.sh` reports "Nothing to promote" — the
+    healthy state after a promote. Do not run it as a per-change ritual (see
+    "Dev overlay & promotion").
 - **Remote dev access (LAN/WSL/Tailscale):** fixed, dev tooling only (not the
   feature). Two root causes:
   - `scripts/start.js` built its own minimal `WebpackDevServer` options and
@@ -1086,13 +1097,15 @@ checks no longer work. Compare a live context to a stored one with
    looping model" below for the contract and the VGM baseline.
 2. Testing. Dev-only harnesses cover parsers (`dev/test-parsers.js`),
    build-music round-trips (`dev/test-build.js`), sequencer navigation, the
-   SongRef identity model, the VGM/GME/MDX/MIDI/XMP loop model, the SID/N64 end
-   detector, and the sub-tune server API -- 151 checks via `./dev/run-tests.sh`
-   (2 reported known failures: the VGM indefinite-playback fade, a known limit,
-   and the unguarded `lvgm_get_cur_loop` sentinel). Not yet harnessed: GME's
-   in-buffer `restartTrack` path (the N64 equivalent is covered), and the client
-   component behavior (favorites/sub-tunes/share links/top charts), which needs
-   a browser.
+   SongRef identity model, the loop model of every engine (VGM/GME/MDX/MIDI/XMP
+   plus V2M's tier-3 contract), the SID/N64 end detector, and the sub-tune server
+   API -- 159 checks via `./dev/run-tests.sh` (2 reported known failures: the VGM
+   indefinite-playback fade, a known limit, and the unguarded
+   `lvgm_get_cur_loop` sentinel). Every engine now has a harness, including the
+   GME in-buffer `restartTrack` path. Not yet harnessed: the client component
+   behavior (favorites/sub-tunes/share links/top charts), which needs a browser
+   -- and that is a decision, not just a gap: the repo has no test runner and no
+   jsdom, so it means adding a dependency or hand-verifying in the preview.
    They are removed with `dev/` before the PR, which still ships without tests
    (matching the repo, which has no test runner or CI). If Matt wants a durable
    suite, the same harnesses could move to a tracked `test/` dir and run via
@@ -1509,7 +1522,8 @@ feature only holds for the engines above.
 The fallback ladder to apply per engine, in order: **native region loop ->
 in-buffer restart -> stop + reload**. Tier 1 is done (VGM, MDX, XMP-native
 loop count), tier 2 is done
-(GME, N64, SID-tail-restart). Tier 3 is the stop + reload every remaining player is on, and it also
+(GME, N64, SID-tail-restart). Tier 3 is the stop + reload, which V2M is the last
+player still on, and it also
 re-fetches the whole file per cycle — for a sub-tune that is the entire
 multi-song NSF, every loop.
 

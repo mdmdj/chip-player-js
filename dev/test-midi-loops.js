@@ -181,6 +181,54 @@ check('setPosition still restores program state (seek regression)', () => {
   assert.ok(p.channelProgramNums.some(v => v !== 0) || p.events.length > 0);
 });
 
+// --- Synthetic fixtures -----------------------------------------------------
+// The catalog files above cover the real shapes, but the edge cases (an N64
+// CC102/103 pair in a format-2 file, a lone CC111 near the end, post-loop
+// padding with no notes) are exactly the ones we would not want to depend on a
+// user-supplied file for, so they are built here as minimal SMFs. tpq = 120, so
+// one beat is 120 ticks and 1000ms.
+const TPQ = 120;
+
+function varlen(n) {
+  const out = [n & 0x7f];
+  n >>= 7;
+  while (n > 0) { out.unshift((n & 0x7f) | 0x80); n >>= 7; }
+  return out;
+}
+
+// events: [{ delta, bytes }], or an array of such lists for a multi-track file.
+// Returns the whole file as bytes. Header layout is MThd + 6-byte payload:
+// format and track count are 2 bytes each, division 2 bytes.
+function buildMidi(events, { format = 1, division = TPQ } = {}) {
+  const trackLists = Array.isArray(events[0]) ? events : [events];
+  const chunks = trackLists.map((list) => {
+    const track = [];
+    for (const ev of list) track.push(...varlen(ev.delta), ...ev.bytes);
+    track.push(...varlen(0), 0xff, 0x2f, 0x00); // end of track
+    return [0x4d, 0x54, 0x72, 0x6b,
+      (track.length >> 24) & 0xff, (track.length >> 16) & 0xff,
+      (track.length >> 8) & 0xff, track.length & 0xff, ...track];
+  });
+  const header = [0x4d, 0x54, 0x68, 0x64, 0, 0, 0, 6,
+    (format >> 8) & 0xff, format & 0xff,
+    (chunks.length >> 8) & 0xff, chunks.length & 0xff,
+    (division >> 8) & 0xff, division & 0xff];
+  return new Uint8Array([...header, ...chunks.flat()]);
+}
+
+// Set the tempo so the ms assertions are exact (default 500000 us/beat = 120bpm).
+const tempo = (usPerQuarter = 500000) => ({ delta: 0, bytes: [0xff, 0x51, 0x03,
+  (usPerQuarter >> 16) & 0xff, (usPerQuarter >> 8) & 0xff, usPerQuarter & 0xff] });
+const cc = (controller, value = 0) => ({ delta: 0, bytes: [0xb0, controller, value] });
+const ccAt = (delta, controller, value = 0) => ({ delta, bytes: [0xb0, controller, value] });
+const noteOnAt = (delta, channel = 0, pitch = 60, velocity = 100) =>
+  ({ delta, bytes: [0x90 | channel, pitch, velocity] });
+const noteOffAt = (delta, channel = 0, pitch = 60) => ({ delta, bytes: [0x80 | channel, pitch, 0] });
+
+function parseBytes(bytes) {
+  return new MIDIFile(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+}
+
 function rollFor(rel) {
   const buf = fs.readFileSync(path.join(ROOT, 'catalog', rel));
   return parseMidiData(new Uint8Array(buf));
@@ -225,6 +273,130 @@ check('Gyrocopter: padded END_OF_TRACK does not inflate duration', () => {
   // Dead air clamped: duration is two passes, band is the second half.
   assert.ok(dur - (loopStartMs + 2 * B) < 1000, `dur=${dur} bandEnd=${loopStartMs + 2 * B}`);
   assert.ok(dur / B < 2.01, `dur/B=${dur / B}`);
+});
+
+// --- Synthetic shapes -------------------------------------------------------
+
+check('N64 shape: a CC102/103 pair in a format-2 file gives a region', () => {
+  // Mario Kart marks the loop with CC102 at 0 and CC103 at the end of the body.
+  const bytes = buildMidi([
+    [tempo(), ccAt(0, 102)],
+    [tempo(), noteOnAt(0), noteOffAt(TPQ), noteOnAt(0), noteOffAt(TPQ), cc(103), noteOnAt(0), noteOffAt(TPQ)],
+  ], { format: 2 });
+  const mf = parseBytes(bytes);
+  const range = mf.findLoopRange(mf.tracks.map((_, i) => mf.getTrackEvents(i)));
+  assert.ok(range, 'a region was found');
+  assert.strictEqual(range.startTick, 0);
+  assert.strictEqual(range.endTick, 2 * TPQ, 'the CC103 tick');
+  // The player's band must be the same region the file reports, in the same
+  // ms the piano roll and the audio use. (Asserted against the file rather
+  // than an absolute value: for format 2 the clock is deliberately not reset
+  // between tracks, so a marker sitting in the conductor track gets a
+  // different origin than one in the music track. Real format-2 files are
+  // covered by the Mario Kart checks above, which assert exact ms.)
+  const { loopStartMs, loopEndMs } = mf.getPlaybackEvents(true);
+  const p = makePlayer(stubSynth(true));
+  p.load(mf, true);
+  assert.ok(p.loop, 'the player picked the region up');
+  assert.strictEqual(p.loop.startMs, loopStartMs);
+  assert.strictEqual(p.loop.lengthMs, loopEndMs - loopStartMs);
+  assert.ok(p.loop.lengthMs > 0, 'the region has a length');
+  const roll = parseMidiData(bytes);
+  assert.ok(roll.durationMs > 0, 'the piano roll reads the same file');
+});
+
+check('a paired loop marker shorter than a beat is not a region', () => {
+  // RPG Maker writes a "don't loop" flag at the very end of a song: a
+  // start/end pair a few ticks apart must be treated as a marker, not a region.
+  const bytes = buildMidi([
+    tempo(),
+    noteOnAt(0), noteOffAt(TPQ * 4),
+    cc(110), noteOnAt(0), noteOffAt(4), cc(111),
+  ]);
+  const mf = parseBytes(bytes);
+  const range = mf.findLoopRange(mf.tracks.map((_, i) => mf.getTrackEvents(i)));
+  assert.strictEqual(range, null, `too short to be a region (got ${JSON.stringify(range)})`);
+  const p = makePlayer(stubSynth(true));
+  p.load(mf, true);
+  assert.ok(!p.loop, 'no band, and repeat one plays straight through');
+});
+
+check('lone CC111 (RPG Maker): the region runs to the end of the track', () => {
+  const bytes = buildMidi([
+    tempo(),
+    noteOnAt(0), noteOffAt(TPQ * 2),
+    noteOnAt(0), noteOffAt(TPQ * 2),
+    cc(111),
+    noteOnAt(0), noteOffAt(TPQ * 2),
+    noteOnAt(0), noteOffAt(TPQ * 2),
+  ]);
+  const mf = parseBytes(bytes);
+  const p = makePlayer(stubSynth(true));
+  p.load(mf, true);
+  assert.ok(p.loop, 'a region starting at the marker');
+  assert.ok(Math.abs(p.loop.startMs - 2000) < 1, `start=${p.loop.startMs}ms (2 beats in)`);
+  assert.ok(p.loop.jumpMs > p.loop.startMs, 'and it wraps back to the marker');
+});
+
+check('post-loop content with no notes does not inflate the duration', () => {
+  // Converter output pads with note-less events a whole loop past the loop end
+  // (Gyrocopter's END_OF_TRACK). Those must attach at the loop end, not push
+  // the song out with dead air.
+  const loopLen = 2 * TPQ;
+  const bytes = buildMidi([
+    tempo(),
+    noteOnAt(0), noteOffAt(loopLen),
+    noteOnAt(0), noteOffAt(loopLen),
+    cc(103),
+    // Note-less cleanup a whole loop past the loop end, as converters emit.
+    { delta: loopLen, bytes: [0xb0, 7, 100] },
+    cc(64, 0), cc(120, 0), cc(121, 0),
+  ]);
+  const mf = parseBytes(bytes);
+  const p = makePlayer(stubSynth(true));
+  p.load(mf, true);
+  // The looped event list is two passes, so a clean file ends at 2 * loopLength
+  // however far the padding is spaced out.
+  const { events, loopStartMs, loopEndMs } = mf.getPlaybackEvents(true);
+  const last = events[events.length - 1].playTime;
+  const B = loopEndMs - loopStartMs;
+  assert.ok(Math.abs(last - (loopStartMs + 2 * B)) < 1,
+    `dead air after the loop: playTime=${last} expected=${loopStartMs + 2 * B}`);
+});
+
+check('post-loop content *with* notes keeps its exact timing', () => {
+  const loopLen = 2 * TPQ;
+  const bytes = buildMidi([
+    tempo(),
+    noteOnAt(0), noteOffAt(loopLen),
+    noteOnAt(0), noteOffAt(loopLen),
+    cc(103),
+    noteOnAt(0, 0, 64), noteOffAt(TPQ),
+  ]);
+  const mf = parseBytes(bytes);
+  const p = makePlayer(stubSynth(true));
+  p.load(mf, true);
+  const events = mf.getPlaybackEvents(true).events;
+  const last = events[events.length - 1];
+  assert.ok(last.playTime >= p.loop.lengthMs + TPQ / (TPQ / 1000) - 1,
+    `a composed ending keeps its timing: playTime=${last.playTime} loopLength=${p.loop.lengthMs}`);
+});
+
+check('a file with no loop markers plays straight through under repeat one', () => {
+  const bytes = buildMidi([
+    tempo(),
+    noteOnAt(0), noteOffAt(TPQ),
+    noteOnAt(0), noteOffAt(TPQ),
+  ]);
+  const mf = parseBytes(bytes);
+  const p = makePlayer(stubSynth(true));
+  p.load(mf, true);
+  assert.ok(!p.loop, 'no markers, no region');
+  p.play(() => {});
+  p.setLooping(true);
+  p.setPosition(p.getDuration() - 30);
+  p.processPlaySynth(0, 2048);
+  assert.ok(p.paused, 'repeat one cannot invent a loop, so the song ends');
 });
 
 console.log(`\n${passed} checks passed${process.exitCode ? ' (WITH FAILURES)' : ''}.`);

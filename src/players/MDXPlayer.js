@@ -10,6 +10,10 @@ const fileExtensions = [
 ];
 const MOUNTPOINT = '/mdx';
 const INT16_MAX = Math.pow(2, 16) - 1;
+// MDX songs with an infinite loop play this many times before fading out.
+// Two passes matches libvgm's default and the app's loop model (see
+// Player.getLoopBandMs), so MDX gets the same slider band and head fold.
+const DEFAULT_LOOP_COUNT = 2;
 
 export default class MDXPlayer extends Player {
   constructor(...args) {
@@ -23,6 +27,9 @@ export default class MDXPlayer extends Player {
     this.playerKey = 'mdx';
     this.name = 'Sharp X68000 MDX Player';
     this.speed = 1;
+    this._durationMs = 0;
+    this._maxLoopCount = DEFAULT_LOOP_COUNT;
+    this.durationExtended = false; // repeat-one left after passing the fade
     this.mdxCtx = this.core._mdx_create_context();
     this.core._mdx_set_rate(this.sampleRate);
     this.core._mdx_set_dir(this.mdxCtx, MOUNTPOINT);
@@ -75,6 +82,8 @@ export default class MDXPlayer extends Player {
           const len = buf.indexOf(0);
           const title = new TextDecoder("shift-jis").decode(buf.subarray(0, len));
           this.metadata = { title: title || pathe.basename(filename) };
+          this._readLoopRegion();
+          this.applyLoopCount(false);
 
           this.resolveParamValues(persistedSettings);
           this.setTempo(persistedSettings.tempo || 1);
@@ -85,6 +94,36 @@ export default class MDXPlayer extends Player {
           });
         });
       });
+  }
+
+  // Measure the song's built-in loop region once, at load. _mdx_get_length
+  // re-parses the song and resets the track work area to the start, so it must
+  // only run here (never while playing -- callers poll getDurationMs every
+  // 100 ms tick, and re-reading it would rewind the engine each tick). Passing
+  // max_loop=2 also makes the engine record where its infinite loop completes
+  // each pass: length(k) = intro + k * loop + fade, so two recorded loop points
+  // give the exact loop length and, since the fade is a constant offset, the
+  // intro as well (no fade guessing). Engines without the loop API fall back to
+  // a plain duration and no band.
+  _readLoopRegion() {
+    const core = this.core;
+    this.durationExtended = false;
+    this._maxLoopCount = DEFAULT_LOOP_COUNT;
+    if (typeof core._mdx_set_max_loop === 'function') {
+      core._mdx_set_max_loop(this.mdxCtx, DEFAULT_LOOP_COUNT);
+    }
+    this._durationMs = core._mdx_get_length(this.mdxCtx) * 1000;
+    if (typeof core._mdx_get_loop_start_ms === 'function' &&
+        typeof core._mdx_get_loop_length_ms === 'function') {
+      const introMs = core._mdx_get_loop_start_ms(this.mdxCtx);
+      const loopMs = core._mdx_get_loop_length_ms(this.mdxCtx);
+      if (loopMs > 0) {
+        // The shared intro_length/loop_length vocabulary maps MDX onto the
+        // generic loop hooks, exactly as VGMPlayer does for libvgm.
+        this.metadata.intro_length = introMs;
+        this.metadata.loop_length = loopMs;
+      }
+    }
   }
 
   processAudioInner(channels) {
@@ -128,8 +167,82 @@ export default class MDXPlayer extends Player {
     return this.core._mdx_get_position_ms(this.mdxCtx);
   }
 
+  // Repeat One loops MDX natively: the engine's own infinite loop, with the
+  // loop-count limit disabled (0 = forever) so the region repeats seamlessly
+  // instead of fading after N passes. Leaving Repeat One restores a finite
+  // count so the current pass finishes and the engine fades, like libvgm.
+  setLooping(looping) {
+    const wasLooping = this.looping;
+    super.setLooping(looping);
+    // The engine loops natively; the base "late repeat" seek would fight it.
+    this.restartAtEndPending = false;
+    this.applyLoopCount(wasLooping);
+  }
+
+  // Loop count to hand the engine for the current state: 0 forever while
+  // repeating, otherwise finish the in-progress pass and fade. Only re-derive
+  // when actually leaving a looping state; a no-op toggle must not push the
+  // fade boundary past a fade that is already scheduled.
+  applyLoopCount(wasLooping) {
+    if (!this.mdxCtx || typeof this.core._mdx_set_max_loop !== 'function') return;
+    const hasLoop = this.metadata && this.metadata.loop_length > 0;
+    if (this.looping) {
+      this._maxLoopCount = 0;
+    } else if (wasLooping && hasLoop) {
+      const curLoop = this.getCurLoop();
+      this._maxLoopCount = Math.max(DEFAULT_LOOP_COUNT, curLoop + 1);
+      // Leaving after passing the default fade: the position is already past
+      // the reported duration, so the base end detector must stand down and let
+      // the engine's fade end the song (the display runs its tail from here).
+      if (curLoop >= DEFAULT_LOOP_COUNT) this.durationExtended = true;
+    } else {
+      this._maxLoopCount = DEFAULT_LOOP_COUNT;
+    }
+    this.core._mdx_set_max_loop(this.mdxCtx, this._maxLoopCount);
+  }
+
+  // Which pass of the built-in loop we are in (0 during the intro/first pass).
+  getCurLoop() {
+    const meta = this.metadata;
+    const intro = meta ? meta.intro_length : -1;
+    const loop = meta ? meta.loop_length : 0;
+    if (!(loop > 0) || !(intro >= 0)) return 0;
+    return Math.max(0, Math.floor((this.getPositionMs() - intro) / loop));
+  }
+
+  // Same playlist-position model as VGMPlayer: the head cycles inside the
+  // highlighted band (the last non-fade pass) while repeating, and runs the
+  // fade tail from the band end once the fade starts, so toggling Repeat One
+  // never makes the head jump.
+  getDisplayPositionMs() {
+    const abs = this.getPositionMs();
+    const meta = this.metadata;
+    const intro = meta ? meta.intro_length : -1;
+    const loop = meta ? meta.loop_length : 0;
+    if (!(intro >= 0) || !(loop > 0) || abs == null) return abs;
+
+    const band = this.getLoopBandMs();
+    if (!band) return abs;
+    const bandStart = band.startMs;
+    const bandEnd = band.endMs;
+    if (abs <= bandStart) return abs;
+
+    const fadeStartMs = this.looping ? null : (intro + this._maxLoopCount * loop);
+    if (fadeStartMs != null && abs >= fadeStartMs) {
+      return Math.min(bandEnd + (abs - fadeStartMs), this.getDurationMs());
+    }
+
+    if (abs < bandEnd) return abs;
+    const phase = ((abs - intro) % loop + loop) % loop;
+    return bandStart + phase;
+  }
+
+  isPlayingIndefinitely() {
+    return this.looping || !!this.durationExtended;
+  }
+
   getDurationMs() {
-    return this.core._mdx_get_length(this.mdxCtx) * 1000;
+    return this._durationMs;
   }
 
   getMetadata() {

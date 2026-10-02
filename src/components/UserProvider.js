@@ -27,7 +27,9 @@ const DEFAULT_SETTINGS = {
   showVisualizer: false,
   theme: 'msdos',
   silenceDuration: -1,
+  showLoopArea: true,
 };
+
 
 const UserProvider = ({ children }) => {
   // Use authState hook for user state
@@ -56,6 +58,7 @@ const UserProvider = ({ children }) => {
       return DEFAULT_SETTINGS;
     }
   });
+
 
   useEffect(() => {
     // Initialize Firebase

@@ -105,7 +105,9 @@ export default class GMEPlayer extends Player {
       return;
     }
 
-    const playIndefinitely = !!this.params.indefinitePlayback;
+    // Repeat-one behaves like "Indefinite Playback": GME has no native loop
+    // control, so we skip the JS fadeout and keep rendering the looped track.
+    const playIndefinitely = !!this.params.indefinitePlayback || this.looping;
 
     if (!playIndefinitely && this.getDurationMs() > 0 && this.getPositionMs() >= this.getDurationMs() && this.fadingOut === false) {
       console.log('[GMEPlayer] Starting JS fadeout at %d ms.', this.getPositionMs());
@@ -113,7 +115,21 @@ export default class GMEPlayer extends Player {
       this.fadingOut = true;
     }
 
-    const trackEnded = core._gme_track_ended(this.gmeCtx) === 1 || this.fadeFinished;
+    let trackEnded = core._gme_track_ended(this.gmeCtx) === 1 || this.fadeFinished;
+
+    if (playIndefinitely) {
+      // GME has no loop API, and once it reports the track ended gme_play only
+      // produces silence. Restart the track to loop it (repeat-one or the
+      // Indefinite Playback setting). Looping chip drivers (e.g. NSF) never
+      // report track ended; they loop internally, so there is nothing to
+      // restart -- letting them run is the seamless case. Never restart at
+      // the track length: that would cut a seamlessly looping driver with a
+      // hard restart.
+      if (trackEnded) {
+        this.restartTrack();
+        trackEnded = false;
+      }
+    }
 
     if (!trackEnded) {
       core._gme_play(this.gmeCtx, this.bufferSize * 2, this.buffer);
@@ -177,6 +193,7 @@ export default class GMEPlayer extends Player {
     this.fadingOut = false;
     this.fadeStartMs = null;
     this.fadeFinished = false;
+    this.restartAtEndPending = false;
     this.subtune = subtune;
     this.metadata = this._parseMetadata(subtune);
     this.emit('playerStateUpdate', {
@@ -195,6 +212,7 @@ export default class GMEPlayer extends Player {
     this.fadingOut = false;
     this.fadeStartMs = null;
     this.fadeFinished = false;
+    this.restartAtEndPending = false;
     this.seekTargetMs = null;
     this.seekRequestId = null;
     this.currentFileExt = pathe.extname(filepath);
@@ -306,6 +324,24 @@ export default class GMEPlayer extends Player {
     return 0;
   }
 
+  getDisplayPositionMs() {
+    // Playlist position for the slider head. Tracks with a real loop region
+    // fold into the band while looping; anything else shows the real
+    // position. Blind loops (indefinite with no known region) are handled in
+    // the footer, which parks the head and lets the elapsed time climb.
+    const abs = this.getPositionMs();
+    const band = this.getLoopBandMs();
+    if (band) {
+      if (abs <= band.startMs) return abs;
+      const looping = this.looping || !!this.params.indefinitePlayback;
+      if (!looping) return abs;
+      const loopLength = band.endMs - band.startMs;
+      if (loopLength <= 0) return abs;
+      return band.startMs + ((abs - band.startMs) % loopLength);
+    }
+    return abs;
+  }
+
   getMetadata() {
     return this.metadata;
   }
@@ -325,7 +361,8 @@ export default class GMEPlayer extends Player {
         break;
       case 'disableEcho':
         this.params[id] = !!value;
-        if (this.gmeCtx) core._gme_disable_echo(this.gmeCtx, value ? 1 : 0);
+        // gme_disable_echo is a 0.6.4+ API; older builds omit it.
+        if (this.gmeCtx && core._gme_disable_echo) core._gme_disable_echo(this.gmeCtx, value ? 1 : 0);
         break;
       case 'enableAccuracy':
         this.params[id] = !!value;
@@ -366,6 +403,32 @@ export default class GMEPlayer extends Player {
 
   setFadeout(startMs) {
     // JS-based fade is used in processAudioInner instead
+  }
+
+  setLooping(looping) {
+    super.setLooping(looping);
+    // Clear any fade in progress so toggling repeat mid-song takes effect now.
+    this.fadingOut = false;
+    this.fadeStartMs = null;
+    this.fadeFinished = false;
+  }
+
+  // Indefinite Playback behaves like Repeat One: the engine keeps rendering
+  // past durationMs, so the base end detector must stay out of the way.
+  isPlayingIndefinitely() {
+    return this.looping || !!this.params.indefinitePlayback;
+  }
+
+  restartTrack() {
+    this.fadingOut = false;
+    this.fadeStartMs = null;
+    this.fadeFinished = false;
+    this.silenceSamplesRemaining = 0;
+    this.onSilenceEnd = null;
+    core._gme_start_track(this.gmeCtx, this.subtune);
+    // gme_start_track resets the fade; push it far out again so the restarted
+    // track keeps looping instead of being cut off by the next fade.
+    core._gme_set_fade(this.gmeCtx, 200000000);
   }
 
   getVoiceMask() {

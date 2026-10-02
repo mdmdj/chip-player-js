@@ -20,6 +20,18 @@
 #include "utils/MemoryLoader.h"
 #include "emu/EmuCores.h"
 
+// Compatibility with the vendored libvgm, which predates a few names this
+// wrapper uses. (The upstream fork names devices OKIM*, uses a bool for
+// GetCurTime's loop flag, and has no PLR_DEV_INFO.parentIdx.)
+#ifndef DEVID_MSM6258
+#define DEVID_MSM6258 DEVID_OKIM6258
+#endif
+#ifndef DEVID_MSM6295
+#define DEVID_MSM6295 DEVID_OKIM6295
+#endif
+#define PLAYTIME_TIME_FILE 0
+#define PLAYTIME_LOOP_INCL 1
+
 /* C wrapper functions */
 typedef struct lvgm_player lvgm_player;
 
@@ -302,14 +314,16 @@ UINT8 lvgm_load_data(lvgm_player *player, const UINT8 *data, const UINT32 size) 
     }
   }
 
+  // NOTE: no per-device core override here. (A Gens YM2612 force lived here
+  // briefly while a GME/libvgm ym2612_write symbol collision made GPGX look
+  // broken; pruning GME's OPN objects fixed the real cause. See AGENTS.md.)
+
   voices.clear();
   chips.clear();
   size_t curDev;
   for (curDev = 0; curDev < diList.size(); curDev++) {
     const PLR_DEV_INFO& pdi = diList[curDev];
-    if (pdi.parentIdx != (UINT32)-1) {
-      continue;
-    }
+    // The vendored libvgm has no parentIdx; it only lists primary devices.
     const char* rawDevName = SndEmu_GetDevName(pdi.type, 1, pdi.devCfg);
     std::string devName = getNiceChipName(pdi.type, rawDevName);
 
@@ -367,6 +381,62 @@ UINT32 lvgm_get_duration_ms(lvgm_player *player) {
 
   secs *= playerA->GetPlaybackSpeed();
   return UINT32(secs * 1000.);
+}
+
+// Loop region: the first pass is intro + loop, and GetLoopTicks() is the loop
+// length, so the loop starts at total - loop. Both return 0 when no loop points
+// are defined (the player reports GetLoopTicks() == 0).
+UINT32 lvgm_get_loop_start_ms(lvgm_player *player) {
+  PlayerA* playerA = real(player);
+  PlayerBase* base = playerA->GetPlayer();
+  if (base == nullptr || base->GetLoopTicks() == 0)
+    return 0;
+  double secs = base->Tick2Second(base->GetTotalTicks() - base->GetLoopTicks());
+  return UINT32(secs * playerA->GetPlaybackSpeed() * 1000.);
+}
+
+UINT32 lvgm_get_loop_end_ms(lvgm_player *player) {
+  PlayerA* playerA = real(player);
+  PlayerBase* base = playerA->GetPlayer();
+  if (base == nullptr || base->GetLoopTicks() == 0)
+    return 0;
+  double secs = base->Tick2Second(base->GetTotalTicks());
+  return UINT32(secs * playerA->GetPlaybackSpeed() * 1000.);
+}
+
+// Current loop index (0 = 1st loop, 1 = 2nd loop, ...); 0 while in the intro.
+UINT32 lvgm_get_cur_loop(lvgm_player *player) {
+  return real(player)->GetCurLoop();
+}
+
+// Position as if the track were played once, with completed loops subtracted
+// (libvgm's GetCurTime(false)). This is the "playlist" position: it steps back
+// at each loop boundary and is what the UI head/time should follow, while
+// lvgm_get_position_ms() stays the absolute "time playing".
+UINT32 lvgm_get_playlist_position_ms(lvgm_player *player) {
+  double secs = real(player)->GetCurTime(0);
+  return UINT32(secs * 1000.);
+}
+
+// Absolute position where the fade begins (end of the last loop) for the
+// currently configured loop count. Used to place the loop band's last instance.
+UINT32 lvgm_get_fade_start_ms(lvgm_player *player) {
+  PlayerA* playerA = real(player);
+  PlayerBase* base = playerA->GetPlayer();
+  if (base == nullptr)
+    return 0;
+  double secs = base->Tick2Second(base->GetTotalPlayTicks(playerA->GetLoopCount()));
+  return UINT32(secs * playerA->GetPlaybackSpeed() * 1000.);
+}
+
+// Sets how many times a looping track plays before fading out (0 = forever).
+// Used for repeat-one, independent of the global Indefinite Playback setting.
+void lvgm_set_loop_count(lvgm_player *player, UINT32 count) {
+  PlayerA* playerA = real(player);
+  playerA->SetLoopCount(count);
+  if (count != 0 && playerA->GetPlayer() != nullptr && playerA->GetCurLoop() >= count) {
+    playerA->FadeOut();
+  }
 }
 
 void lvgm_set_indefinite_playback(lvgm_player *player, uint8_t enabled) {

@@ -221,6 +221,8 @@ extern void* mdx_parse_mml_ym2151_async_initialize(MDX_DATA* in_mdx, PDX_DATA* i
 extern int mdx_parse_mml_ym2151_async(songdata *data, int track_mute_mask);
 extern int mdx_parse_mml_ym2151_make_samples(short *buffer,int buffer_size, songdata *);
 extern int mdx_parse_mml_get_tempo(void* in_self);
+extern long mdx_parse_mml_get_loop_first_us(void* in_self);
+extern long mdx_parse_mml_get_loop_second_us(void* in_self);
 
 extern int mdx_parse_mml_ym2151_async_get_length(songdata *data);
 

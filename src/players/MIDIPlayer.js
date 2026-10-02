@@ -198,18 +198,20 @@ export default class MIDIPlayer extends Player {
       },
     });
 
-    // Populate OPL3 banks
-    const numBanks = core._adl_getBanksCount();
-    const ptr = core._adl_getBankNames();
-    const oplBanks = [];
-    for (let i = 0; i < numBanks; i++) {
-      oplBanks.push({
-        label: core.UTF8ToString(core.getValue(ptr + i * 4, '*')),
-        value: i,
-      });
+    // Populate OPL3 banks (only when the core was built with libADLMIDI).
+    if (core._adl_getBanksCount && core._adl_getBankNames) {
+      const numBanks = core._adl_getBanksCount();
+      const ptr = core._adl_getBankNames();
+      const oplBanks = [];
+      for (let i = 0; i < numBanks; i++) {
+        oplBanks.push({
+          label: core.UTF8ToString(core.getValue(ptr + i * 4, '*')),
+          value: i,
+        });
+      }
+      const oplDef = this.paramDefs.find(def => def.id === 'opl3bank');
+      if (oplDef) oplDef.options = [{ label: 'OPL3 Bank', items: oplBanks }];
     }
-    this.paramDefs.find(def => def.id === 'opl3bank').options =
-      [{ label: 'OPL3 Bank', items: oplBanks }];
 
     this.webMidiIsInitialized = false;
     // this.midiFilePlayer = new MIDIFilePlayer({ output: dummyMidiOutput });
@@ -381,6 +383,14 @@ export default class MIDIPlayer extends Player {
     // Checking filepath doesn't work for dragged files. Force to true during development.
     const useTrackLoops = filepath.includes('SoundFont MIDI');
     this.midiFilePlayer.load(midiFile, useTrackLoops);
+    // Loop region in the shared intro_length/loop_length vocabulary, so the
+    // generic slider band and head fold apply (see Player.getLoopBandMs).
+    // Parsed here at load time from the file's own loop points — N64
+    // CC102/103 or HMI CC110/111 — no catalog work needed.
+    const loop = this.midiFilePlayer.getLoopRegion();
+    this.metadata = loop && loop.lengthMs > 0
+      ? { intro_length: loop.startMs, loop_length: loop.lengthMs }
+      : null;
     this.midiFilePlayer.play(() => this.handleSongEnd());
 
     this.resume();
@@ -403,7 +413,8 @@ export default class MIDIPlayer extends Player {
     // Crude bank matching for a few specific games. :D
     const fp = filepath.toLowerCase().replace('_', ' ');
     const opl3def = this.paramDefs.find(def => def.id === 'opl3bank');
-    if (opl3def) {
+    // No bank options when the core lacks libADLMIDI.
+    if (opl3def && opl3def.options) {
       const opl3banks = opl3def.options[0].items;
       const findBank = (str) => opl3banks.findIndex(bank => bank.label.indexOf(str) > -1);
       let bankId = null;
@@ -551,6 +562,32 @@ export default class MIDIPlayer extends Player {
 
   getPositionMs() {
     return this.midiFilePlayer.getPosition();
+  }
+
+  // Playlist position: cycle the head inside the highlighted band while
+  // repeating (same model as VGMPlayer). MIDI has no fade: past the band the
+  // song simply ends, so with repeat off the head always runs live and
+  // toggling repeat never moves it.
+  getDisplayPositionMs() {
+    const abs = this.getPositionMs();
+    const meta = this.metadata;
+    if (!meta || !(meta.intro_length >= 0) || !(meta.loop_length > 0) || abs == null)
+      return abs;
+    const band = this.getLoopBandMs();
+    if (!band) return abs;
+    if (abs <= band.endMs) return abs;
+    if (!this.looping) return abs;
+    const phase = (((abs - meta.intro_length) % meta.loop_length) + meta.loop_length) % meta.loop_length;
+    return band.startMs + phase;
+  }
+
+  // Repeat One wraps the JS event loop back to the second pass at the end of
+  // the list; the base "late repeat" seek would fight it (same as VGMPlayer).
+  // Files without a loop region keep the stop-and-reload fallback.
+  setLooping(looping) {
+    super.setLooping(looping);
+    this.restartAtEndPending = false;
+    if (this.midiFilePlayer) this.midiFilePlayer.setLooping(looping);
   }
 
   seekMs(ms) {

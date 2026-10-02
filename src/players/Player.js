@@ -43,6 +43,7 @@ export default class Player extends EventEmitter {
     this.params = {};
     this.infoTexts = [];
     this.looping = false; // infinite looping mode (vs. normal mode where it stops at end of song)
+    this.restartAtEndPending = false; // repeat-one enabled after the loop end
     this.silenceDuration = -1;
     this.silenceSamplesRemaining = 0;
     this.onSilenceEnd = null;
@@ -121,6 +122,14 @@ export default class Player extends EventEmitter {
   getPositionMs() {
     console.debug(`Player.getPositionMs() not implemented for ${this.constructor.name}.`);
     return 0;
+  }
+
+  // Position for the slider head and time label. getPositionMs() is the
+  // absolute "time playing" (it keeps counting across loops); players that can
+  // loop a region override this to fold the loop phase into the displayed
+  // "playlist" position so the head repeats the region instead of running on.
+  getDisplayPositionMs() {
+    return this.getPositionMs();
   }
 
   seekMs(ms) {
@@ -288,6 +297,45 @@ export default class Player extends EventEmitter {
 
   setLooping(looping) {
     this.looping = looping;
+    // If repeat-one is switched on while playback is already past the end of
+    // the loop region, never jump the transport back into the loop. Finish the
+    // song, then restart from the top (handled in processAudio).
+    this.restartAtEndPending = looping && this.getLoopEndMs() != null &&
+      this.getPositionMs() > this.getLoopEndMs();
+  }
+
+  // End of the loop region in ms, or null when the track defines no loop.
+  getLoopEndMs() {
+    const meta = this.metadata;
+    return meta && meta.loop_length > 0 && meta.intro_length >= 0
+      ? meta.intro_length + meta.loop_length
+      : null;
+  }
+
+  // Highlight band for the time slider, in ms, or null when the track defines
+  // no loop region. The band is the LAST loop instance before the fade
+  // (default playback is intro + two passes + fade): that gives the user as
+  // long as possible to decide to stay, and toggling repeat never shifts the
+  // band. Reads the shared intro_length/loop_length vocabulary; engines whose
+  // loop semantics differ override this.
+  getLoopBandMs() {
+    const meta = this.metadata;
+    if (!meta || !Number.isFinite(meta.intro_length) || meta.intro_length < 0 ||
+        !Number.isFinite(meta.loop_length) || meta.loop_length <= 0)
+      return null;
+    const startMs = meta.intro_length + meta.loop_length;
+    let endMs = meta.intro_length + 2 * meta.loop_length;
+    const durationMs = this.getDurationMs();
+    if (durationMs > 0) endMs = Math.min(endMs, durationMs);
+    return endMs > startMs ? { startMs, endMs } : null;
+  }
+
+  // True when playback legitimately runs past durationMs and the engine (not
+  // the base end detector) owns the end: Repeat One, a player's
+  // indefinite-playback setting, or an extended tail left over from leaving a
+  // deep repeat. Position keeps running past durationMs in all of those.
+  isPlayingIndefinitely() {
+    return this.looping;
   }
 
   setSilenceDuration(seconds) {
@@ -347,6 +395,16 @@ export default class Player extends EventEmitter {
       return;
     }
 
+    // Repeat-one was enabled after the loop end: don't jump back into the
+    // loop, but restart the whole song once it reaches the end.
+    if (this.looping && this.restartAtEndPending) {
+      const duration = this.getDurationMs();
+      if (duration > 0 && this.getPositionMs() >= duration) {
+        this.restartAtEndPending = false;
+        this.seekMs(0);
+      }
+    }
+
     const start = performance.now();
     this.processAudioInner(output);
     const end = performance.now();
@@ -355,7 +413,7 @@ export default class Player extends EventEmitter {
       for (let ch = 0; ch < output.length; ch++) {
         output[ch].fill(0);
       }
-    } else if (this.silenceDuration >= 0 && !this.paused && !this.looping && !this.fadingOut && output.length > 0) {
+    } else if (this.silenceDuration >= 0 && !this.paused && !this.isPlayingIndefinitely() && !this.fadingOut && output.length > 0) {
       const duration = this.durationMs;
       const position = this.getPositionMs();
 

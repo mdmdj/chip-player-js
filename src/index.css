@@ -18,6 +18,7 @@
     --button:     #66d;
     --selected:   #00f;
     --focus:      #00f;
+    --loop-region: #00f; /* shaded span of a song's looping section */
     --background: #008;
     --shadow:     #005;
     --border:     #ff0;  /* todo: replace instances of clickable with this */
@@ -423,6 +424,15 @@ body,#root {
     top: calc((var(--charH) - var(--railH)) / 2);
     box-sizing: border-box;
     border: 1px solid var(--clickable);
+}
+
+.Slider-loop {
+    height: var(--charH);
+    top: 0;
+    position: absolute;
+    box-sizing: border-box;
+    background-color: var(--loop-region);
+    pointer-events: none;
 }
 
 .Slider-knob {

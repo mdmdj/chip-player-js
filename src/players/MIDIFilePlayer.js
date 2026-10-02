@@ -58,6 +58,14 @@ function MIDIPlayer(options) {
   this.channelProgramNums = [];
   this.textInfo = [];
   this.isAuditioning = false;
+  // Loop region in first-pass ms ({startMs, lengthMs, jumpMs, jumpIndex}),
+  // or null when the file defines no loop. jumpMs/jumpIndex start the second
+  // pass (the slider band); wrapping there instead of the loop start keeps
+  // the head cycling in the band, like the libvgm Repeat One.
+  this.loop = null;
+  this.looping = false;
+  // Note-on pitches still ringing per channel, for a clean loop wrap.
+  this.activeNotes = new Map();
 
   // Disabled due to "Page prevented back/forward cache restoration".
   // window.addEventListener('unload', this.stop);
@@ -68,14 +76,27 @@ MIDIPlayer.prototype.load = function (midiFile, useTrackLoops = false) {
   this.stop();
   this.position = 0;
   this.elapsedTime = 0;
-  if (useTrackLoops) {
-    console.debug('Processing MIDI track loops...');
-    const tracks = midiFile.tracks.map((_, i) => midiFile.getTrackEvents(i));
-    this.events = midiFile.getLoopedEvents(tracks, 2);
-  } else {
-    this.events = midiFile.getEvents();
+  this.loop = null;
+  this.activeNotes.clear();
+  // Same expanded list the piano roll parses, so audio and roll agree.
+  const { events, loopStartMs, loopEndMs } = midiFile.getPlaybackEvents(useTrackLoops);
+  this.events = events;
+  if (loopEndMs != null && loopEndMs > (loopStartMs || 0)) {
+    const startMs = loopStartMs || 0;
+    const jumpMs = startMs + (loopEndMs - startMs);
+    let jumpIndex = events.findIndex(e => e.playTime >= jumpMs);
+    if (jumpIndex < 0) jumpIndex = events.length;
+    this.loop = { startMs, lengthMs: loopEndMs - startMs, jumpMs, jumpIndex };
   }
   this.summarizeMidiEvents();
+};
+
+MIDIPlayer.prototype.getLoopRegion = function () {
+  return this.loop;
+};
+
+MIDIPlayer.prototype.setLooping = function (looping) {
+  this.looping = !!looping;
 };
 
 MIDIPlayer.prototype.doSkipSilence = function () {
@@ -126,13 +147,17 @@ MIDIPlayer.prototype.processPlaySynth = function (buffer, bufferSize) {
         switch (event.subtype) {
           case MIDIEvents.EVENT_MIDI_NOTE_ON:
             if (!this.channelMask[event.channel]) break;
-            if (event.param2 === 0) // velocity
+            if (event.param2 === 0) { // velocity
               synth.noteOff(event.channel, event.param1);
-            else
+              this.activeNotes.delete((event.channel << 7) | event.param1);
+            } else {
               synth.noteOn(event.channel, event.param1, event.param2);
+              this.activeNotes.set((event.channel << 7) | event.param1, 1);
+            }
             break;
           case MIDIEvents.EVENT_MIDI_NOTE_OFF:
             synth.noteOff(event.channel, event.param1);
+            this.activeNotes.delete((event.channel << 7) | event.param1);
             break;
           case MIDIEvents.EVENT_MIDI_PROGRAM_CHANGE:
             this.handleProgramChange(event.channel, event.param1);
@@ -164,6 +189,13 @@ MIDIPlayer.prototype.processPlaySynth = function (buffer, bufferSize) {
   }
 
   if (!this.paused && !this.isAuditioning && this.position >= this.events.length) {
+    // Repeat One with a loop region wraps back to the second pass instead of
+    // ending: the in-loop note-offs already fired, so only still-ringing
+    // notes are cut and the loop continues like a native engine loop.
+    if (this.looping && this.loop) {
+      this.loopJump();
+      return bytesWritten;
+    }
     // Last MIDI event has been processed.
     // Continue synthesis until silence is detected.
     // This allows voices with a long release tail to complete.
@@ -245,6 +277,10 @@ MIDIPlayer.prototype.processPlay = function () {
   }
 
   if (this.position >= this.events.length) {
+    if (this.looping && this.loop && !this.isAuditioning) {
+      this.loopJump();
+      return;
+    }
     setTimeout(this.endCallback, BUFFER_AHEAD + 100);
     this.position = 0;
     this.paused = true;
@@ -270,6 +306,7 @@ MIDIPlayer.prototype.resume = function () {
 
 MIDIPlayer.prototype.stop = function () {
   this.paused = true;
+  this.activeNotes.clear();
   this.panic();
 };
 
@@ -379,20 +416,14 @@ MIDIPlayer.prototype.setPositionWebMidi = function (ms, eventList) {
   }
 };
 
-MIDIPlayer.prototype.setPosition = function (ms) {
-  if (ms < 0 || ms > this.getDuration()) return;
-
-  this.lastProcessPlayTimestamp = performance.now();
-  this.panic(this.lastSendTimestamp + 10);
-  let eventMap = {};
-  let eventList = [];
-  let pos = this.position;
-
-  if (ms < this.elapsedTime) {
-    pos = 0;
-  }
-
-  while (this.events[pos] && this.events[pos].playTime < ms) {
+MIDIPlayer.prototype.collectStateEvents = function (fromIdx, toMs) {
+  // Newest program/controller state before toMs, for restoring the synth
+  // after a transport move (seek or loop wrap). RPN/NRPN/data-entry
+  // controllers must replay in order; everything else is last-wins.
+  const eventMap = {};
+  const sequenced = [];
+  let pos = fromIdx;
+  while (this.events[pos] && this.events[pos].playTime < toMs) {
     const event = this.events[pos];
     if (event.subtype === MIDIEvents.EVENT_MIDI_PROGRAM_CHANGE) {
       this.handleProgramChange(event.channel, event.param1);
@@ -401,7 +432,7 @@ MIDIPlayer.prototype.setPosition = function (ms) {
       // These controllers (RPN, NRPN, Data Entry) must be sequenced in order
       if (SEQUENCED_CONTROLLERS.includes(event.param1)) {
         // console.log('Sequenced event: ch %d -- %d - %d -- %d ms', event.channel, event.param1, event.param2, event.playTime);
-        eventList.push(event);
+        sequenced.push(event);
       } else {
         // All others, we only care about the last event
         eventMap[`${event.subtype}-${event.channel}-${event.param1}`] = event;
@@ -409,8 +440,17 @@ MIDIPlayer.prototype.setPosition = function (ms) {
     }
     pos++;
   }
+  return { eventList: Object.values(eventMap).concat(sequenced), endIdx: pos };
+};
 
-  eventList = Object.values(eventMap).concat(eventList);
+MIDIPlayer.prototype.setPosition = function (ms) {
+  if (ms < 0 || ms > this.getDuration()) return;
+
+  this.lastProcessPlayTimestamp = performance.now();
+  this.panic(this.lastSendTimestamp + 10);
+  this.activeNotes.clear();
+  const fromIdx = ms < this.elapsedTime ? 0 : this.position;
+  const { eventList, endIdx } = this.collectStateEvents(fromIdx, ms);
 
   if (this.useWebMIDI) {
     this.setPositionWebMidi(ms, eventList);
@@ -419,7 +459,42 @@ MIDIPlayer.prototype.setPosition = function (ms) {
   }
 
   this.elapsedTime = ms;
-  this.position = pos;
+  this.position = endIdx;
+};
+
+// Repeat-One wrap to the start of the second pass (the slider band). No
+// panic: the loop is authored to continue, so program/controller state is
+// restored silently and only notes still ringing from the finished pass are
+// cut — the closest a JS event loop gets to a native engine loop.
+MIDIPlayer.prototype.loopJump = function () {
+  const loop = this.loop;
+  if (!loop) return;
+  const ringing = [...this.activeNotes.keys()];
+  this.activeNotes.clear();
+  // The state the second pass starts with: intro plus one full loop pass.
+  const { eventList } = this.collectStateEvents(0, loop.jumpMs);
+  if (this.useWebMIDI) {
+    for (const key of ringing) {
+      this.send([(MIDIEvents.EVENT_MIDI_NOTE_OFF << 4) + (key >> 7), key & 0x7f, 0],
+        this.lastSendTimestamp);
+    }
+    for (const event of eventList) {
+      let message = null;
+      if (event.subtype === MIDIEvents.EVENT_MIDI_PROGRAM_CHANGE) {
+        message = [(event.subtype << 4) + event.channel, event.param1];
+      } else if (event.subtype === MIDIEvents.EVENT_MIDI_CONTROLLER) {
+        message = [(event.subtype << 4) + event.channel, event.param1, event.param2];
+      }
+      if (message) this.send(message, this.lastSendTimestamp);
+    }
+  } else {
+    for (const key of ringing) {
+      if (this.synth) this.synth.noteOff(key >> 7, key & 0x7f);
+    }
+    if (this.synth) this.setPositionSynth(eventList);
+  }
+  this.elapsedTime = loop.jumpMs;
+  this.position = loop.jumpIndex;
 };
 
 MIDIPlayer.prototype.getChannelInUse = function (ch) {

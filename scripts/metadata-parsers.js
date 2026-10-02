@@ -172,6 +172,7 @@ const PARSERS = {
   nsf: parseNSF,
   nsfe: parseNSFe,
   gbs: parseGBS,
+  ay: parseAY,
   spc: parseSPC,
   mod: parseMOD,
   xm: parseXM,
@@ -375,15 +376,79 @@ function parseNSFe(buf) {
 }
 
 function parseGBS(buf) {
+  // Spec: https://gbdev.io/pandocs/Audio.html ("GBS" format)
+  // Layout mirrors game-music-emu/gme/Gbs_Core.h: track_count at 0x04,
+  // first_track (1-based) at 0x05, then three null-padded 32-byte strings.
+  if (buf.length < 0x70) return {};
   if (buf.toString('ascii', 0, 3) !== 'GBS') {
     console.warn('[GBS] Missing GBS signature.');
   }
+  const copyright = readStr(buf, 0x50, 0x70);
   return {
     title: readStr(buf, 0x10, 0x30),
     artist: readStr(buf, 0x30, 0x50),
-    copyright: readStr(buf, 0x50, 0x70),
-    system: 'Gameboy'
+    copyright,
+    date: extractDate(copyright),
+    system: 'Gameboy',
+    numSongs: buf[0x04] || 1,
+    startingSong: buf[0x05] || 1,
   };
+}
+
+/**
+ * Read a null-terminated string at a big-endian offset field, where the
+ * offset is relative to the field's own position (the ZXAYEMUL convention;
+ * see game-music-emu/gme/Ay_Emu.cpp:get_data). Returns null when the field
+ * is zero or points outside the buffer.
+ */
+function readAyStringAt(buf, fieldPos) {
+  if (fieldPos + 2 > buf.length) return null;
+  const offset = buf.readInt16BE(fieldPos);
+  if (!offset) return null;
+  const start = fieldPos + offset;
+  if (start >= buf.length) return null;
+  let end = start;
+  while (end < buf.length && buf[end] !== 0) end++;
+  return decodeBuffer(buf.subarray(start, end));
+}
+
+function parseAY(buf) {
+  // Layout mirrors game-music-emu/gme/Ay_Emu.h:header_t. The header holds
+  // offsets (not inline strings); per-track names live in the tracks table.
+  if (buf.length < 0x14) return {};
+  if (buf.toString('ascii', 0, 8) !== 'ZXAYEMUL') {
+    console.warn('[AY] Missing ZXAYEMUL signature.');
+    return { system: 'ZX Spectrum' };
+  }
+  const maxTrack = buf[0x10];
+  const numSongs = (maxTrack || 0) + 1;
+
+  const meta = {
+    system: 'ZX Spectrum',
+    numSongs,
+    startingSong: (buf[0x11] || 0) + 1,
+  };
+  const author = readAyStringAt(buf, 0x0C);
+  if (author) meta.artist = author;
+  const comment = readAyStringAt(buf, 0x0E);
+  if (comment) meta.comment = comment;
+
+  // Tracks table: one 4-byte entry per song; the first word of each entry
+  // points at that song's null-terminated name.
+  const tracksOff = buf.readUInt16BE(0x12);
+  const tracksPos = 0x12 + tracksOff;
+  if (tracksOff && tracksPos + numSongs * 4 <= buf.length) {
+    const labels = [];
+    for (let i = 0; i < numSongs; i++) {
+      labels.push(readAyStringAt(buf, tracksPos + i * 4));
+    }
+    if (labels.some((l) => l != null && l !== '')) {
+      meta.trackLabels = labels.map((l) => (l ? l : null));
+      if (meta.trackLabels[0]) meta.title = meta.trackLabels[0];
+    }
+  }
+
+  return meta;
 }
 
 function parseSPC(buf) {

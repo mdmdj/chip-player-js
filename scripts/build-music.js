@@ -348,7 +348,7 @@ function escapeRegExp(string) {
 }
 
 // Formats that can contain more than one song ("sub-songs") in a single file.
-const MULTISONG_EXTENSIONS = new Set(['nsf', 'nsfe', 'sid', 'mus']);
+const MULTISONG_EXTENSIONS = new Set(['nsf', 'nsfe', 'sid', 'mus', 'gbs', 'ay']);
 
 /**
  * Describe the playable sub-songs inside a file from parser metadata.

@@ -16,6 +16,7 @@ export const SettingsSchema = z.object({
   theme: z.string().max(20).default('msdos'),
   tempo: z.number().min(0.1).max(2).default(1),
   silenceDuration: z.number().min(-1).max(60).default(-1),
+  showLoopArea: z.boolean().default(true),
 }).catchall(
   z.union([z.string(), z.number(), z.boolean()])
 );

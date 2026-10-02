@@ -57,20 +57,56 @@ function AppFooter(props) {
 
   const {
     faves,
+    settings,
   } = useContext(UserContext);
 
   const directoryLink = directoryLinkFromFilepath(songPath, isSongFolder);
   const songUrl = getUrlFromFilepath(songPath);
+
+  // The highlighted loop band is engine policy: the player reports it in ms
+  // (see Player.getLoopBandMs) and the footer only maps it onto the slider.
+  // Visual only: hiding the band never changes playback or the head fold.
+  const showLoopArea = settings?.showLoopArea ?? true;
+  const bandMs = showLoopArea ? sequencer?.getPlayer()?.getLoopBandMs?.() || null : null;
+  // Blind loop: playing indefinitely with no known loop region AND past the
+  // track length without ending (e.g. an NSF driver looping internally).
+  // Any head position out there would be a lie, so the slider parks at the
+  // end, the elapsed time keeps climbing, and the duration label reads
+  // "Looping". The past-the-end condition is the scoping: engines that end
+  // at their length (MIDI, XMP, SID, ...) never dwell there -- they loop via
+  // stop + reload -- so they keep the normal slider. Live-read so toggling
+  // repeat off restores the normal slider on the next render/tick. Note the
+  // raw band (not the visual toggle): hiding the band must not trigger
+  // blind UI.
+  const isBlindLoopNow = () => {
+    const p = sequencer?.getPlayer?.() || null;
+    if (!p || typeof p.isPlayingIndefinitely !== 'function' || !p.isPlayingIndefinitely()) return false;
+    if (typeof p.getLoopBandMs === 'function' && p.getLoopBandMs()) return false;
+    const duration = typeof p.getDurationMs === 'function' ? p.getDurationMs() : 0;
+    if (!(duration > 0)) return false;
+    if (typeof p.isPlaying === 'function' && !p.isPlaying()) return false;
+    return p.getPositionMs() >= duration;
+  };
+  const loopStart = bandMs && currentSongDurationMs > 0
+    ? bandMs.startMs / currentSongDurationMs
+    : null;
+  const loopEnd = bandMs && currentSongDurationMs > 0
+    ? Math.min(bandMs.endMs / currentSongDurationMs, 1)
+    : null;
 
   const handleToggleInfo = useCallback((e) => {
     e.preventDefault();
     toggleInfo();
   }, [toggleInfo]);
 
+  // The shareable link carries the sub-tune; the href and the clipboard
+  // copy must agree so right-click/copy and middle-click keep the sub-song.
+  const songLink = getCurrentSongLink(/*withSubtune=*/true);
+
   const handleCopySongLink = useCallback((e) => {
     e.preventDefault();
-    handleCopyLink(getCurrentSongLink(/*withSubtune=*/true));
-  }, [getCurrentSongLink, handleCopyLink]);
+    handleCopyLink(songLink);
+  }, [songLink, handleCopyLink]);
 
   const playPauseTitle = paused ? 'Play' : 'Pause';
   const playPauseClass = paused ? 'icon-play' : 'icon-pause';
@@ -113,12 +149,16 @@ function AppFooter(props) {
           <TimeSlider
             paused={paused}
             currentSongDurationMs={currentSongDurationMs}
+            loopStart={loopStart}
+            loopEnd={loopEnd}
+            getIsBlindLoop={isBlindLoopNow}
             getCurrentPositionMs={() => {
-              // TODO: reevaluate this approach
-              if (sequencer && sequencer.getPlayer()) {
-                return sequencer.getPlayer().getPositionMs();
-              }
-              return 0;
+              const player = sequencer && sequencer.getPlayer();
+              if (!player) return 0;
+              // Blind loop shows absolute time played, climbing unbounded;
+              // otherwise the player's playlist (folded) position.
+              if (isBlindLoopNow()) return player.getPositionMs();
+              return player.getDisplayPositionMs ? player.getDisplayPositionMs() : player.getPositionMs();
             }}
             onChange={handleTimeSliderChange}/>
           <VolumeSlider
@@ -144,7 +184,7 @@ function AppFooter(props) {
             <div className="SongDetails-title">
               {songPath ?
                 <>
-                  <a href={getCurrentSongLink()}
+                  <a href={songLink}
                      title="Copy song link to clipboard"
                      onClick={handleCopySongLink}>
                     {title}{' '}

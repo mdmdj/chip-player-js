@@ -166,7 +166,10 @@ export function parseMidiData(buffer) {
   if (!isMidiData(buffer)) return null;
 
   const midiFile = new MIDIFile(buffer);
-  const events = midiFile.getEvents();
+  // The same expanded list the audio engine plays (intro + two passes for
+  // loop files), so the roll stays populated through the second pass and
+  // across Repeat-One wraps instead of ending at the first loop point.
+  const { events } = midiFile.getPlaybackEvents();
 
   const notes = [];
   const openNotes = new Map(); // key: `${track}_${channel}_${pitch}` -> note

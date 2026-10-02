@@ -58,6 +58,11 @@ typedef struct _mdxmml_ym2151_instances {
   int all_track_finished;
   int fade_out_wait;
   int master_volume;
+
+  /* Song loop bookkeeping, recorded while parsing (see mdx_get_loop_*). */
+  int loop_min_seen;       /* last observed song-wide infinite-loop count */
+  long loop_first_us;      /* elapsed at the 1st loop (intro + loop) */
+  long loop_second_us;     /* elapsed at the 2nd loop (intro + 2 * loop) */
 } mdxmml_ym2151_instances;
 
 /* ------------------------------------------------------------------ */
@@ -258,6 +263,7 @@ mdx_parse_mml_ym2151_async_initialize(MDX_DATA *orig_mdx, PDX_DATA *orig_pdx, so
   /* start parsing */
 
   self->all_track_finished=FLAG_FALSE;
+  self->fade_out=0;
   self->fade_out_wait=0;
   self->master_volume=127;
 
@@ -287,10 +293,11 @@ mdx_parse_mml_ym2151_async(songdata *data, int track_mute_mask)
   }
 
   if ( self->fade_out > 0 ) {
+    if ( self->master_volume <= 0 ) { self->all_track_finished = FLAG_TRUE; return FLAG_FALSE; }
     if ( self->fade_out_wait==0 ) { self->fade_out_wait = self->fade_out; }
     self->fade_out_wait--;
     if ( self->fade_out_wait==0 ) { self->master_volume--; }
-    if ( self->master_volume==0 ) { return FLAG_FALSE; }
+    if ( self->master_volume==0 ) { self->all_track_finished = FLAG_TRUE; return FLAG_FALSE; }
   }
   ym2151_set_master_volume( self->master_volume * self->mdx->fm_volume / 127, data );
   pcm8_set_master_volume( self->master_volume * self->mdx->pcm_volume / 127, data );
@@ -329,6 +336,17 @@ mdx_parse_mml_ym2151_async(songdata *data, int track_mute_mask)
     if ( infinite_loops >= self->mdx->max_infinite_loops ) {
       self->fade_out = self->mdx->fade_out_speed;
     }
+  }
+
+  /* Record when the song as a whole completes its first and second loop
+     (infinite_loops is the minimum across tracks still playing). The
+     difference is the loop length; the first is intro + loop. */
+  if ( infinite_loops < 32767 ) {
+    if ( self->loop_min_seen < 1 && infinite_loops >= 1 && self->loop_first_us == 0 )
+      self->loop_first_us = self->mdx->elapsed_time;
+    if ( self->loop_min_seen < 2 && infinite_loops >= 2 && self->loop_second_us == 0 )
+      self->loop_second_us = self->mdx->elapsed_time;
+    self->loop_min_seen = infinite_loops;
   }
 
   /* timer count */
@@ -389,6 +407,20 @@ mdx_parse_mml_get_tempo(void* in_self)
   mdxmml_ym2151_instances* self = (mdxmml_ym2151_instances *)in_self;
 
  return 1000*1024*(256 - self->mdx->tempo)/4000;
+}
+
+long
+mdx_parse_mml_get_loop_first_us(void* in_self)
+{
+  if (!in_self) return 0;
+  return ((mdxmml_ym2151_instances *)in_self)->loop_first_us;
+}
+
+long
+mdx_parse_mml_get_loop_second_us(void* in_self)
+{
+  if (!in_self) return 0;
+  return ((mdxmml_ym2151_instances *)in_self)->loop_second_us;
 }
 
 

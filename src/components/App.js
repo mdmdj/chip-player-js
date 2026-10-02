@@ -233,15 +233,7 @@ class App extends React.Component {
       urlParams.delete('t');
       const qs = urlParams.toString();
       const search = qs ? `?${qs}` : '';
-      // Navigate to song's containing folder. History comes from withRouter().
-      const dirname = pathe.dirname(playPath);
-      this.fetchDirectory(dirname).then(() => {
-        this.props.history.replace(`${pathJoin('/browse', dirname)}${search}`);
-        const context = this.playContexts[dirname] || [];
-        const index = context.findIndex(ref => ref.path === playPath);
-
-        this.playContext(context, index < 0 ? 0 : index, subtune);
-
+      const seekToTime = () => {
         if (time) {
           setTimeout(() => {
             if (this.sequencer.getPlayer()) {
@@ -249,7 +241,34 @@ class App extends React.Component {
             }
           }, 100);
         }
-      });
+      };
+      // A multi-song file is a virtual folder: land inside it with the
+      // requested sub-song selected, rather than on the parent directory.
+      // The server omits subtuneCount for plain files, so its absence
+      // means the containing-folder flow below.
+      if (window.__chipConfig?.subtuneCount > 1) {
+        this.fetchDirectory(playPath).then(() => {
+          this.props.history.replace(`${pathJoin('/browse', playPath)}${search}`);
+          const folderContext = this.playContexts[playPath] || [];
+          const target = subtune ?? 0;
+          const index = folderContext.findIndex(ref => ref.path === playPath && ref.subtune === target);
+          // No subtune override: each entry already carries its own sub-song.
+          this.playContext(folderContext, index < 0 ? 0 : index);
+          seekToTime();
+        });
+      } else {
+        // Navigate to song's containing folder. History comes from withRouter().
+        const dirname = pathe.dirname(playPath);
+        this.fetchDirectory(dirname).then(() => {
+          this.props.history.replace(`${pathJoin('/browse', dirname)}${search}`);
+          const context = this.playContexts[dirname] || [];
+          const index = context.findIndex(ref => ref.path === playPath);
+
+          this.playContext(context, index < 0 ? 0 : index, subtune);
+
+          seekToTime();
+        });
+      }
     }
 
     this.setState({ loading: false });
@@ -849,8 +868,29 @@ class App extends React.Component {
   }
 
   handleCopyLink = (url) => {
-    navigator.clipboard.writeText(url);
-    this.props.toastContext.enqueueToast('Copied song link to clipboard.', ToastLevels.INFO);
+    if (!url) return;
+    const done = () => this.props.toastContext.enqueueToast('Copied song link to clipboard.', ToastLevels.INFO);
+    const failed = () => this.props.toastContext.enqueueToast('Could not copy song link to clipboard.', ToastLevels.ERROR);
+    // navigator.clipboard requires a secure context; fall back to execCommand
+    // (e.g. remote dev over plain http) so the button still works there.
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(url).then(done, failed);
+    } else {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = url;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        const ok = document.execCommand('copy');
+        ta.remove();
+        if (ok) done();
+        else failed();
+      } catch (e) {
+        failed();
+      }
+    }
   }
 
   handleToggleSettings = (e) => {
@@ -1030,6 +1070,7 @@ class App extends React.Component {
           </div>
           <AppFooter
             currentSongDurationMs={this.state.currentSongDurationMs}
+            currentSongMetadata={this.state.currentSongMetadata}
             ejected={this.state.ejected}
             getCurrentSongLink={this.getCurrentSongLink}
             handleCopyLink={this.handleCopyLink}

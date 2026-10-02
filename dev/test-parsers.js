@@ -12,7 +12,7 @@ const { parseMetadata } = require('../scripts/metadata-parsers');
 
 const CATALOG = path.join(__dirname, '..', 'catalog');
 
-const { buildNSF, buildNSFe, buildSID } = require('./fixtures');
+const { buildNSF, buildNSFe, buildSID, buildGBS, buildAY } = require('./fixtures');
 
 let passed = 0;
 let failed = 0;
@@ -124,6 +124,46 @@ check('rejects missing signature', () => {
   assert.strictEqual(m.numSongs, undefined);
 });
 
+console.log('GBS (synthetic)');
+check('multi-song counts + strings + date', () => {
+  const m = parseMetadata(buildGBS({ numSongs: 35, startingSong: 1, title: 'Metal Gear Solid', artist: 'Konami', copyright: '2000' }), 'gbs');
+  assert.strictEqual(m.numSongs, 35);
+  assert.strictEqual(m.startingSong, 1);
+  assert.strictEqual(m.title, 'Metal Gear Solid');
+  assert.strictEqual(m.artist, 'Konami');
+  assert.strictEqual(m.system, 'Gameboy');
+  assert.strictEqual(m.date, '2000-01-01');
+});
+check('missing count defaults to 1', () => {
+  const m = parseMetadata(buildGBS({ numSongs: 0, title: 'X', artist: '', copyright: '' }), 'gbs');
+  assert.strictEqual(m.numSongs, 1);
+});
+check('rejects short buffer', () => {
+  const m = parseMetadata(Buffer.alloc(0x10), 'gbs');
+  assert.strictEqual(m.numSongs, undefined);
+});
+
+console.log('AY (synthetic)');
+check('multi-track counts + per-track labels', () => {
+  const m = parseMetadata(buildAY({ numSongs: 3, firstTrack: 0, author: 'Tim Follin', comment: 'Game', labels: ['Menu', 'Level 1', 'Boss'] }), 'ay');
+  assert.strictEqual(m.numSongs, 3);
+  assert.strictEqual(m.startingSong, 1);
+  assert.deepStrictEqual(m.trackLabels, ['Menu', 'Level 1', 'Boss']);
+  assert.strictEqual(m.title, 'Menu');
+  assert.strictEqual(m.artist, 'Tim Follin');
+  assert.strictEqual(m.system, 'ZX Spectrum');
+});
+check('single track still yields its label as title', () => {
+  const m = parseMetadata(buildAY({ numSongs: 1, labels: ['Only'] }), 'ay');
+  assert.strictEqual(m.numSongs, 1);
+  assert.strictEqual(m.title, 'Only');
+});
+check('rejects missing signature', () => {
+  const m = parseMetadata(Buffer.alloc(0x40), 'ay');
+  assert.strictEqual(m.system, 'ZX Spectrum');
+  assert.strictEqual(m.numSongs, undefined);
+});
+
 console.log('Date extraction (synthetic)');
 check('NSF year from copyright', () => {
   const m = parseMetadata(buildNSF({ numSongs: 1, title: 'T', artist: '', copyright: '1988 Konami' }), 'nsf');
@@ -170,6 +210,12 @@ realTest('SID files have plausible metadata', 'sid', 'sid', (m, f) => {
   assert.ok(m.artist && m.artist.length > 0, `${f}: artist empty`);
 });
 
+realTest('RSID files parse like PSID (counts + speeds)', 'sid', 'sid', (m, f) => {
+  if (!f.startsWith('RSID_')) return;
+  assert.ok(m.numSongs > 1, `${f}: expected multi-song RSID, got ${m.numSongs}`);
+  assert.ok(Array.isArray(m.speeds) && m.speeds.length === m.numSongs, `${f}: speed table mismatch`);
+});
+
 realTest('NSF files have plausible metadata', 'nsf', 'nsf', (m, f) => {
   assert.ok(m.numSongs >= 1, `${f}: numSongs`);
   assert.ok(m.title && m.title.length > 0, `${f}: title empty`);
@@ -181,6 +227,19 @@ realTest('NSFE files expose track labels', 'nsfe', 'nsfe', (m, f) => {
   if (m.numSongs > 1) {
     assert.ok(Array.isArray(m.trackLabels), `${f}: missing trackLabels for ${m.numSongs} songs`);
     assert.ok(m.trackLabels.length >= 1, `${f}: empty trackLabels`);
+  }
+});
+
+realTest('GBS files have plausible counts', 'gbs', 'gbs', (m, f) => {
+  assert.ok(m.numSongs >= 1, `${f}: numSongs`);
+  assert.ok(m.title && m.title.length > 0, `${f}: title empty`);
+});
+
+realTest('AY files expose track counts and labels', 'ay', 'ay', (m, f) => {
+  assert.ok(m.numSongs >= 1, `${f}: numSongs`);
+  if (m.numSongs > 1) {
+    assert.ok(Array.isArray(m.trackLabels), `${f}: missing trackLabels for ${m.numSongs} tracks`);
+    assert.strictEqual(m.trackLabels.length, m.numSongs, `${f}: label/track mismatch`);
   }
 });
 

@@ -220,6 +220,15 @@ MIDIFile.prototype.getLoopedEvents = function (tracks, loopCount = 2, range = nu
   // would make the "end of the first iteration" latch degenerate to the end of
   // the song, highlighting the whole file as the loop region.
   const expandLoop = range != null && format !== 2;
+  // DEV-BEGIN (stripped for promotion; catalog tripwire. If a format-2 file ever
+  // carries loop markers it plays once with no band, so warn where it can be
+  // spotted: on playback, and (see scripts/build-music.js) at catalog build
+  // time. Reachable via a share link or local files, never via a marker search,
+  // so a warning at parse time alone would not reach us.)
+  if (range != null && !expandLoop) {
+    console.warn('[midi] format-2 file defines loop markers; the song-global loop is ignored for async patterns, so it plays once with no loop band.');
+  }
+  // DEV-END
   const channelsByTrack = {};
   const capturePush = (trackIdx, srcElapsedLoops, ev) => {
     if (ev.channel !== undefined) {

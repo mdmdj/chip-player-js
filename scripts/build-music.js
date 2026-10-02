@@ -9,6 +9,11 @@ const { toArabic } = require('roman-numerals');
 const { FORMATS } = require('../src/config/index');
 const { parseMetadata, cleanString } = require('./metadata-parsers');
 
+// DEV-BEGIN (stripped for promotion; format-2 MIDI tripwire. See processFile and
+// the run summary: format-2 SMFs are async patterns with no shared timeline, so
+// the player ignores their song-global loop markers.)
+const format2MidiFiles = [];
+// DEV-END
 
 const program = new Command();
 
@@ -791,6 +796,16 @@ function processFile(child, directoryId, dirEntries, dirImagePath, dirTextIds) {
   // 3. Soundfont (MIDI only)
   let soundfont = null;
   if (extension === 'mid' || extension === 'midi') {
+    // DEV-BEGIN (stripped for promotion; format-2 tripwire. The player ignores a
+    // song-global loop for format-2 SMFs (async patterns, no shared timeline), so
+    // a catalog containing one means a file plays once with no loop band. Cheap
+    // to notice here, once, rather than one track at a time later.)
+    if (buffer.length > 9 &&
+        buffer[0] === 0x4d && buffer[1] === 0x54 && buffer[2] === 0x68 && buffer[3] === 0x64) {
+      const smfFormat = (buffer[8] << 8) | buffer[9];
+      if (smfFormat === 2) format2MidiFiles.push(relativePath);
+    }
+    // DEV-END
     const header = buffer.subarray(0, 1024).toString('utf8'); 
     const match = header.match(SF2_REGEX);
     
@@ -974,6 +989,12 @@ processDirectory(CATALOG_DIR, '')
     console.log(`Modified:           ${chalk.yellow(modifiedCount)}`);
     console.log(`Removed:            ${chalk.red(removedCount)}`);
     console.log(`Total songs after:  ${chalk.white(finalCount)}`);
+    // DEV-BEGIN (stripped for promotion; format-2 tripwire, see processFile)
+    if (format2MidiFiles.length > 0) {
+      console.log(chalk.yellow(`⚠ Format-2 MIDI:  ${format2MidiFiles.length} file(s) use async patterns; their song-global loop markers are ignored (no loop band).`));
+      for (const p of format2MidiFiles.slice(0, 10)) console.log(chalk.yellow(`   - ${p}`));
+    }
+    // DEV-END
     console.log(chalk.gray('───────────────────────────────────────────────────'));
 
     if (processedSamples.length > 0) {

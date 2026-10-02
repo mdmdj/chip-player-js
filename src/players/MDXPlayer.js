@@ -30,6 +30,9 @@ export default class MDXPlayer extends Player {
     this._durationMs = 0;
     this._maxLoopCount = DEFAULT_LOOP_COUNT;
     this.durationExtended = false; // repeat-one left after passing the fade
+    // Fade start captured when repeat one is enabled while a fade is already
+    // running; see syncFadeTailCapture().
+    this.fadeTailStartMs = null;
     this.mdxCtx = this.core._mdx_create_context();
     this.core._mdx_set_rate(this.sampleRate);
     this.core._mdx_set_dir(this.mdxCtx, MOUNTPOINT);
@@ -108,6 +111,7 @@ export default class MDXPlayer extends Player {
   _readLoopRegion() {
     const core = this.core;
     this.durationExtended = false;
+    this.fadeTailStartMs = null;
     this._maxLoopCount = DEFAULT_LOOP_COUNT;
     if (typeof core._mdx_set_max_loop === 'function') {
       core._mdx_set_max_loop(this.mdxCtx, DEFAULT_LOOP_COUNT);
@@ -173,10 +177,36 @@ export default class MDXPlayer extends Player {
   // count so the current pass finishes and the engine fades, like libvgm.
   setLooping(looping) {
     const wasLooping = this.looping;
+    // Capture before applyLoopCount() changes the pass count.
+    this.syncFadeTailCapture(looping);
     super.setLooping(looping);
     // The engine loops natively; the base "late repeat" seek would fight it.
     this.restartAtEndPending = false;
     this.applyLoopCount(wasLooping);
+  }
+
+  // Absolute position where the configured pass count fades out, or 0 when the
+  // song has no measured loop region.
+  _fadeStartMs() {
+    const meta = this.metadata;
+    const intro = meta ? meta.intro_length : -1;
+    const loop = meta ? meta.loop_length : 0;
+    if (!(intro >= 0) || !(loop > 0)) return 0;
+    return intro + this._maxLoopCount * loop;
+  }
+
+  // Capture the fade start before the pass count changes to 0. mdxmini latches
+  // fade_out once the loop counter reaches max_infinite_loops, and only reinit
+  // clears it, so a fade already running keeps running: enabling repeat one
+  // then ends the song rather than looping it. Remembering where the fade began
+  // keeps the head on that tail instead of folding it back into the band
+  // (VGMPlayer.syncFadeTailCapture is the same idea for libvgm).
+  syncFadeTailCapture(looping) {
+    if (!looping || this.fadeTailStartMs != null) return;
+    const fadeStart = this._fadeStartMs();
+    if (fadeStart > 0 && this.getPositionMs() >= fadeStart) {
+      this.fadeTailStartMs = fadeStart;
+    }
   }
 
   // Loop count to hand the engine for the current state: 0 forever while
@@ -227,7 +257,10 @@ export default class MDXPlayer extends Player {
     const bandEnd = band.endMs;
     if (abs <= bandStart) return abs;
 
-    const fadeStartMs = this.looping ? null : (intro + this._maxLoopCount * loop);
+    // While repeating, the configured fade start is meaningless (0 passes), so
+    // only a captured tail applies; a seek or the next load drops it.
+    const fadeStartMs = this.fadeTailStartMs != null ? this.fadeTailStartMs
+      : (this.looping ? null : this._fadeStartMs());
     if (fadeStartMs != null && abs >= fadeStartMs) {
       return Math.min(bandEnd + (abs - fadeStartMs), this.getDurationMs());
     }
@@ -308,6 +341,8 @@ export default class MDXPlayer extends Player {
   }
 
   seekMs(seekMs) {
+    // The captured tail belongs to the old position.
+    this.fadeTailStartMs = null;
     this.muteAudioDuringCall(this.audioNode, () =>
       this.core._mdx_set_position_ms(this.mdxCtx, seekMs)
     );

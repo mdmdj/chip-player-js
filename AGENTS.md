@@ -231,7 +231,14 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
   does): without it Express serves the raw `public/` template with literal
   `%PUBLIC_URL%` instead of proxying HTML from WDS, and manifest/icons 500.
   `ps` won't show the env, so check
-  `curl -s localhost:8080/ | grep -c PUBLIC_URL` (0 = healthy).
+  `curl -s mms-1:8080/ | grep -c PUBLIC_URL` (0 = healthy).
+  **Restart after editing any webpack config file** (`config/webpack.config.*`,
+  `scripts/start.js`): the config is read once at startup, so a live rebuild
+  keeps serving the old one — e.g. a new `DefinePlugin` silently ships an
+  unsubstituted `__BUILD_INFO__` identifier into the bundle.
+  Run it with `PATH="$HOME/.nvm/versions/node/v24.21.0/bin:$PATH"` (see
+  "Session start"); `nvm use` alone does not fix PATH in a non-interactive
+  shell.
 - **Audio:** the dev stub `src/chip-core.js` is a no-op (no audio). A **real
   chip-core was built** in this session — see "Building the real chip-core"
   below. It is gitignored and not committed.
@@ -489,9 +496,24 @@ in-repo tree, or intentionally point the build at the new clone.
 The T3 Code browser-preview tab logs an Electron sandbox error
 (`Electron sandboxed_renderer.bundle.js script failed to run` /
 `Cannot destructure property 'preloadScripts' of 'binding.startupData'`) and a
-blank tab shows `chrome-error://chromewebdata/`. It still works once you
-navigate it to `http://<host>:8080` (e.g. `mms-1:8080`); drive the app there or
-verify quickly over HTTP with `curl http://localhost:8080/api/...`.
+blank tab shows `chrome-error://chromewebdata/`.
+
+**Drive the preview at `http://mms-1:8080`, not `localhost:8080` (2026-10-02).**
+`mms-1` is this box's Tailscale name (`mms-1.dala-gentoo.ts.net` → 100.66.142.9);
+the preview's browser cannot reach the dev server on the loopback name — every
+`localhost:8080` navigation lands on `chrome-error://chromewebdata/` with an empty
+document, while the same page on `mms-1:8080` loads normally. Shell `curl` is
+fine on either name; this is only about the preview tab.
+
+**Prefer the t3 preview over curl** whenever the question is "does it work in a
+browser" — it is the only check that catches things the served bundle cannot:
+runtime globals, console errors, a booting React tree, engine state after a
+click. `curl` is for cheap liveness and content greps
+(`curl http://mms-1:8080/api/browse`, `curl .../static/js/bundle.js | grep -c
+<newSymbol>`) while iterating on a build. When the preview does fail, the usual
+triage is `preview_navigate` (re-navigate, append `?r=N` to defeat the bundle
+cache) before concluding anything is broken: `evaluate` fails on its own fairly
+often on a page that is otherwise healthy, and `snapshot` still works.
 
 **Keep tool requests small — treat this as a hard rule.** The frequent failure
 is the LLM provider rejecting an entire turn once the session context grows
@@ -789,16 +811,26 @@ checks no longer work. Compare a live context to a stored one with
   audio/engine/build/dev work. There is no commit list to maintain — a change
   either belongs to the feature branch or it does not. Run the app from the dev
   branch.
-- **UNCOMMITTED, do not lose.** `chip-player-js-feature/` (the feature worktree)
-  holds three hand-carried fixes, uncommitted: P1 `__chipConfig.subtuneCount`
-  injection in `server/index.js`; S4 `cache1Hour` restored to master; P2
-  `engine->load(currentTune)` in `libsidplayfp-wrapper.cpp`'s `sid_set_subtune`.
-  **P1 is why the feature branch was broken** — its client half (`App.js:249`
-  `window.__chipConfig?.subtuneCount > 1`) promotes, so without the server half
-  every `?play=…&subtune=N` share link fell back to the containing directory.
-  Also uncommitted on `dev/overlay`: `AGENTS.md`, `dev/promote-paths.txt`,
-  `scripts/build-chip-core.js`, new `scripts/build-info.js`,
-  `config/webpack.config.common.js`, `src/index.js`.
+- **Hand-carried fixes are committed (2026-10-02).** `feature/subtunes-as-first-class`
+  is at `55f2e3d87`, which carries the two hand-carried hunks `promote.sh` can
+  never deliver: P1 `__chipConfig.subtuneCount` injection in `server/index.js`
+  (and S4 `cache1Hour` restored to master), and P2 `engine->load(currentTune)`
+  in `libsidplayfp-wrapper.cpp`'s `sid_set_subtune`. **P1 is why the feature branch
+  used to be broken** — its client half (`App.js` `window.__chipConfig?.subtuneCount
+  > 1`) promotes, so without the server half every `?play=…&subtune=N` share link
+  fell back to the containing directory. Both files are path-listed in
+  `dev/promote-paths.txt`, so this is the *only* way they reach the PR: repeat it
+  by hand for any future feature work in them.
+- **Engine-provenance stamping is overlay-only (2026-10-02).** `scripts/build-info.js`
+  (the reader), `config/webpack.config.common.js` (the `DefinePlugin`) are listed in
+  `dev/promote-paths.txt`; `src/index.js`'s `window.ChipCoreBuildInfo` assignment is
+  a DEV region, because the config it depends on never promotes — leaving the
+  assignment behind would reference an undefined `__BUILD_INFO__`. Its `no-undef`
+  waiver has to live inside that region too (`eslintConfig` is in `package.json`,
+  which promote.sh does *not* skip). Verified in-app: `JSON.parse(window.ChipCoreBuildInfo)`
+  works — note the double `JSON.stringify`, because DefinePlugin substitutes a
+  string value as a *code fragment*, so one stringify lands an object literal.
+
 - **Handoff state (2026-10):** GBS/AY sub-tune parsing landed (feature:
   `parseGBS` counts, new `parseAY` with per-track labels, `gbs`/`ay` in
   `MULTISONG_EXTENSIONS`; dev-only fixtures + 10 new parser checks, 30 total).
@@ -811,11 +843,24 @@ checks no longer work. Compare a live context to a stored one with
   none are routed to parsers that matter); real `.mus` is always single-song
   (`MUS.cpp: m_songs = 1`), so nothing to test there; `sgc`/`sap` stay compiled
   but unrouted,   `hes`/`kss` pruned + unrouted.
-- **Rebase pending:** `feature/subtunes-as-first-class` is promoted through
-  `6fe033edb`, but `dev/overlay` is still based pre-promotion — the rebase was
-  attempted and aborted (every pre-promote pick replays work the promote
-  already carried over, so it is all conflicts and empty commits). Redo it
-  in a fresh session before the next promote.
+- **Rebase done (2026-10-02); the trees are in sync.** `dev/overlay` was rebased
+  onto `feature/subtunes-as-first-class` (67 commits replayed, 4 dropped as
+  already-promoted), and `promote.sh` now reports **"Nothing to promote"** — that
+  is the healthy steady state after a promote. Two lessons, both costing a full
+  redo:
+  - **`-X ours` in a rebase resolves toward the *upstream*, not your branch** —
+    the opposite of what it means in a merge. My first attempt with `-X ours`
+    silently stripped every DEV region (`Settings.js`, `UserProvider.js`,
+    `N64Player.js`, `SIDPlayer.js`) and left `VGMPlayer.js` with a duplicate
+    `applyLoopCount` referencing an undefined `wasLooping`. `-X theirs` is what
+    keeps overlay content. The feature branch's *hand-carried* fixes must still be
+    checked by hand afterwards: `-X theirs` dropped `cache1Hour`'s dev skip
+    (`server/index.js`) and a `parseAY` hunk, both restored in "Re-apply two
+    deltas the rebase clobbered".
+  - **Verify a rebase by tree, not by "it completed":** snapshot the old tip on a
+    scratch branch first, then require `git diff <old-tip> HEAD` to be empty
+    (mine was, after the fixup). That diff is the whole proof that no DEV region
+    or vendored fix was lost — it is what caught the `-X ours` damage.
 - **Bug verification (2026-10-02) — two confirmed, one dead, one masked.** A sweep
   of the feature diff for defects *we caused* produced ~25 candidates; root-value
   verification settled four, and the rest were judged not worth the risk of
@@ -1414,7 +1459,7 @@ Testing gotchas learned the hard way:
   times out at 15 s, so never rely on state surviving across calls for a
   6-second test track.
 - The tab can serve a stale bundle after edits: force `?r=N`, and confirm the
-  served build with `curl localhost:8080/static/js/bundle.js | grep -c <newSymbol>`.
+  served build with `curl mms-1:8080/static/js/bundle.js | grep -c <newSymbol>`.
 - Parameter toggles made right after `playSong`/`playContext` are overwritten
   by `resolveParamValues` when the async load finishes — pin the setting first
   (`userContext.settings['vgm.indefinitePlayback'] = true`) or apply it after
@@ -1431,7 +1476,8 @@ Testing gotchas learned the hard way:
 - Don't add comments the codebase wouldn't have; don't reformat unrelated code.
 - Templates literals: **do not put backticks inside SQL template strings**
   (broke `build-music.js` twice via SQL comments using backticks).
-- Verify with `curl` against `localhost:8080/api/...`.
+- Verify with `curl` against `mms-1:8080/api/...` (either name works from the
+  shell; `mms-1` is the one that also works in the preview tab).
 - Dev shims stage **untracked, gitignored** modules rather than patching tracked
   files. `dev/apply.sh` writes `server/middleware/auth.dev.js`,
   `src/chip-player-devtools.js`, `src/chip-core.js`, `src/config/firebaseConfig.js`

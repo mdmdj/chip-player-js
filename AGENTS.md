@@ -218,8 +218,9 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
   - `node dev/test-vgm-loops.js`, `node dev/test-mdx-loops.js` — the VGM toggle
     matrix and MDX's native loop, each with a fake core modelling that engine's
     bookkeeping (libvgm's running fade survives `SetLoopCount(0)`; mdxmini's
-    `length(k) = intro + k*loop + fade`). One `xfail` each, both confirmed
-    in-app (see the bug-verification notes).
+    `length(k) = intro + k*loop + fade`). One `xfail`: the VGM
+    indefinite-playback fade, confirmed in-app and kept as a known limit (see
+    the bug-verification notes).
   - `node dev/test-midi-loops.js`, `node dev/test-xmp-loops.js` — loop-region
     harnesses for the MIDI and XMP Repeat One work.
   - `node dev/test-end-detector.js` — the SID/N64 tail detector: trip gate,
@@ -1052,8 +1053,8 @@ checks no longer work. Compare a live context to a stored one with
 2. Testing. Dev-only harnesses cover parsers (`dev/test-parsers.js`),
    build-music round-trips (`dev/test-build.js`), sequencer navigation, the
    SongRef identity model, the VGM/MDX/MIDI/XMP loop model, the SID/N64 end
-   detector, and the sub-tune server API -- 126 checks via `./dev/run-tests.sh`
-   (2 reported known failures, both confirmed in-app). Not yet harnessed: GME's
+   detector, and the sub-tune server API -- 127 checks via `./dev/run-tests.sh`
+   (1 reported known failure: the VGM indefinite-playback fade, a known limit). Not yet harnessed: GME's
    in-buffer `restartTrack` path (the N64 equivalent is covered), and the client
    component behavior (favorites/sub-tunes/share links/top charts), which needs
    a browser.

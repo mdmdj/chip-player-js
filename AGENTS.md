@@ -712,7 +712,12 @@ checks no longer work. Compare a live context to a stored one with
   notes: no `.mus`/`.smf`/`.gym`/`.s98`/`.dro` files anywhere (players claim some,
   none are routed to parsers that matter); real `.mus` is always single-song
   (`MUS.cpp: m_songs = 1`), so nothing to test there; `sgc`/`sap` stay compiled
-  but unrouted, `hes`/`kss` pruned + unrouted.
+  but unrouted,   `hes`/`kss` pruned + unrouted.
+- **Rebase pending:** `feature/subtunes-as-first-class` is promoted through
+  `6fe033edb`, but `dev/overlay` is still based pre-promotion — the rebase was
+  attempted and aborted (every pre-promote pick replays work the promote
+  already carried over, so it is all conflicts and empty commits). Redo it
+  in a fresh session before the next promote.
 - **Handoff state (2026-09, read this):**
   - **Looping is now the top priority** and is treated as **feature** work (part
     of completing the sub-tunes feature), not an overlay extra. The VGM Repeat

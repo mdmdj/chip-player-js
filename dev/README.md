@@ -23,6 +23,22 @@ keep it out of the PR).
 npm run dev      # webpack dev server (:3000) + API server (:8080)
 ```
 
+## Promoting feature work to the reviewable branch
+
+`dev/overlay` is the working branch; the reviewable PR branch
+(`feature/subtunes-as-first-class`) must contain only feature work. Promoting is
+two steps, and the second one is deliberately not a flag on the first:
+
+```sh
+./dev/promote.sh           # plan only; it has no write path at all
+touch dev/.promote-armed   # arm the writer
+./dev/promote-apply.sh     # commits to the feature branch, then disarms itself
+```
+
+The key file exists so promoting is an act a person does on purpose. See
+"Dev overlay & promotion" in the repo-root `AGENTS.md` for what counts as
+feature work and how the DEV-region stripping works.
+
 To revert:
 
 ```sh

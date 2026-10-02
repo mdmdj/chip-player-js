@@ -120,8 +120,12 @@ function makeCore({ introMs = A, loopMs = B } = {}) {
     while (core.abs < targetMs && !core.finished && steps++ < 100000) core.step();
   };
   core.setLoopCount = (count) => {
-    core.lastLoopArg = count;
-    core.loopCount = count;
+    // The export takes a UINT32: anything wider truncates, so a JS value of
+    // 2**32 becomes 0 -- "loop forever" -- which is how a missing null guard in
+    // lvgm_get_cur_loop() would silently turn "finish the pass" into "loop".
+    const arg = count >>> 0;
+    core.lastLoopArg = arg;
+    core.loopCount = arg;
     // SetLoopCount() itself never clears a running fade, so a fade latched here
     // outlives a later SetLoopCount(0) -- see the indefinite-playback check.
     if (count !== 0 && core.curLoop() >= count) core.startFade();
@@ -412,6 +416,17 @@ async function main() {
     p.setParameter('indefinitePlayback', false);
     assert.strictEqual(core.lastLoopArg, 2);
     assertNoJump(p, 'setting off', before, p.getDisplayPositionMs());
+  });
+
+  await xcheck('a sentinel loop count from an unloaded engine never means "loop forever"',
+    'lvgm_get_cur_loop() is the one getter without the `GetPlayer() == nullptr` guard its siblings have, and PlayerA::GetCurLoop() returns (UINT32)-1 when no file is loaded. JS then computes Math.max(2, 4294967295 + 1) = 2**32, which the export truncates to 0 = loop forever, so a toggle in that state arms "repeat" instead of "finish the pass and fade". Narrow (it needs a toggle before a successful load), and masked in practice by load order, but a one-line guard in the wrapper would close it.', async () => {
+    const { p, core } = await makePlayer();
+    // What the engine reports with nothing loaded.
+    core._lvgm_get_cur_loop = () => 4294967295;
+    p.setLooping(true);
+    p.setLooping(false);
+    assert.ok(core.lastLoopArg >= 2,
+      `the engine must get a finite pass count, got ${core.lastLoopArg}`);
   });
 
   await xcheck('setting off while repeat one is on does not latch a fade',

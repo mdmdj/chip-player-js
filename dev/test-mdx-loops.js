@@ -68,6 +68,7 @@ function makeCore({ introMs = A, loopMs = B, withLoopGetters = true } = {}) {
     introMs, loopMs,
     maxLoop: 0,
     abs: 0,
+    fadeStartedAtMs: null, // mdxmini latches fade_out; only reinit (a seek) clears it
     silent: false,
     lastMaxLoopArg: null,
     stopped: false,
@@ -78,6 +79,8 @@ function makeCore({ introMs = A, loopMs = B, withLoopGetters = true } = {}) {
   core.lengthMs = (passes) => (passes === 0
     ? Infinity
     : core.introMs + passes * core.loopMs + FADE_MS);
+  // Where the fade for a given pass count begins: the end of that pass.
+  core.fadeStartMs = (passes) => core.introMs + passes * core.loopMs;
 
   Object.assign(core, {
     _mdx_create_context: () => 1,
@@ -87,18 +90,17 @@ function makeCore({ introMs = A, loopMs = B, withLoopGetters = true } = {}) {
     _mdx_close: () => 0,
     _mdx_get_title: (ctx, ptr) => core.HEAPU8.fill(0, ptr, ptr + 256),
     ccall: (name) => (name === 'mdx_open' ? 0 : 0),
+    // Note: lowering the pass count to 0 does NOT clear a fade already in
+    // progress (mdxmini only reinit clears it), which is why enabling Repeat One
+    // during the fade ends the song rather than looping it.
     _mdx_set_max_loop: (ctx, n) => { core.lastMaxLoopArg = n; core.maxLoop = n; },
+    _mdx_set_position_ms: (ctx, ms) => { core.abs = ms; core.fadeStartedAtMs = null; },
     _mdx_get_position_ms: () => Math.round(core.abs),
     _mdx_get_tracks: () => 0,
     _mdx_get_track_name: () => 8,
     _mdx_get_track_mask: () => 0,
     _mdx_set_track_mask: () => {},
-    _mdx_calc_sample: () => {
-      // The engine fades out after the capped passes, then reports the end.
-      if (core.maxLoop > 0 && core.abs >= core.lengthMs(core.maxLoop)) return 0;
-      core.abs += STEP_MS;
-      return BUFFER_SIZE;
-    },
+    _mdx_calc_sample: () => (core.step() ? BUFFER_SIZE : 0),
     _malloc: () => 4096,
     _free: () => {},
     HEAPU8: new Uint8Array(8192),
@@ -114,7 +116,18 @@ function makeCore({ introMs = A, loopMs = B, withLoopGetters = true } = {}) {
     core._mdx_get_loop_length_ms = () => core.loopMs;
   }
 
-  core.step = () => core._mdx_calc_sample() !== 0;
+  // Advance in whole steps: the fade latches when the clock crosses the boundary
+  // for the current pass count, so a test that jumped to a position would skip
+  // state the engine would have set.
+  core.step = () => {
+    if (core.fadeStartedAtMs == null && core.maxLoop > 0 &&
+        core.abs >= core.fadeStartMs(core.maxLoop)) {
+      core.fadeStartedAtMs = core.fadeStartMs(core.maxLoop);
+    }
+    if (core.fadeStartedAtMs != null && core.abs >= core.fadeStartedAtMs + FADE_MS) return false;
+    core.abs += STEP_MS;
+    return true;
+  };
   core.advanceTo = (targetMs) => {
     let steps = 0;
     while (core.abs < targetMs && steps++ < 100000) {
@@ -332,8 +345,7 @@ async function main() {
     assert.strictEqual(p.restartAtEndPending, false, 'native looping, no late restart');
   });
 
-  await xcheck('enabling repeat one during the fade tail keeps the head on the tail',
-    'MDX has no fadeTailStartMs capture: getDisplayPositionMs() ignores the fade once this.looping is set, so enabling repeat one while the fade is running folds the head back into the band instead of riding the tail out (VGMPlayer.syncFadeTailCapture exists for exactly this). Confirmed in-app on catalog/mdx/G2MST6.MDX.', async () => {
+  await check('enabling repeat one during the fade tail keeps the head on the tail', async () => {
       const { p, core } = await makePlayer();
       core.advanceTo(BAND_END + 2000); // fade already running at 2 passes
       const before = p.getDisplayPositionMs();
@@ -344,6 +356,17 @@ async function main() {
       await driveToEnd(p, core, BAND_END + 4000, 30000);
       assert.strictEqual(p.stopped, true, 'the running fade still ends the song');
     });
+
+  await check('a seek drops the captured tail, and the head folds again', async () => {
+    const { p, core } = await makePlayer();
+    core.advanceTo(BAND_END + 2000);
+    p.setLooping(true); // captures the running fade
+    assert.strictEqual(p.fadeTailStartMs, BAND_END);
+    p.seekMs(BAND_START + 1000);
+    assert.strictEqual(p.fadeTailStartMs, null, 'the capture belonged to the old position');
+    await drive(p, core, [BAND_START + B]);
+    assertDisplay(p, BAND_START, 'folds into the band again');
+  });
 
   console.log(`\n${passed} checks passed${xfailed ? `, ${xfailed} known failure(s)` : ''}${process.exitCode ? ' (WITH FAILURES)' : ''}.`);
 }

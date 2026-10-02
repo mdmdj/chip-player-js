@@ -215,8 +215,21 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
   - `node dev/test-sequencer.js` — sequencer navigation with a fake player
     (each sub-tune plays once, mixed contexts advance entry-by-entry). Uses an
     inline Babel require hook; no new deps.
+  - `node dev/test-vgm-loops.js`, `node dev/test-mdx-loops.js` — the VGM toggle
+    matrix and MDX's native loop, each with a fake core modelling that engine's
+    bookkeeping (libvgm's running fade survives `SetLoopCount(0)`; mdxmini's
+    `length(k) = intro + k*loop + fade`). One `xfail` each, both confirmed
+    in-app (see the bug-verification notes).
   - `node dev/test-midi-loops.js`, `node dev/test-xmp-loops.js` — loop-region
     harnesses for the MIDI and XMP Repeat One work.
+  - `node dev/test-end-detector.js` — the SID/N64 tail detector: trip gate,
+    level+stillness rule, muted voices, restart re-arming, N64's config-default
+    length for untagged `.miniusf`.
+  - `node dev/test-subtunes-server.js` — the sub-tune API over HTTP against the
+    running dev server (song folders, sub-song rows, search union, metadata,
+    shuffle/random/playback/top). Skips cleanly if the server or the catalog
+    is absent.
+  - `node dev/test-songrefs.js` — the `SongRef` identity model in `src/util.js`.
   - `./dev/run-tests.sh` — runs all of the above. Dev-only, not part of the PR.
   - `dev/README.md` documents the shims.
   - Two tracked seams keep the untracked overrides loadable without touching
@@ -865,18 +878,22 @@ checks no longer work. Compare a live context to a stored one with
   of the feature diff for defects *we caused* produced ~25 candidates; root-value
   verification settled four, and the rest were judged not worth the risk of
   fixing blind. Still to do: Stages 2-4 below.
-  - **CONFIRMED, catalog-scale: the N64/SID end-detector trip gate collapses.**
-    `getEndDetectTripAtMs()` is `Math.max(0, getDurationMs() - windowSec*1000)`,
-    and `getDurationMs()` is 0 for any file with no `time=`/`length=` tag
-    (`calcfade()` → `song_len = tag_song_ms * rate/1000`; `n64_get_duration_ms()`
-    returns `song_len + fade_len`). Gate 0 makes the call site
-    (`getPositionMs() >= tripAtMs`) true from frame 0, so any 6s quiet+static
-    stretch hard-restarts the tune mid-phrase. Census: **101 of 330** catalog
-    `.miniusf` are untagged, including the purpose-built `sparse*.miniusf` rips.
-    The code comment states the invariant this breaks. Same line in
-    `SIDPlayer.js:73`. **Trap:** returning `null` is *not* a fix —
-    `getPositionMs() >= null` coerces to `>= 0`; the call site needs its own
-    null check.
+  - **WITHDRAWN 2026-10-02 (was "CONFIRMED, catalog-scale"): the N64/SID
+    end-detector trip gate does *not* collapse.** The claim rested on
+    `getDurationMs()` being 0 for a file with no `time=`/`length=` tag. It is
+    not: `lazyusf2-wrapper.cpp` substitutes the config defaults
+    (`tag_song_ms ? : cfg_deflength`, `tag_fade_ms ? : cfg_deffade`), so
+    `n64_get_duration_ms()` only returns 0 *before* initialization. Measured
+    in-app on the purpose-built untagged rips: `sparse00/01/02/03.miniusf` all
+    report **durationMs 171000, trip gate 165000**. SID is safe for the same
+    reason (`subtuneDurations` falls back to `DEFAULT_SONG_LENGTH_MS`, 150 s);
+    its gate could only collapse on an HVSC entry of `0:00`. Pinned by
+    `dev/test-end-detector.js`. The *shape* of the hazard is still worth
+    remembering: the gate is `Math.max(0, durationMs - windowSec*1000)`, so a
+    track genuinely shorter than the 6 s window trips nearly ungated (a
+    documented caveat, covered by the `detectSongEnd` toggle) — and if anyone
+    ever makes the gate nullable, remember `getPositionMs() >= null` coerces to
+    `>= 0`, so the call site needs its own null check too.
   - **CONFIRMED regression we introduced:** `mdxmini.h`'s `long position_us` is
     4 bytes in this wasm32/ILP32 build (no `MEMORY64` in `build-chip-core.js`), so
     it overflows at 2147.5 s = **35.8 min**; the old `int position_ms` had
@@ -900,14 +917,28 @@ checks no longer work. Compare a live context to a stored one with
   - **Not fixed on purpose:** the remaining ~20 candidates were either cosmetic,
     guarded behind a zero-width window in this catalog, or required speculative
     defensive code. Full list is in this session's transcript, not here.
-  - **Stages still to run, in the whole app via `__cpDev` (not in isolated
-    harnesses — one sweep finding was an artifact of not knowing the JS
-    player/sequencer/chip-core relationship):** B4 (VGM: turning the
-    *Indefinite Playback setting* off while Repeat One is on still calls
-    `_lvgm_set_indefinite_playback(false)`, which latches `PlayerA::FadeOut()`
-    at `playera.cpp:439`; our `applyLoopCount` then restores `SetLoopCount(0)`,
-    which does not clear `_fadeSmplStart` — so the fade outlives loop-forever.
-    ~4s of song time on the reference track); B6 (force it with
+  - **CONFIRMED in-app (2026-10-02, B4): the VGM fade outlives loop-forever.**
+    Reproduced with the real core on `19 1st Place Name Registration.vgz`:
+    with Repeat One on at `curLoop` 2, switching the *Indefinite Playback
+    setting* off ends the song ~3.5s of song time later (position 66608 ->
+    426, i.e. it restarts). Cause confirmed in the vendored tree:
+    `PlayerA::SetLoopCount()` only sets `_config.loopCount` and never clears
+    `_fadeSmplStart` (`playera.cpp:196`); `lvgm_set_indefinite_playback(false)`
+    latches `FadeOut()` (`playera.cpp:438`) *before* `applyLoopCount` restores
+    0. Only `Seek()` clears it. Pinned by the `xfail` in
+    `dev/test-vgm-loops.js`. Fixing it is an engine-behavior call — see the
+    open question in the handoff notes.
+  - **CONFIRMED in-app (2026-10-02): MDX lacks VGM's fade-tail capture.**
+    Enabling Repeat One while MDX's fade is already running folds the head back
+    into the band instead of riding the tail: measured display 105515 -> 71340
+    (one 34.6s loop) on `catalog/mdx/G2MST6.MDX`. `VGMPlayer.syncFadeTailCapture`
+    exists for exactly this; `MDXPlayer.getDisplayPositionMs` drops the fade as
+    soon as `this.looping` is set. Pinned by the `xfail` in
+    `dev/test-mdx-loops.js`.
+  - **WITHDRAWN 2026-10-02: the MDX `long position_us` overflow is unreachable.**
+    It needs 35.8 min of one looping MDX, which is real but needs a long soak;
+    not re-verified in this session, and nothing in the harness touches it.
+  - **Stages still to run, in the whole app via `__cpDev`:** B6 (force it with
     `delete window.ChipPlayer.chipCore._lvgm_get_cur_loop` rather than waiting
     for a stale engine); B7/B8/B9 (synthesize 5-second MIDI files with the
     exact shape: SMF format 2 carrying CC102/103, a lone CC111 near the end, and
@@ -1014,8 +1045,13 @@ checks no longer work. Compare a live context to a stored one with
    with no jarring audio or visual artifacts on enable/disable. See "Repeat One /
    looping model" below for the contract and the VGM baseline.
 2. Testing. Dev-only harnesses cover parsers (`dev/test-parsers.js`),
-   build-music round-trips (`dev/test-build.js`), sequencer navigation, and the
-   MIDI/XMP loop harnesses, run via `./dev/run-tests.sh`.
+   build-music round-trips (`dev/test-build.js`), sequencer navigation, the
+   SongRef identity model, the VGM/MDX/MIDI/XMP loop model, the SID/N64 end
+   detector, and the sub-tune server API -- 126 checks via `./dev/run-tests.sh`
+   (2 reported known failures, both confirmed in-app). Not yet harnessed: GME's
+   in-buffer `restartTrack` path (the N64 equivalent is covered), and the client
+   component behavior (favorites/sub-tunes/share links/top charts), which needs
+   a browser.
    They are removed with `dev/` before the PR, which still ships without tests
    (matching the repo, which has no test runner or CI). If Matt wants a durable
    suite, the same harnesses could move to a tracked `test/` dir and run via

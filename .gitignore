@@ -33,3 +33,4 @@ libxmp/lite/cmake/libxmp-checks.cmake
 *.dev-backup
 _ignore/
 dev/nes-audio-tests/
+dev/.promote-armed

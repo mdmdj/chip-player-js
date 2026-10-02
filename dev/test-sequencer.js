@@ -73,6 +73,23 @@ class FakePlayer extends EventEmitter {
   }
 }
 
+// Same, but the song does not end by itself: lets a test end it at a chosen
+// moment. `endNow()` is what the player calls when the engine reports the end.
+class ManualPlayer extends FakePlayer {
+  constructor() {
+    super();
+    this.ended = false;
+  }
+  async loadData(data, filepath, persistedSettings, subtune = 0) {
+    this.loads.push(`${filepath}#${subtune}`);
+    this.stopped = false;
+    this.emit('playerStateUpdate', { isStopped: false, numSubtunes: 1, subtune });
+  }
+  endNow() {
+    this.stop();
+  }
+}
+
 function makeSequencer(players) {
   // `local/` paths are read via localFilesManager.read(), avoiding network.
   return new Sequencer(players, { read: () => new Uint8Array(0) }, () => ({}));
@@ -109,6 +126,39 @@ check('playContext subtune override only affects the first song', () => {
   const seq = makeSequencer([player]);
   seq.playContext([{ path: 'local/game.nsf', subtune: 0 }], 0, 2);
   assert.deepStrictEqual(player.loads, ['local/game.nsf#2']);
+});
+
+// Tier-3 engines (V2M today) have no loop API: the engine ends, and the
+// sequencer either advances to the next entry or -- under Repeat One, where
+// currIdx stays put -- re-loads the same one. That re-load is a full refetch
+// and a new player, which is the honest cost of the bottom rung of the ladder.
+check('repeat one re-loads the same entry instead of advancing', () => {
+  const player = new ManualPlayer();
+  const seq = makeSequencer([player]);
+  seq.setRepeat(2); // REPEAT_ONE
+  seq.playContext([
+    { path: 'local/a.v2m', subtune: 0 },
+    { path: 'local/b.v2m', subtune: 0 },
+  ], 0);
+  assert.deepStrictEqual(player.loads, ['local/a.v2m#0']);
+  player.endNow();
+  assert.deepStrictEqual(player.loads, ['local/a.v2m#0', 'local/a.v2m#0'],
+    'the same entry is re-run, not the next one');
+  player.endNow();
+  assert.deepStrictEqual(player.loads.length, 3, 'and it keeps repeating');
+});
+
+check('repeat off advances to the next entry when a song ends', () => {
+  const player = new ManualPlayer();
+  const seq = makeSequencer([player]);
+  seq.playContext([
+    { path: 'local/a.v2m', subtune: 0 },
+    { path: 'local/b.v2m', subtune: 0 },
+  ], 0);
+  player.endNow();
+  assert.deepStrictEqual(player.loads, ['local/a.v2m#0', 'local/b.v2m#0']);
+  player.endNow();
+  assert.strictEqual(seq.getCurrSongRef(), null, 'the context drains');
 });
 
 console.log(`\n${passed} passed, ${failed} failed.`);

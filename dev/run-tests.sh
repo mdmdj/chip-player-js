@@ -21,6 +21,9 @@ echo
 echo "== mdx loops =="
 node "$DIR/test-mdx-loops.js" 2>/dev/null
 echo
+echo "== v2m loops (tier 3) =="
+node "$DIR/test-v2m-loops.js" 2>/dev/null
+echo
 echo "== midi loops =="
 node "$DIR/test-midi-loops.js" 2>/dev/null
 echo

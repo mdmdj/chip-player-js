@@ -16,6 +16,7 @@ public/soundfonts/
 **/untracked/
 src/-catalog-tests/
 src/chip-core.js
+src/chip-core.wasm.buildinfo.json
 src/chip-player-devtools.js
 server/middleware/auth.dev.js
 server/catalog.json

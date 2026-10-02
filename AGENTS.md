@@ -226,9 +226,9 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
   - `node dev/test-midi-loops.js`, `node dev/test-xmp-loops.js` — loop-region
     harnesses for the MIDI and XMP Repeat One work. The MIDI one also *builds*
     minimal SMFs (`buildMidi`) for the edge shapes, so they do not depend on a
-    user-supplied catalog: an N64 CC102/103 pair in a format-2 file, a paired
-    marker too short to be a region, a lone CC111, post-loop padding with and
-    without notes, and a markerless file under repeat one.
+    user-supplied catalog: an N64 CC102/103 pair, a paired marker too short to be
+    a region, a lone CC111, post-loop padding with and without notes, a markerless
+    file under repeat one, and the format-2 no-band rule with a format-1 guard.
   - `node dev/test-end-detector.js` — the SID/N64 tail detector: trip gate,
     level+stillness rule, muted voices, restart re-arming, N64's config-default
     length for untagged `.miniusf`.
@@ -1060,7 +1060,7 @@ checks no longer work. Compare a live context to a stored one with
 2. Testing. Dev-only harnesses cover parsers (`dev/test-parsers.js`),
    build-music round-trips (`dev/test-build.js`), sequencer navigation, the
    SongRef identity model, the VGM/GME/MDX/MIDI/XMP loop model, the SID/N64 end
-   detector, and the sub-tune server API -- 149 checks via `./dev/run-tests.sh`
+   detector, and the sub-tune server API -- 151 checks via `./dev/run-tests.sh`
    (2 reported known failures: the VGM indefinite-playback fade, a known limit,
    and the unguarded `lvgm_get_cur_loop` sentinel). Not yet harnessed: GME's
    in-buffer `restartTrack` path (the N64 equivalent is covered), and the client
@@ -1410,8 +1410,17 @@ only armed when `silenceDuration >= 0`, and both arms must end the song):
   silent state restore (no panic); the head folds into the band via the
   shared `getLoopBandMs`, with no fade tail (past the band the song ends).
   Lone CC111 (RPG Maker: loop to song end) expands the same way. Verified on
-  the catalog set (Mario Kart 64 [0, 58348], Descent Game01 [100, 200194])
-  via `dev/test-midi-loops.js` (in `dev/run-tests.sh`). The piano roll parses
+  the catalog set (Mario Kart 64 [0, 58348], Descent Game01 [100, 200194]) via
+  `dev/test-midi-loops.js` (in `dev/run-tests.sh`), which also *builds* minimal
+  SMFs for the edge shapes so they do not need a catalog file. **Format 2 (async
+  patterns, no shared timeline) gets no band at all** — the expansion is skipped
+  there, and the "end of the first iteration" latch used to fall through to the
+  end of the song, so the UI would highlight the whole file as the loop region;
+  `getLoopedEvents` now reports a band only when it expanded the loop, which is
+  what "no band" means to the player (`midi-helpers.js`, `expandLoop`). Two
+  DEV-region tripwires watch for the case: `scripts/build-music.js` counts
+  format-2 SMFs in the run summary (this catalog has 7, all Day of the Tentacle
+  / RPG Maker, none carrying markers) and `midi-helpers.js` warns on playback. The piano roll parses
   the same expanded list (`MIDIFile.getPlaybackEvents`, shared with the
   audio engine), so it stays populated through the second pass and across
   Repeat-One wraps instead of ending at the first loop point. Post-loop

@@ -277,23 +277,21 @@ check('Gyrocopter: padded END_OF_TRACK does not inflate duration', () => {
 
 // --- Synthetic shapes -------------------------------------------------------
 
-check('N64 shape: a CC102/103 pair in a format-2 file gives a region', () => {
+check('N64 shape: a CC102/103 pair gives a region and a band', () => {
   // Mario Kart marks the loop with CC102 at 0 and CC103 at the end of the body.
+  // The real file is format 1 (measured), so that is the shape to test here;
+  // format 2 gets its own check below.
   const bytes = buildMidi([
     [tempo(), ccAt(0, 102)],
     [tempo(), noteOnAt(0), noteOffAt(TPQ), noteOnAt(0), noteOffAt(TPQ), cc(103), noteOnAt(0), noteOffAt(TPQ)],
-  ], { format: 2 });
+  ], { format: 1 });
   const mf = parseBytes(bytes);
   const range = mf.findLoopRange(mf.tracks.map((_, i) => mf.getTrackEvents(i)));
   assert.ok(range, 'a region was found');
   assert.strictEqual(range.startTick, 0);
   assert.strictEqual(range.endTick, 2 * TPQ, 'the CC103 tick');
   // The player's band must be the same region the file reports, in the same
-  // ms the piano roll and the audio use. (Asserted against the file rather
-  // than an absolute value: for format 2 the clock is deliberately not reset
-  // between tracks, so a marker sitting in the conductor track gets a
-  // different origin than one in the music track. Real format-2 files are
-  // covered by the Mario Kart checks above, which assert exact ms.)
+  // ms the piano roll and the audio use.
   const { loopStartMs, loopEndMs } = mf.getPlaybackEvents(true);
   const p = makePlayer(stubSynth(true));
   p.load(mf, true);
@@ -397,6 +395,43 @@ check('a file with no loop markers plays straight through under repeat one', () 
   p.setPosition(p.getDuration() - 30);
   p.processPlaySynth(0, 2048);
   assert.ok(p.paused, 'repeat one cannot invent a loop, so the song ends');
+});
+
+check('format 2 (async patterns): loop markers are ignored, so there is no band', () => {
+  // findLoopRange() is format-blind and still finds the region, but a
+  // song-global loop cannot be expanded onto independent patterns, so the
+  // player must report *no* band rather than latching the whole song as one.
+  const bytes = buildMidi([
+    [tempo(), ccAt(0, 102)],
+    [tempo(), noteOnAt(0), noteOffAt(TPQ), cc(103), noteOnAt(0), noteOffAt(TPQ)],
+  ], { format: 2 });
+  const mf = parseBytes(bytes);
+  assert.ok(mf.findLoopRange(mf.tracks.map((_, i) => mf.getTrackEvents(i))),
+    'the markers really are there');
+  const { loopStartMs, loopEndMs } = mf.getPlaybackEvents(true);
+  assert.strictEqual(loopStartMs, null);
+  assert.strictEqual(loopEndMs, null, 'not the end of the song either');
+  const p = makePlayer(stubSynth(true));
+  p.load(mf, true);
+  assert.ok(!p.loop, 'no band, so no wrap and repeat one plays straight through');
+  const roll = parseMidiData(bytes);
+  const audio = mf.getPlaybackEvents(true).events.slice(-1)[0].playTime;
+  assert.ok(Math.abs(roll.durationMs - audio) < 1,
+    `piano roll and audio agree on a single pass (roll=${roll.durationMs} audio=${audio})`);
+});
+
+check('format 1 with the same markers still gets its band (guards the guard)', () => {
+  const bytes = buildMidi([
+    tempo(), cc(102),
+    noteOnAt(0), noteOffAt(TPQ), cc(103),
+    noteOnAt(0), noteOffAt(TPQ),
+  ], { format: 1 });
+  const mf = parseBytes(bytes);
+  const { loopStartMs, loopEndMs } = mf.getPlaybackEvents(true);
+  assert.ok(loopEndMs != null && loopEndMs > loopStartMs, 'the band survives format 1');
+  const p = makePlayer(stubSynth(true));
+  p.load(mf, true);
+  assert.ok(p.loop, 'and the player still wraps');
 });
 
 console.log(`\n${passed} checks passed${process.exitCode ? ' (WITH FAILURES)' : ''}.`);

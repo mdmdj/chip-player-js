@@ -978,10 +978,16 @@ checks no longer work. Compare a live context to a stored one with
     exact shape: SMF format 2 carrying CC102/103, a lone CC111 near the end, and
     >=2 note-less post-loop events); B10 (the `UserProvider` optimistic-favorite
     *failure* path isn't token-guarded, so a late rejection reverts a different
-    song's favorite); B11 (`App.js:251` builds the startup browse URL from the
-    raw path, so a `%` in a filename throws `URIError` inside the fetch
-    `.then()` and the shared song never plays — `catalog/midi/.../100% Pure
-    Love.mid` is the fixture).
+    song's favorite); B11 — **not ours, and the mechanism was misdiagnosed
+    here**: a bare `%` in a filename throws `URIError`, but in
+    `MIDIPlayer.metadataFromFilepath`'s unguarded `decodeURIComponent`
+    (`MIDIPlayer.js:265`, Matt's, `e4e926832d` 2022, present in `master`), so
+    the song is unplayable on load — not in the startup browse URL, which goes
+    through `fetchDirectory`'s `encodeURIComponent` and is fine. Reachable in
+    prod today by clicking such a file in the browser; fixture
+    `catalog/midi/.../100% Pure Love.mid`. Our per-segment encoding fixes in
+    `util.getUrlFromFilepath`/`getMetadataUrlForFilepath` cover the other call
+    sites; this is the one that is left.
   - **Super-speed playback is feasible and needs no tracked-file changes:** audio
     is driven by a legacy `ScriptProcessorNode` on the main thread
     (`App.js:190`, `playerNode.onaudioprocess` — the worklet is an 11-line no-op

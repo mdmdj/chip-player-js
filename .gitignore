@@ -31,4 +31,4 @@ libxmp/lite/cmake/libxmp-checks.cmake
 *.backup/
 *.dev-backup
 _ignore/
-public/sitemap*.xml
+dev/nes-audio-tests/

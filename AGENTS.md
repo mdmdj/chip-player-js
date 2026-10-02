@@ -139,10 +139,22 @@ is listed as overlay-only. At final PR prep these are the "1–2 lines" to
 remove by hand.
 
 Because the file is path-listed, `promote.sh` also skips the feature work that
-lands here: the `?play=` handler's `subtuneCount` injection into `__chipConfig`
-must be carried to the feature branch by hand at the same time. (Its counterpart,
-`m.subtune_count` in `getSongByIdStmt`, lives in `server/database.js` and
-promotes normally.)
+lands here. **Done 2026-10-02:** the `?play=` handler's `subtuneCount` injection
+into `__chipConfig` (`server/index.js`, in the `chipConfig` literal's `if (song
+.subtune_count > 1)` arm) is now hand-carried to the feature branch. Its
+counterpart, `m.subtune_count` in `getSongByIdStmt`, lives in
+`server/database.js` and promotes normally. Both are required together — the
+client branch `App.js` (`if (window.__chipConfig?.subtuneCount > 1)`) promotes,
+so without the server half every `?play=…&subtune=N` share link silently falls
+back to the containing directory.
+
+**Also hand-carried:** `src/bindings/libsidplayfp-wrapper.cpp`'s
+`sid_set_subtune` fix (call `engine->load(currentTune)` after `selectSong()`).
+That file is path-listed because its `SIDPLAYFP_HAVE_SEEK` guards need our fork,
+but *this hunk does not* — master's own wrapper already calls `engine->load()`
+in `sid_load_data`, so it is upstream libsidplayfp API. Without it the PR's
+`SIDPlayer.playSubtune` selects a sub-tune that never loads, so every sub-tune of
+a multi-song SID plays song 0 and the tail-detector restart is a no-op.
 
 ### Known gaps (handoff state)
 
@@ -155,10 +167,11 @@ promotes normally.)
   regions strip, portable guards ride along).
 - Remaining path-listed files are intentional: `src/config/index.js` is
   dev-only throughout (LAN hostname) and `server/index.js` stays listed
-  (DEV_AUTH_MODULE/skia seams) plus two hand items: the `?play=` handler's
-  `subtuneCount` injection (feature, carry by hand with the promoted
-  `getSongByIdStmt` column) and an unrelated HVSC `csdbid` perf guard
-  (stays out). MIDIPlayer/XMPPlayer needed no regions after all — their
+  (DEV_AUTH_MODULE/skia seams) plus one hand item that is now DONE — the `?play=`
+  handler's `subtuneCount` injection is hand-carried alongside the promoted
+  `getSongByIdStmt` column (see "The 1 hard-coded seam" above); the remaining
+  item is an unrelated HVSC `csdbid` perf guard, which stays out.
+  MIDIPlayer/XMPPlayer needed no regions after all — their
   fork/API guards are portable compat — so they delisted whole.
 - After the reverted libvgm attempt, the working tree is clean and VGM/looping
   work (see "Building the real chip-core").
@@ -224,6 +237,81 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
   below. It is gitignored and not committed.
 
 ### Building the real chip-core
+
+> **Record what you built from; don't guess.** The shipped `src/chip-core.wasm`
+> was rescued (gitignored, so it was never in git) to
+> `~/dev/chip-core-frozen/` (sha256 `94c17c93…`) with a `PROVENANCE.md`. Its
+> source clones had all been deleted (`../libvgm`, `../libxmp`,
+> `../game-music-emu`, `../FluidLite`, `../libADLMIDI`; only
+> `../libsidplayfp` survived), so provenance had to be reconstructed
+> empirically on 2026-10-02. The conclusion: it is consistent with this repo's
+> vendored `libvgm/` (upstream `91b6542`), and `../libvgm` has been restored at
+> that commit. Two guards now make this class of confusion non-recurring:
+>
+> - **A rebuild is byte-for-byte reproducible (verified 2026-10-02).** Rebuilding
+>   from the in-repo trees reproduces the frozen artifact *exactly*: sha256
+>   `94c17c9357d4b937…`, 1,912,960 B. So the shipped core was built from the
+>   in-repo trees — not a lost sibling clone. `scripts/build-subprojects.sh`
+>   builds the **in-repo** trees (`libvgm/`, `libxmp/`, `game-music-emu/`,
+>   `fluidlite/`, `libADLMIDI/`); their `.a` files already exist under each tree's
+>   `build/`. `../libsidplayfp` is the one genuine sibling (SID isn't vendored).
+>   Never add a sibling clone of the other five: `normalizeInput()` prefers an
+>   existing sibling, whose build outputs don't exist, which breaks linking.
+> - **An engine-content gate, not a blanket fallback ban.** A fallback to an
+>   in-repo tree is this branch's *normal* state and only warns. What fails the
+>   build is an engine whose **content hash changed** since the recorded
+>   manifest — that is what silently swaps a version. Override with
+>   `CHIP_ALLOW_ENGINE_FALLBACK=1`.
+> - **Provenance is recorded, and readable from a running app.**
+>   `scripts/build-info.js` is the single reader: per engine a tree hash
+>   (`git rev-parse HEAD:<dir>`, works without the dir having its own `.git`) or
+>   a sibling commit plus recursive submodule state, and a confidence `tier`:
+>   `authoritative` (Matt-specified — SID) / `verified` (content-matched against
+>   upstream: libvgm, libxmp, fluidlite, libADLMIDI) / `base+patches`
+>   (game-music-emu — no upstream blob matched; declares 0.6.2 with our local
+>   CMake edits) / `assumed`. Two consumers, so they cannot disagree: each build
+>   writes `src/chip-core.wasm.buildinfo.json`, and
+>   `config/webpack.config.common.js` `DefinePlugin`s the same object as
+>   `__BUILD_INFO__`, which `src/index.js` assigns to `window.ChipCoreBuildInfo`.
+>   Deliberately **not** in the UI: run `JSON.parse(window.ChipCoreBuildInfo)` in
+>   a deployed build's console to ask prod what it was built from, or grep the
+>   single-line literal in `main.<hash>.js`. Whitelisted fields only — hashes, no
+>   `git log` (author PII), no remote URLs (may embed a credential), no absolute
+>   paths (leak a home directory). Known gap: the SID submodule parser reports 1
+>   submodule where `git submodule status --recursive` shows 2 (`resid` on
+>   `montag-dev`, plus the xa65 `driver`) — fix before trusting SID's pin.
+> - **Prod IS built from this repo's vendored libvgm.** Probed 2026-10-02
+>   against prod's `static/js/main.acd8.js` (Emscripten export names survive as
+>   string literals even though the wasm is stripped). Prod's libvgm surface is
+>   19 names, every one byte-identical to ours (`lvgm_init`, `_load_data`,
+>   `_render`, `_seek_ms`, `_set_indefinite_playback`, voice APIs, …), and it has
+>   **none** of our 8 loop APIs (`lvgm_get_cur_loop`, `lvgm_set_loop_count`,
+>   `lvgm_get_{loop_start,loop_end,fade_start,playlist_position}_ms`,
+>   `lvgm_get_indefinite_playback`, `lvgm_reset`) — so **prod ships no VGM
+>   loop-region feature at all**, and our Repeat One baseline is new capability,
+>   not a port. The tie-breaker for *which* tree prod used:
+>   `lvgm_get_voice_chip_name` exists in **no** upstream libvgm — it is ours,
+>   added to the wrapper 2024-06-17 (`27ad9ee11`, moved to `src/bindings/` by
+>   `cad9a5545`) — and prod exports it. So prod is built from this repo's wrapper
+>   and therefore this repo's `libvgm/`. (Prod ships MDX — `mdx_open` and
+>   `mdx_calc_sample` present — but not `mdx_set_max_loop`.)
+> - **libvgm counts loops correctly — no patch is needed.** `VGMPlayer::Cmd_
+>   EndOfData()` in `player/vgmplayer_cmdhandler.cpp:574` does `_curLoop ++` on
+>   every loop (and fires `PLREVT_LOOP` with it), reset only in
+>   `vgmplayer.cpp:938` (init `:148`). This is identical in the vendored
+>   `91b6542` and in upstream HEAD `c8b998b`, which is why the frozen artifact
+>   reports `curLoop` 0/1/1/2 at seeks 1k/31k/45k/60k. **Our vendored
+>   `libvgm/player/vgmplayer.cpp` is byte-identical to upstream `91b6542`
+>   (2023-12-20)** (blob `591511bf`), and `libvgm/` was untouched 2024-06-20 →
+>   2026-04-03, so prod and the frozen artifact agree. **Do not go looking for a
+>   missing loop counter in libvgm — there isn't one.** (A 2026-10-02 detour
+>   concluded otherwise by grepping only `vgmplayer.cpp` and missing the
+>   increment in `vgmplayer_cmdhandler.cpp`; that also invalidated a 48-fork
+>   scan. When auditing loop state, grep the *whole* player dir, not one file.)
+> - **The Repeat One matrix numbers are stale.** The frozen core reports
+>   `intro_length=76, loop_length=29867` (band [29943, 59810]) for
+>   `16 Hurry Up!.vgz`; AGENTS.md's matrix records A=342/B=800. Re-measure before
+>   trusting the matrix.
 
 Real audio works locally. `scripts/build-subprojects.sh` + changes to
 `scripts/build-chip-core.js` build all vendored engines into
@@ -701,6 +789,16 @@ checks no longer work. Compare a live context to a stored one with
   audio/engine/build/dev work. There is no commit list to maintain — a change
   either belongs to the feature branch or it does not. Run the app from the dev
   branch.
+- **UNCOMMITTED, do not lose.** `chip-player-js-feature/` (the feature worktree)
+  holds three hand-carried fixes, uncommitted: P1 `__chipConfig.subtuneCount`
+  injection in `server/index.js`; S4 `cache1Hour` restored to master; P2
+  `engine->load(currentTune)` in `libsidplayfp-wrapper.cpp`'s `sid_set_subtune`.
+  **P1 is why the feature branch was broken** — its client half (`App.js:249`
+  `window.__chipConfig?.subtuneCount > 1`) promotes, so without the server half
+  every `?play=…&subtune=N` share link fell back to the containing directory.
+  Also uncommitted on `dev/overlay`: `AGENTS.md`, `dev/promote-paths.txt`,
+  `scripts/build-chip-core.js`, new `scripts/build-info.js`,
+  `config/webpack.config.common.js`, `src/index.js`.
 - **Handoff state (2026-10):** GBS/AY sub-tune parsing landed (feature:
   `parseGBS` counts, new `parseAY` with per-track labels, `gbs`/`ay` in
   `MULTISONG_EXTENSIONS`; dev-only fixtures + 10 new parser checks, 30 total).
@@ -718,6 +816,85 @@ checks no longer work. Compare a live context to a stored one with
   attempted and aborted (every pre-promote pick replays work the promote
   already carried over, so it is all conflicts and empty commits). Redo it
   in a fresh session before the next promote.
+- **Bug verification (2026-10-02) — two confirmed, one dead, one masked.** A sweep
+  of the feature diff for defects *we caused* produced ~25 candidates; root-value
+  verification settled four, and the rest were judged not worth the risk of
+  fixing blind. Still to do: Stages 2-4 below.
+  - **CONFIRMED, catalog-scale: the N64/SID end-detector trip gate collapses.**
+    `getEndDetectTripAtMs()` is `Math.max(0, getDurationMs() - windowSec*1000)`,
+    and `getDurationMs()` is 0 for any file with no `time=`/`length=` tag
+    (`calcfade()` → `song_len = tag_song_ms * rate/1000`; `n64_get_duration_ms()`
+    returns `song_len + fade_len`). Gate 0 makes the call site
+    (`getPositionMs() >= tripAtMs`) true from frame 0, so any 6s quiet+static
+    stretch hard-restarts the tune mid-phrase. Census: **101 of 330** catalog
+    `.miniusf` are untagged, including the purpose-built `sparse*.miniusf` rips.
+    The code comment states the invariant this breaks. Same line in
+    `SIDPlayer.js:73`. **Trap:** returning `null` is *not* a fix —
+    `getPositionMs() >= null` coerces to `>= 0`; the call site needs its own
+    null check.
+  - **CONFIRMED regression we introduced:** `mdxmini.h`'s `long position_us` is
+    4 bytes in this wasm32/ILP32 build (no `MEMORY64` in `build-chip-core.js`), so
+    it overflows at 2147.5 s = **35.8 min**; the old `int position_ms` had
+    596.5 h (24.8 days) of range. A ~400x range cut bought 1 ms of seek
+    accuracy. On wrap: negative position, head jumps to the start, and
+    `mdx_set_position_ms`'s `seek_to_ms < position_ms` backward-seek test stops
+    firing. Reachable by leaving any looping MDX on Repeat One for 36 min. One
+    word: `long` → `double`.
+  - **DEAD (do not "fix"):** `XMPPlayer._loopCount` appears not to reset on
+    `loadData`, but `Sequencer.playSong:231` calls
+    `setLooping(repeat === REPEAT_ONE)` on every load, and with repeat already
+    off that hits the third branch (`XMPPlayer.js:289`) which sets it to 1. It
+    self-heals before `loadData` runs.
+  - **MASKED:** `lvgm_get_cur_loop` lacks the `GetPlayer()` null guard its three
+    siblings have, so a pre-first-load toggle sends `UINT32(-1)` → JS
+    `Math.max(2, 4294967296)` → wasm truncation → `0` = loop forever. Real
+    defect, but the precondition is "no file loaded" (nothing to loop) and the
+    next `loadData` → `resolveParamValues` → `setParameter('indefinitePlayback',
+    false)` → `SetLoopCount(2)` resets it. Masked by call ordering, not design;
+    worth the 1-line guard, not worth describing as a hang.
+  - **Not fixed on purpose:** the remaining ~20 candidates were either cosmetic,
+    guarded behind a zero-width window in this catalog, or required speculative
+    defensive code. Full list is in this session's transcript, not here.
+  - **Stages still to run, in the whole app via `__cpDev` (not in isolated
+    harnesses — one sweep finding was an artifact of not knowing the JS
+    player/sequencer/chip-core relationship):** B4 (VGM: turning the
+    *Indefinite Playback setting* off while Repeat One is on still calls
+    `_lvgm_set_indefinite_playback(false)`, which latches `PlayerA::FadeOut()`
+    at `playera.cpp:439`; our `applyLoopCount` then restores `SetLoopCount(0)`,
+    which does not clear `_fadeSmplStart` — so the fade outlives loop-forever.
+    ~4s of song time on the reference track); B6 (force it with
+    `delete window.ChipPlayer.chipCore._lvgm_get_cur_loop` rather than waiting
+    for a stale engine); B7/B8/B9 (synthesize 5-second MIDI files with the
+    exact shape: SMF format 2 carrying CC102/103, a lone CC111 near the end, and
+    >=2 note-less post-loop events); B10 (the `UserProvider` optimistic-favorite
+    *failure* path isn't token-guarded, so a late rejection reverts a different
+    song's favorite); B11 (`App.js:251` builds the startup browse URL from the
+    raw path, so a `%` in a filename throws `URIError` inside the fetch
+    `.then()` and the shared song never plays — `catalog/midi/.../100% Pure
+    Love.mid` is the fixture).
+  - **Super-speed playback is feasible and needs no tracked-file changes:** audio
+    is driven by a legacy `ScriptProcessorNode` on the main thread
+    (`App.js:190`, `playerNode.onaudioprocess` — the worklet is an 11-line no-op
+    stub), and `this.playerNode` is on the App instance = `window.ChipPlayer`. So
+    a devtools-only `__cpDev.superSpeed(k)` can save+null `onaudioprocess` and
+    call `player.processAudio(chans)` in a time-budgeted loop: identical call
+    sequence, buffer size and sample rate, only wall-clock density changes.
+    (Do *not* touch the sample rate handed to the players — song-time-per-buffer
+    is `bufferSize / rate`, so a higher rate is *slower*, and the practical
+    ceiling is 48000/8000 ~6x before engines misbehave.) Validate first by
+    asserting the engine's own `getPositionMs()`/`GetCurLoop()` agree at matched
+    song positions at 1x and 16x. Note that most Stage 1-4 items do **not**
+    need it once you assert the root value instead of the emergent behaviour.
+- **Testing is deliberately NOT in the PR.** The dev harnesses stay in `dev/`
+    (excluded by `dev/promote-paths.txt`) and are version-controlled on
+    `dev/overlay`, so they persist without being shipped. Rationale: the repo has
+    no test runner, no CI and no `test` script; a tracked suite would silently
+    skip ~30% of its checks because `catalog/` is gitignored
+    (`test-parsers.js` real-file checks `return` silently, `test-midi-loops.js`
+    `process.exit(0)`s); and the benefit is consumed entirely before the PR is
+    written while the maintenance cost lands on Matt afterwards. Offer it, don't
+    impose it. This was decided explicitly — do not re-litigate without new
+    information.
 - **Handoff state (2026-09, read this):**
   - **Looping is now the top priority** and is treated as **feature** work (part
     of completing the sub-tunes feature), not an overlay extra. The VGM Repeat

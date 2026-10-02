@@ -84,6 +84,15 @@ module.exports = {
     ],
   },
   plugins: [
+    // Stamp the audio engines' provenance into the bundle as a single-line
+    // string literal. Evaluated here (not written to a committed file) so it
+    // always describes the build that produced it, and it runs for any build
+    // that loads this config. src/index.js assigns it to window.ChipCoreBuildInfo,
+    // so a shipped build can be asked what it was built from from the console,
+    // and the literal is greppable in the bundle.
+    new webpack.DefinePlugin({
+      __BUILD_INFO__: JSON.stringify(require('../scripts/build-info').buildInfo()),
+    }),
     new ESLintPlugin({
       context: paths.appSrc,
       formatter: eslintFormatter,

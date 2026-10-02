@@ -479,20 +479,34 @@ const preJs = `/*eslint-disable*/`;
 // ...); they are now vendored in this repo. Rewrite a "../name/..." path to
 // "name/..." when the sibling doesn't exist but the in-repo path does.
 const repoRoot = path.resolve(__dirname, '..');
+// Engines are referenced as ../<name> (a sibling checkout). When that sibling is
+// gone we fall back to the in-repo tree -- which is this branch's normal state,
+// but the in-repo trees are not always the version the shipped core was built
+// from (the in-repo libvgm is a stale 2023 tree; a sibling clone would silently
+// swap it). Swapping an engine's version changes playback with no error anywhere,
+// so record every fallback and refuse to build on one without an explicit
+// opt-in.
+const engineFallbacks = [];
+// The engine root is the first segment after '../' (../libvgm/build/... -> libvgm).
+const engineOf = (p) => (p.match(/^\.\.\/([a-zA-Z0-9_.-]+)/) || [])[1] || null;
 const normalizeInput = (p) => {
+  const rewrite = (target) => {
+    const local = target.replace(/^\.\.\//, '');
+    const sibling = path.resolve(repoRoot, target);
+    if (fs.existsSync(sibling) || !fs.existsSync(path.resolve(repoRoot, local))) return target;
+    const engine = engineOf(target);
+    if (engine && !engineFallbacks.includes(engine)) engineFallbacks.push(engine);
+    return local;
+  };
   // Rewrite include flags too: -I../libvgm -> -Ilibvgm
   const inc = p.match(/^-I(.*)$/);
   if (inc) {
-    const target = inc[1];
-    if (!target.startsWith('../')) return p;
-    const local = target.replace(/^\.\.\//, '');
-    const sibling = path.resolve(repoRoot, target);
-    return (!fs.existsSync(sibling) && fs.existsSync(path.resolve(repoRoot, local))) ? `-I${local}` : p;
+    if (!inc[1].startsWith('../')) return p;
+    const local = rewrite(inc[1]);
+    return local === inc[1] ? p : `-I${local}`;
   }
   if (!p.startsWith('../')) return p;
-  const local = p.replace(/^\.\.\//, '');
-  const sibling = path.resolve(repoRoot, p);
-  return (!fs.existsSync(sibling) && fs.existsSync(path.resolve(repoRoot, local))) ? local : p;
+  return rewrite(p);
 };
 // The compiler is run from the repo root; output paths (src/chip-core.js) are
 // already relative to it.
@@ -500,6 +514,71 @@ const args = []
   .concat(flags.map(normalizeInput))
   .concat(sourceFiles.map(normalizeInput));
 console.log(`Normalized invocation:\n${compiler} ${chalk.blue(args.join(' '))}\n`);
+
+// (A) Engine identity gate. Engines are referenced as ../<name> and fall back to
+// the in-repo tree when that sibling is gone -- which is this branch's normal
+// state, so a fallback alone is not suspicious. What matters is whether the
+// resolved engine CONTENT changed since the last build: a stray sibling clone or
+// a local edit swaps an engine's version with no error and no runtime symptom.
+// So compare tree hashes against the recorded manifest and fail only on a
+// change. Opt in with CHIP_ALLOW_ENGINE_FALLBACK=1.
+const { engineInfo: readEngine } = require('./build-info');
+const resolvedEngines = require('./build-info').ENGINES.map(readEngine);
+let previous = null;
+try {
+  previous = JSON.parse(fs.readFileSync(`${wasmOutFile}.buildinfo.json`, 'utf8'));
+} catch { /* no baseline yet: first build with this gate */ }
+if (engineFallbacks.length) {
+  console.warn(chalk.yellow(
+    `engine-fallback: resolved to the in-repo tree for ${engineFallbacks.join(', ')} ` +
+    '(expected on this branch; recorded below)'
+  ));
+}
+if (previous && previous.engines) {
+  const changed = resolvedEngines.filter(e => {
+    const before = previous.engines.find(p => p.name === e.name);
+    if (!before) return false;
+    return (before.tree || null) !== (e.tree || null)
+      || (before.revision || null) !== (e.revision || null)
+      || JSON.stringify(before.submodules || null) !== JSON.stringify(e.submodules || null);
+  });
+  if (changed.length) {
+    const detail = changed.map(e => {
+      const b = previous.engines.find(p => p.name === e.name);
+      return `  ${e.name}: ${b.tree || b.revision || '?'} -> ${e.tree || e.revision || '?'}`;
+    }).join('\n');
+    console.warn(chalk.yellow(`engine-content change since the last build:\n${detail}`));
+    if (process.env.CHIP_ALLOW_ENGINE_FALLBACK !== '1') {
+      console.error(chalk.red(
+        'Refusing to build: an engine\'s content differs from the recorded build.\n' +
+        'That silently changes playback (loop/fade behaviour, chip set). Restore the\n' +
+        'previous engine state, or re-run with CHIP_ALLOW_ENGINE_FALLBACK=1 to accept it.'
+      ));
+      process.exit(1);
+    }
+  } else {
+    console.log('engine-content: unchanged since the recorded build.');
+  }
+}
+
+// (B) Provenance. The build used to record nothing, so a core could silently
+// stop matching its sources and there was no way to tell afterwards. Same reader
+// the bundle is stamped from (scripts/build-info.js), so the wasm manifest and
+// window.ChipCoreBuildInfo can never disagree.
+const buildInfo = Object.assign(
+  { emcc: (() => { try { return execSync(`${compiler} --version`, { stdio: ['ignore', 'pipe', 'ignore'] }).toString().split('\n')[0].trim(); } catch { return null; } })() },
+  require('./build-info').buildInfo(),
+);
+buildInfo.engines = require('./build-info').ENGINES.map(require('./build-info').engineInfo);
+buildInfo.engineFallbacks = engineFallbacks;
+fs.writeFileSync(`${wasmOutFile}.buildinfo.json`, JSON.stringify(buildInfo, null, 2) + '\n');
+console.log(`Wrote ${wasmOutFile}.buildinfo.json (${buildInfo.engines.length} engines).`);
+const stale = buildInfo.engines.filter(e => e.tier !== 'verified' && e.tier !== 'authoritative');
+if (stale.length) {
+  console.warn(chalk.yellow(
+    `engines not content-verified: ${stale.map(e => `${e.name} (${e.tier})`).join(', ')}`
+  ));
+}
 checkDuplicateSymbols(args.filter(a => a.endsWith('.a')));
 // Duplicate-symbol tripwire: every linked archive must own its strong C/C++
 // globals uniquely. GME and libvgm once both exported MAME OPN symbols and
@@ -542,6 +621,10 @@ build_proc.on('exit', function (code) {
     console.log(`Built ${wasmOutFile}.`);
     // Don't use --pre-js because it can get stripped out by closure.
     console.log('Prepending %s: %s', jsOutFile, preJs.trim());
-    execSync(`cat <<EOF > ${jsOutFile}\n${preJs}\n$(cat ${jsOutFile})\nEOF`, { cwd: repoRoot });
+    // Stamp the provenance into the glue too, so the manifest travels with the
+    // artifact even if the sidecar JSON is lost.
+    const stamp = `${preJs}\nwindow.ChipCoreBuildInfo = ${JSON.stringify(buildInfo)};`;
+    fs.writeFileSync(`${jsOutFile}.stamped`, stamp + '\n' + fs.readFileSync(jsOutFile, 'utf8'));
+    fs.renameSync(`${jsOutFile}.stamped`, jsOutFile);
   }
 });

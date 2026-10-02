@@ -7,6 +7,12 @@ import { UserProvider } from './components/UserProvider';
 import { ToastProvider } from './components/ToastProvider';
 import ThemeHandler from './components/ThemeHandler';
 
+// Build provenance for the audio engines, stamped in by webpack (see
+// config/webpack.config.common.js). Deliberately not in the UI: it exists so a
+// deployed build can be asked what it was built from -- run
+// JSON.parse(window.ChipCoreBuildInfo) in the console.
+window.ChipCoreBuildInfo = __BUILD_INFO__;
+
 ReactDOM.render((
   <Router basename={process.env.PUBLIC_URL}>
     <ToastProvider>

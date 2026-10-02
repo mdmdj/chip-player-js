@@ -56,4 +56,49 @@ function buildSID({ version = 2, numSongs, startingSong = 1, name = '', author =
   return buf;
 }
 
-module.exports = { buildNSF, buildNSFe, buildSID };
+function buildGBS({ numSongs, startingSong = 1, title = '', artist = '', copyright = '' }) {
+  const buf = Buffer.alloc(0x70);
+  buf.write('GBS', 0, 'ascii');
+  buf[0x03] = 0x01;
+  buf[0x04] = numSongs;
+  buf[0x05] = startingSong;
+  buf.write(title, 0x10, 'latin1');
+  buf.write(artist, 0x30, 'latin1');
+  buf.write(copyright, 0x50, 'latin1');
+  return buf;
+}
+
+function buildAY({ numSongs, firstTrack = 0, author = '', comment = '', labels = [] }) {
+  // String/blob area follows the header; all offsets are relative to their
+  // own field position (the ZXAYEMUL convention).
+  const cstr = (s) => Buffer.from(s + '\0', 'latin1');
+  const parts = [Buffer.alloc(0x14)];
+  let pos = 0x14;
+  const authorPos = pos;
+  parts.push(cstr(author)); pos += author.length + 1;
+  const commentPos = pos;
+  parts.push(cstr(comment)); pos += comment.length + 1;
+  const namePos = [];
+  for (let i = 0; i < numSongs; i++) {
+    namePos.push(pos);
+    const nm = labels[i] || '';
+    parts.push(cstr(nm)); pos += nm.length + 1;
+  }
+  const tracksPos = pos;
+  const entries = Buffer.alloc(numSongs * 4);
+  for (let i = 0; i < numSongs; i++) {
+    entries.writeInt16BE(namePos[i] - (tracksPos + i * 4), i * 4);
+    // Info offset (bytes 2-3 of each entry) stays 0: absent.
+  }
+  parts.push(entries);
+  const buf = Buffer.concat(parts);
+  buf.write('ZXAYEMUL', 0, 'ascii');
+  buf[0x10] = numSongs - 1; // max_track (0-based)
+  buf[0x11] = firstTrack;
+  buf.writeInt16BE(authorPos - 0x0C, 0x0C);
+  buf.writeInt16BE(commentPos - 0x0E, 0x0E);
+  buf.writeInt16BE(tracksPos - 0x12, 0x12);
+  return buf;
+}
+
+module.exports = { buildNSF, buildNSFe, buildSID, buildGBS, buildAY };

@@ -16,7 +16,10 @@ initGA();
 // Build provenance for the audio engines, stamped in by webpack (see
 // config/webpack.config.common.js). Deliberately not in the UI: it exists so a
 // deployed build can be asked what it was built from -- run
-// JSON.parse(window.ChipCoreBuildInfo) in the console.
+// JSON.parse(window.ChipCoreBuildInfo) in the console. __BUILD_INFO__ comes from
+// DefinePlugin; eslintConfig lives in package.json, which promote.sh does not
+// skip, so the no-undef waiver has to sit inside the region too.
+// eslint-disable-next-line no-undef
 window.ChipCoreBuildInfo = __BUILD_INFO__;
 // DEV-END
 ReactDOM.render((

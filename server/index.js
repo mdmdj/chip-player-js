@@ -156,8 +156,7 @@ app.use((req, res, next) => {
 });
 
 const cache1Hour = (req, res, next) => {
-  // Skip caching in dev so code/catalog changes aren't masked by stale responses.
-  if (!isDev) res.header('Cache-Control', 'public, max-age=3600');
+  res.header('Cache-Control', 'public, max-age=3600');
   next();
 };
 
@@ -931,6 +930,11 @@ function getHtmlInjectionsForRequest(req) {
       const chipConfig = {
         songId: song.song_id,
         songPath: song.path,
+      }
+      // Only multi-song files carry the count: it lets the client land
+      // inside the virtual song folder without probing the path first.
+      if (song.subtune_count > 1) {
+        chipConfig.subtuneCount = song.subtune_count;
       }
       scriptTag = `<script>window.__chipConfig = ${JSON.stringify(chipConfig)};</script>`;
 

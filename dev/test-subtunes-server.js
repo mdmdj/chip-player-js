@@ -114,19 +114,23 @@ async function main() {
   });
 
   await check('unlabeled sub-songs fall back to "Tune N", labeled ones keep the label', async () => {
-    const rows = await get(`/api/browse?path=${enc(multiSong.path)}`);
-    for (const row of rows) {
-      const expected = row.name === `Tune ${row.subtune + 1}`
-        ? true // unlabeled: the fallback
-        : false;
-      assert.ok(typeof row.name === 'string' && row.name.length > 0, 'every row is named');
-      if (expected) {
-        assert.strictEqual(row.name, `Tune ${row.subtune + 1}`);
+    for (const fixture of [labeled, unlabeled]) {
+      if (!fixture) continue;
+      const rows = await get(`/api/browse?path=${enc(fixture.path)}`);
+      const row = rows.find(r => r.subtune === fixture.subtune);
+      assert.ok(row, `sub-tune ${fixture.subtune} of ${fixture.path} is listed`);
+      if (fixture.title == null) {
+        assert.strictEqual(row.name, `Tune ${fixture.subtune + 1}`,
+          'an unlabeled sub-song gets the positional fallback');
+      } else {
+        assert.strictEqual(row.name, fixture.title, 'the stored label wins');
       }
     }
-    if (labeled && labeled.path === multiSong.path) {
-      const row = rows.find(r => r.subtune === labeled.subtune);
-      assert.strictEqual(row.name, labeled.title, 'the stored label wins over the fallback');
+    // And nothing is ever nameless.
+    const rows = await get(`/api/browse?path=${enc(multiSong.path)}`);
+    for (const row of rows) {
+      assert.ok(typeof row.name === 'string' && row.name.length > 0,
+        `row ${row.subtune} has a name`);
     }
   });
 

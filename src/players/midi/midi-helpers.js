@@ -221,12 +221,18 @@ MIDIFile.prototype.getLoopedEvents = function (tracks, loopCount = 2, range = nu
   let loopStartMs = null;
   let loopEndMs = null;
   const isRpgMaker = range != null && range.endTick == null;
+  // Async format-2 tracks have no shared timeline, so a song-global range is
+  // meaningless there: those files play once and must not report a band. Only
+  // report one when the loop was actually expanded below -- otherwise the
+  // "end of the first iteration" latch degenerates to the end of the song, and
+  // the UI would highlight the whole file as the loop region.
+  const expandLoop = range != null && format !== 2;
   const channelsByTrack = {};
   const capturePush = (trackIdx, srcElapsedLoops, ev) => {
     if (ev.channel !== undefined) {
       (channelsByTrack[trackIdx] || (channelsByTrack[trackIdx] = new Set())).add(ev.channel);
     }
-    if (range == null) return;
+    if (!expandLoop) return;
     if (loopStartMs == null && isLoopEvent(ev) &&
         (isLoopStartCC(ev.param1) || (isRpgMaker && ev.param1 === CC_111_LOOP_END))) {
       loopStartMs = playTime;
@@ -237,9 +243,7 @@ MIDIFile.prototype.getLoopedEvents = function (tracks, loopCount = 2, range = nu
     }
   };
 
-  // Async format-2 tracks have no shared timeline, so a song-global range is
-  // meaningless there; those files play once.
-  const loop = range != null && format !== 2
+  const loop = expandLoop
     ? { startTick: range.startTick, endTick: range.endTick, maxLoops: loopCount }
     : null;
 
@@ -358,8 +362,8 @@ MIDIFile.prototype.getLoopedEvents = function (tracks, loopCount = 2, range = nu
     }
   }
 
-  if (range != null && loopStartMs == null) loopStartMs = 0;
-  if (range == null || loopEndMs == null || loopEndMs <= loopStartMs) {
+  if (expandLoop && loopStartMs == null) loopStartMs = 0;
+  if (!expandLoop || loopEndMs == null || loopEndMs <= loopStartMs) {
     loopStartMs = null;
     loopEndMs = null;
   }

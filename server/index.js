@@ -164,7 +164,8 @@ app.use((req, res, next) => {
 });
 
 const cache1Hour = (req, res, next) => {
-  res.header('Cache-Control', 'public, max-age=3600');
+  // Skip caching in dev so code/catalog changes aren't masked by stale responses.
+  if (!isDev) res.header('Cache-Control', 'public, max-age=3600');
   next();
 };
 

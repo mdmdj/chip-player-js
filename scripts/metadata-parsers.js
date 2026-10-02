@@ -435,9 +435,9 @@ function parseAY(buf) {
 
   // Tracks table: one 4-byte entry per song; the first word of each entry
   // points at that song's null-terminated name.
-  const tracksOff = buf.readUInt16BE(0x12);
+  const tracksOff = buf.readInt16BE(0x12);
   const tracksPos = 0x12 + tracksOff;
-  if (tracksOff && tracksPos + numSongs * 4 <= buf.length) {
+  if (tracksOff && tracksPos >= 0x14 && tracksPos + numSongs * 4 <= buf.length) {
     const labels = [];
     for (let i = 0; i < numSongs; i++) {
       labels.push(readAyStringAt(buf, tracksPos + i * 4));

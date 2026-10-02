@@ -15,6 +15,9 @@ echo
 echo "== vgm loops =="
 node "$DIR/test-vgm-loops.js" 2>/dev/null
 echo
+echo "== gme loops =="
+node "$DIR/test-gme-loops.js" 2>/dev/null
+echo
 echo "== mdx loops =="
 node "$DIR/test-mdx-loops.js" 2>/dev/null
 echo

@@ -192,23 +192,23 @@ async function main() {
     }
   });
 
-  await check('shuffle can hand out a sub-song other than 0 for a multi-song file', async () => {
-    // Sampling /shuffle many times: a multi-song file must be reachable as any
-    // of its sub-songs, not always its first one.
-    const seen = new Map();
-    for (let i = 0; i < 25; i++) {
-      const res = await get('/api/shuffle?limit=50');
+  await check('shuffle hands out a sub-song other than 0 for a multi-song file', async () => {
+    // Scope the shuffle to the file's own directory so the file is always in
+    // the sample: the point is that toShuffledSongRefs() picks a random
+    // sub-tune per call, not that a global sample happens to catch one.
+    const dir = dirOf(multiSong.path);
+    const seen = new Set();
+    for (let i = 0; i < 20; i++) {
+      const res = await get(`/api/shuffle?limit=200&path=${enc(dir)}`);
       for (const item of res.items) {
-        const row = db.prepare('SELECT subtune_count FROM music WHERE path = ?').get(item.path);
-        if (row && (row.subtune_count || 1) > 1) {
-          if (!seen.has(item.path)) seen.set(item.path, new Set());
-          seen.get(item.path).add(item.subtune);
-        }
+        if (item.path === multiSong.path) seen.add(item.subtune);
       }
     }
-    const multi = [...seen.values()].filter(s => s.size > 1);
-    assert.ok(multi.length > 0,
-      `a multi-song file should shuffle as more than just sub-tune 0 (saw ${seen.size} multi-song files)`);
+    assert.ok(seen.size > 1,
+      `a multi-song file must shuffle as more than just sub-tune 0 (saw ${[...seen]})`);
+    for (const subtune of seen) {
+      assert.ok(subtune < multiSong.subtune_count, 'every shuffled sub-tune is playable');
+    }
   });
 
   await check('playback rejects a sub-tune the file does not have', async () => {

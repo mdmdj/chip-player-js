@@ -928,13 +928,18 @@ checks no longer work. Compare a live context to a stored one with
     0. Only `Seek()` clears it. Pinned by the `xfail` in
     `dev/test-vgm-loops.js`. Fixing it is an engine-behavior call — see the
     open question in the handoff notes.
-  - **CONFIRMED in-app (2026-10-02): MDX lacks VGM's fade-tail capture.**
-    Enabling Repeat One while MDX's fade is already running folds the head back
-    into the band instead of riding the tail: measured display 105515 -> 71340
-    (one 34.6s loop) on `catalog/mdx/G2MST6.MDX`. `VGMPlayer.syncFadeTailCapture`
-    exists for exactly this; `MDXPlayer.getDisplayPositionMs` drops the fade as
-    soon as `this.looping` is set. Pinned by the `xfail` in
-    `dev/test-mdx-loops.js`.
+  - **FIXED (2026-10-02): MDX lacked VGM's fade-tail capture.**
+    Enabling Repeat One while MDX's fade was already running folded the head
+    back into the band instead of riding the tail (measured display 105515 ->
+    71340, one 34.6s loop, on `catalog/mdx/G2MST6.MDX`).
+    `MDXPlayer` now ports `VGMPlayer.syncFadeTailCapture`: the fade start is
+    captured in `setLooping` before the pass count changes (mdxmini latches
+    `fade_out` and only reinit clears it, so a running fade keeps running —
+    the song still ends, which is correct), `getDisplayPositionMs` prefers the
+    captured tail, and a seek or the next load drops it. Verified in-app:
+    display 105600 -> 105982 across the toggle, fade still ends the song. Now a
+    real check in `dev/test-mdx-loops.js` (promoted to the feature branch as
+    `078431d4c`).
   - **WITHDRAWN 2026-10-02: the MDX `long position_us` overflow is unreachable.**
     It needs 35.8 min of one looping MDX, which is real but needs a long soak;
     not re-verified in this session, and nothing in the harness touches it.

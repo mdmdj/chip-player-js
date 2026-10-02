@@ -49,21 +49,42 @@ a list of commits to remember:
 
 Workflow: commit feature changes on the feature branch; commit dev/overlay changes
 only on `dev/overlay`; then `git rebase feature/subtunes-as-first-class` on the
-overlay branch to pick up feature moves. Never commit overlay changes to the
+overlay branch to pick up feature moves. Note that "promote" is its own step and
+is **the user's to trigger** — see "Dev overlay & promotion" below before going
+near `dev/promote-apply.sh` or `dev/.promote-armed`. Never commit overlay changes to the
 feature branch, and never push either branch to `upstream` — everything stays in
 our fork (`origin`). The main worktree (`chip-player-js/`) runs `dev/overlay`; the
 feature branch is checked out in the sibling `chip-player-js-feature/` worktree.
 
 ## Dev overlay & promotion
 
+> **Promotion is user-initiated. Do not promote because you finished something.**
+> Landing a fix on `dev/overlay` and landing it on the reviewable PR branch are
+> different acts, and only the second one is a decision for the user:
+>
+> - **Never run `dev/promote-apply.sh`** and **never create `dev/.promote-armed`**
+>   unless the user asked for that promotion in that turn. "Fix this bug", "make
+>   it clean", "commit and push" and "this is feature work" are not that ask.
+>   A key file exists so the gate is an act a person does on purpose; an agent
+>   creating it has already made the decision it was meant to prevent.
+> - **Do not run `dev/promote.sh` as a per-change ritual** either. It is safe
+>   (plan-only, no write path), but re-checking it after every commit is noise,
+>   not diligence. Run it when the user asks, when reporting promote state at
+>   handoff, or immediately before a promotion the user requested.
+> - **Nothing else promotes.** No CI, no git hooks, no npm script, no test
+>   harness references it; `dev/run-tests.sh` runs parsers and harnesses only.
+>   If you ever add one that does, that is the bug, not the policy.
+
 `dev/overlay` is the **dirty working branch**: it deliberately mixes feature,
 audio/engine and dev-tooling commits, and that is fine. The goal is not a clean
 tree — it is a **deterministic, low-effort way to promote feature work to the
-parent** without leaking overlay content. The intended path is a single button:
+parent** without leaking overlay content. Promotion is two steps, the second of
+which the user takes explicitly:
 
 ```sh
-./dev/promote.sh            # dry run: show the plan
-./dev/promote.sh --apply    # promote to feature/subtunes-as-first-class
+./dev/promote.sh           # plan only; no write path. Prints the next command.
+touch dev/.promote-armed   # the user arms the writer
+./dev/promote-apply.sh     # promotes, and consumes the key
 ```
 
 `promote.sh` requires a clean overlay tree, then, for every file that differs

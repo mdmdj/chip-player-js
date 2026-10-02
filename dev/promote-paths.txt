@@ -27,6 +27,13 @@ scripts/start.js
 scripts/build-subprojects.sh
 scripts/build-chip-core.js
 scripts/build-libsidplayfp.sh
+# Which engine sources a build linked from. Personal dev tooling: it exists to
+# stop a stray ../ clone silently swapping an engine, and Matt builds his own
+# way, so neither the reader nor the webpack stamp belongs in the PR. src/index.js
+# carries the matching assignment inside a DEV region (it must strip too, since
+# this config does not DefinePlugin it).
+scripts/build-info.js
+config/webpack.config.common.js
 src/bindings/libsidplayfp-wrapper.cpp
 src/tinyplayer.c
 game-music-emu/**

@@ -215,21 +215,28 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
   - `node dev/test-sequencer.js` — sequencer navigation with a fake player
     (each sub-tune plays once, mixed contexts advance entry-by-entry). Uses an
     inline Babel require hook; no new deps.
-  - `node dev/test-vgm-loops.js`, `node dev/test-mdx-loops.js` — the VGM toggle
-    matrix and MDX's native loop, each with a fake core modelling that engine's
-    bookkeeping (libvgm's running fade survives `SetLoopCount(0)`; mdxmini's
-    `length(k) = intro + k*loop + fade`). One `xfail`: the VGM
-    indefinite-playback fade, confirmed in-app and kept as a known limit (see
-    the bug-verification notes).
+  - `node dev/test-vgm-loops.js`, `node dev/test-gme-loops.js`,
+    `node dev/test-mdx-loops.js` — the VGM toggle matrix, GME's in-buffer
+    restart, and MDX's native loop, each with a fake core modelling that
+    engine's bookkeeping (libvgm's running fade survives `SetLoopCount(0)`;
+    mdxmini's latched `fade_out` and `length(k) = intro + k*loop + fade`; GME's
+    `track_ended` versus an internally looping driver). Two `xfail`s, both
+    confirmed in-app: the VGM indefinite-playback fade (a known limit, see the
+    decision below) and the unguarded `lvgm_get_cur_loop` sentinel.
   - `node dev/test-midi-loops.js`, `node dev/test-xmp-loops.js` — loop-region
-    harnesses for the MIDI and XMP Repeat One work.
+    harnesses for the MIDI and XMP Repeat One work. The MIDI one also *builds*
+    minimal SMFs (`buildMidi`) for the edge shapes, so they do not depend on a
+    user-supplied catalog: an N64 CC102/103 pair in a format-2 file, a paired
+    marker too short to be a region, a lone CC111, post-loop padding with and
+    without notes, and a markerless file under repeat one.
   - `node dev/test-end-detector.js` — the SID/N64 tail detector: trip gate,
     level+stillness rule, muted voices, restart re-arming, N64's config-default
     length for untagged `.miniusf`.
   - `node dev/test-subtunes-server.js` — the sub-tune API over HTTP against the
     running dev server (song folders, sub-song rows, search union, metadata,
-    shuffle/random/playback/top). Skips cleanly if the server or the catalog
-    is absent.
+    shuffle/random/playback/top, and per-sub-tune favorites including a legacy
+    row with no sub-tune). It mutates the dev user's favorites and undoes them.
+    Skips cleanly if the server or the catalog is absent.
   - `node dev/test-songrefs.js` — the `SongRef` identity model in `src/util.js`.
   - `./dev/run-tests.sh` — runs all of the above. Dev-only, not part of the PR.
   - `dev/README.md` documents the shims.
@@ -1052,9 +1059,10 @@ checks no longer work. Compare a live context to a stored one with
    looping model" below for the contract and the VGM baseline.
 2. Testing. Dev-only harnesses cover parsers (`dev/test-parsers.js`),
    build-music round-trips (`dev/test-build.js`), sequencer navigation, the
-   SongRef identity model, the VGM/MDX/MIDI/XMP loop model, the SID/N64 end
-   detector, and the sub-tune server API -- 127 checks via `./dev/run-tests.sh`
-   (1 reported known failure: the VGM indefinite-playback fade, a known limit). Not yet harnessed: GME's
+   SongRef identity model, the VGM/GME/MDX/MIDI/XMP loop model, the SID/N64 end
+   detector, and the sub-tune server API -- 149 checks via `./dev/run-tests.sh`
+   (2 reported known failures: the VGM indefinite-playback fade, a known limit,
+   and the unguarded `lvgm_get_cur_loop` sentinel). Not yet harnessed: GME's
    in-buffer `restartTrack` path (the N64 equivalent is covered), and the client
    component behavior (favorites/sub-tunes/share links/top charts), which needs
    a browser.

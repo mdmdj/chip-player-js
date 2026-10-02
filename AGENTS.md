@@ -195,14 +195,16 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
     `catalog/` + `server/catalog.db`.
   - `./dev/remove.sh` — reverts the in-place patches (`--revert`) and deletes
     the staged untracked files. No tracked file is restored from a backup.
-  - `node dev/test-parsers.js` — parser harness (20 checks; synthetic buffers +
-    real files under `catalog/`).
+  - `node dev/test-parsers.js` — parser harness (30 checks; synthetic buffers +
+    real files under `catalog/`, including RSID fixtures).
   - `node dev/test-build.js` — build-music round-trip on a temp catalog subdir
     (sub-tune rows, dates, idempotency, FK-safe delete); cleans up after itself.
   - `node dev/test-sequencer.js` — sequencer navigation with a fake player
     (each sub-tune plays once, mixed contexts advance entry-by-entry). Uses an
     inline Babel require hook; no new deps.
-  - `./dev/run-tests.sh` — runs all three. Dev-only, not part of the PR.
+  - `node dev/test-midi-loops.js`, `node dev/test-xmp-loops.js` — loop-region
+    harnesses for the MIDI and XMP Repeat One work.
+  - `./dev/run-tests.sh` — runs all of the above. Dev-only, not part of the PR.
   - `dev/README.md` documents the shims.
   - Two tracked seams keep the untracked overrides loadable without touching
     feature files: `server/index.js` requires `process.env.DEV_AUTH_MODULE ||
@@ -451,7 +453,10 @@ own core state.
 
 `catalog/` is gitignored and user-supplied. As of this branch it holds a
 mixed-format set useful for manual testing: the Famicompo NSFE tree (many
-multi-song files), a `sid/` set, `n64/Blast Corps/` (65 `.miniusf` + one
+multi-song files), a `sid/` set (including two RSID fixtures with 20 and 3
+songs, extracted from the `HVSC_85-all-of-them.7z` also kept there), `nes-audio-tests/`
+(28 single-song NSF hardware/expansion-chip tests, copied from the
+`dev/nes-audio-tests` clone of `bbbradsmith/nes-audio-tests`), `n64/Blast Corps/` (65 `.miniusf` + one
 shared `.usflib`), `mods/` (`.S3M`), `midi/`, and a `.vgz`. Rebuild with
 `node scripts/build-music.js -n` after changing it. Note `.usflib` companions
 are intentionally not indexed but must stay next to their `.miniusf`; a
@@ -475,6 +480,14 @@ gzipped VGM must use the `.vgz` extension (`.gz` is not recognized).
   each). Song count word at `0x0E`, start song at `0x10`. v2+ packed
   PAL/NTSC speed bits at `0x18`, bit i => PAL. **Do not** read strings from the
   header offset field at `0x06` (that is the *data* offset).
+- `parseGBS`: `track_count` at `0x04`, 1-based `first_track` at `0x05` (mirrors
+  `game-music-emu/gme/Gbs_Core.h`); title/artist/copyright are 32-byte fields
+  at `0x10/0x30/0x50`. No per-track labels in-format (sub-tunes fall back to
+  `Tune N`).
+- `parseAY`: mirrors `game-music-emu/gme/Ay_Emu.h:header_t`. `numSongs =
+  max_track + 1` (`0x10`), 0-based `first_track` (`0x11`); author/comment and
+  the per-track names are **signed** big-endian offsets relative to their own
+  field position (see `Ay_Emu.cpp:get_data`) — backward offsets are legal.
 - Release dates: the formats don't have a dedicated date field, so `extractDate`
   scrapes a year (or full date) out of free-form strings — NSF/NSFE/SID
   `copyright` / `released` (e.g. `"1988 Konami"`, `"(C)1984 CAPCOM"`,
@@ -524,8 +537,8 @@ CREATE INDEX idx_subtune_music ON subtune(music_id);
   files). A `subtunes` JSON column was tried and **removed** in favor of the
   normalized table.
 
-Verified on the real catalog: 1244 files, 621 subtune rows, 59 multi-song files,
-428 files with a parsed `release_date`.
+Verified on the real catalog: 6758 files, 1140 subtune rows, 87 multi-song files,
+3806 files with a parsed `release_date`.
 
 ### Server API (`server/database.js`, `server/index.js`)
 
@@ -617,7 +630,7 @@ because `Sequencer` copies its context).
 ## Current state
 
 **Done and verified:**
-1. Parsers (NSF/NSFE/SID) with sub-tune counts/labels — tested.
+1. Parsers (NSF/NSFE/SID/GBS/AY) with sub-tune counts/labels — tested.
 2. Normalized schema (`subtune` table, `subtune_count`, `subtune_fts`) —
    rebuilt and verified against the real catalog.
 3. Server API: `/browse` songfolder + sub-tune listing, `/search` union,
@@ -688,6 +701,18 @@ checks no longer work. Compare a live context to a stored one with
   audio/engine/build/dev work. There is no commit list to maintain — a change
   either belongs to the feature branch or it does not. Run the app from the dev
   branch.
+- **Handoff state (2026-10):** GBS/AY sub-tune parsing landed (feature:
+  `parseGBS` counts, new `parseAY` with per-track labels, `gbs`/`ay` in
+  `MULTISONG_EXTENSIONS`; dev-only fixtures + 10 new parser checks, 30 total).
+  Catalog fixtures gained two RSID SIDs (20 + 3 songs, from `HVSC_85-all-of-them.7z`),
+  a `nes-audio-tests/` dir (28 single-song expansion-chip NSFs, sources kept as the
+  gitignored `dev/nes-audio-tests` clone), and 39 gzipped `.vgm` files were renamed
+  to `.vgz` (they played fine via libvgm's gzip sniff but got no GD3 metadata).
+  Catalog is 6758 files / 1140 subtune rows / 87 multi-song files. Missing-coverage
+  notes: no `.mus`/`.smf`/`.gym`/`.s98`/`.dro` files anywhere (players claim some,
+  none are routed to parsers that matter); real `.mus` is always single-song
+  (`MUS.cpp: m_songs = 1`), so nothing to test there; `sgc`/`sap` stay compiled
+  but unrouted, `hes`/`kss` pruned + unrouted.
 - **Handoff state (2026-09, read this):**
   - **Looping is now the top priority** and is treated as **feature** work (part
     of completing the sub-tunes feature), not an overlay extra. The VGM Repeat
@@ -761,8 +786,9 @@ checks no longer work. Compare a live context to a stored one with
    is one intuitive Repeat One for every format, for single files and sub-tunes,
    with no jarring audio or visual artifacts on enable/disable. See "Repeat One /
    looping model" below for the contract and the VGM baseline.
-2. Testing. Dev-only harnesses now cover parsers (`dev/test-parsers.js`) and a
-   build-music round-trip (`dev/test-build.js`), run via `./dev/run-tests.sh`.
+2. Testing. Dev-only harnesses cover parsers (`dev/test-parsers.js`),
+   build-music round-trips (`dev/test-build.js`), sequencer navigation, and the
+   MIDI/XMP loop harnesses, run via `./dev/run-tests.sh`.
    They are removed with `dev/` before the PR, which still ships without tests
    (matching the repo, which has no test runner or CI). If Matt wants a durable
    suite, the same harnesses could move to a tracked `test/` dir and run via

@@ -100,7 +100,7 @@ function AppFooter(props) {
   }, [toggleInfo]);
 
   // The shareable link carries the sub-tune; the href and the clipboard
-  // copy must agree so right-click/copy and middle-click keep the sub-song.
+  // copy must agree so right-click/copy and middle-click keep the sub-tune.
   const songLink = getCurrentSongLink(/*withSubtune=*/true);
 
   const handleCopySongLink = useCallback((e) => {

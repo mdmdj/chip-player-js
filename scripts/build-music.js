@@ -1,4 +1,5 @@
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const Database = require('better-sqlite3');
@@ -41,8 +42,28 @@ const SF2_REGEX = /SF2=(.+?)\.sf2/;
 
 const NUMERIC_COLLATOR = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 
-// Initialize DB
-const db = new Database(DB_PATH);
+// Initialize DB.
+// A dry run must leave the catalog untouched, but it still has to run the
+// additive migrations (the INSERTs reference the new columns) and exercise the
+// same code as a real build. So take a snapshot and work on that; the real
+// catalog file is never opened for writing.
+let db = new Database(DB_PATH);
+let dryRunDbPath = null;
+if (options.dryrun) {
+  dryRunDbPath = path.join(os.tmpdir(), `catalog-dryrun-${process.pid}.db`);
+  try {
+    fs.rmSync(dryRunDbPath, { force: true });
+    // VACUUM INTO snapshots the committed state including anything still in WAL.
+    db.exec(`VACUUM INTO '${dryRunDbPath.replace(/'/g, "''")}'`);
+    db.close();
+    db = new Database(dryRunDbPath);
+  } catch (e) {
+    console.warn(chalk.yellow(`Could not snapshot the catalog for a dry run (${e.message}); using a temporary empty database.`));
+    db.close();
+    fs.rmSync(dryRunDbPath, { force: true });
+    db = new Database(dryRunDbPath);
+  }
+}
 db.pragma('journal_mode = WAL');
 
 process.on('SIGINT', () => {
@@ -125,15 +146,15 @@ db.exec(`
     text_ids TEXT,               -- JSON array of text IDs
     soundfont TEXT,              -- Relative path to soundfont
     md5 TEXT,                    -- MD5 hash for tracker modules
-    subtune_count INTEGER DEFAULT 1, -- Playable sub-songs (1 = single song)
+    subtune_count INTEGER DEFAULT 1, -- Playable sub-tunes (1 = single song)
     sort_order INTEGER DEFAULT 0,
     FOREIGN KEY(directory_id) REFERENCES directories(id),
     FOREIGN KEY(image_id) REFERENCES images(id)
   );
 
-  -- Each row is a playable sub-song within a single file (e.g. an NSF/NSFE/SID
+  -- Each row is a playable sub-tune within a single file (e.g. an NSF/NSFE/SID
   -- containing several tunes). A file with subtune_count > 1 is presented as a
-  -- "song folder". Single-song files have no rows here, so a sub-song and a
+  -- "song folder". Single-song files have no rows here, so a sub-tune and a
   -- plain song are the same kind of thing to the client.
   CREATE TABLE IF NOT EXISTS subtune (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -154,7 +175,7 @@ db.exec(`
     prefix='1 2 3'
   );
 
-  -- Sub-song titles are searchable just like song titles.
+  -- Sub-tune titles are searchable just like file titles.
   CREATE VIRTUAL TABLE IF NOT EXISTS subtune_fts USING fts5(
     title, 
     content='subtune', content_rowid='id', 
@@ -201,7 +222,7 @@ db.exec(`
 `);
 
 // Additive migrations for databases created before these columns existed.
-// Returns true when the column was just added (caller may need to backfill).
+// Returns true when the column was just added.
 function ensureColumn(table, column, type) {
   const columns = db.prepare(`PRAGMA table_info(${table})`).all();
   if (!columns.some(c => c.name === column)) {
@@ -214,9 +235,24 @@ const addedSubtuneCount = ensureColumn('music', 'subtune_count', 'INTEGER DEFAUL
 ensureColumn('music', 'release_date', 'TEXT');
 ensureColumn('subtune', 'date', 'TEXT');
 
-// A catalog created before subtunes existed has no sub-tune rows. Reprocess
-// everything once so unchanged multi-song files get them.
-if (addedSubtuneCount) options.skipUnmodified = false;
+// A catalog created before subtunes existed has no sub-tune rows, so unchanged
+// multi-song files get skipped and never gain them. "Does this catalog still
+// need the backfill?" cannot be read off the data: the ALTER gives every
+// existing row subtune_count = 1, which is indistinguishable from a genuinely
+// single-song file. So record it in the database header instead, and only an
+// unfiltered build is allowed to mark it done -- a --filter run adds the column
+// to the real catalog without covering the rest of it.
+const SUBTUNE_BACKFILL_VERSION = 1;
+const backfillDone = db.pragma('user_version', { simple: true }) >= SUBTUNE_BACKFILL_VERSION;
+const needsBackfill = addedSubtuneCount || !backfillDone;
+if (needsBackfill) {
+  options.skipUnmodified = false;
+  if (options.verbose) {
+    console.log(chalk.cyan(addedSubtuneCount
+      ? 'Backfilling sub-tunes (newly added sub-tune count)...'
+      : 'Backfilling sub-tunes (catalog predates them)...'));
+  }
+}
 
 // Statements
 const insertMusicStmt = db.prepare(`
@@ -347,14 +383,14 @@ function escapeRegExp(string) {
   return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-// Formats that can contain more than one song ("sub-songs") in a single file.
+// Formats that can contain more than one sub-tune in a single file.
 const MULTISONG_EXTENSIONS = new Set(['nsf', 'nsfe', 'sid', 'mus', 'gbs', 'ay']);
 
 /**
- * Describe the playable sub-songs inside a file from parser metadata.
+ * Describe the playable sub-tunes inside a file from parser metadata.
  *
  * Returns an array of { subtune, title, lengthMs } when the file contains 2+
- * songs, otherwise an empty array. Single-song files have no sub-tunes, which
+ * sub-tunes, otherwise an empty array. Single-song files have no sub-tunes, which
  * keeps the browse tree flat (a plain file).
  *
  *   - subtune:  0-based index, matches the player's subtune index
@@ -817,6 +853,9 @@ processDirectory(CATALOG_DIR, '')
     }
 
     if (!options.dryrun) {
+      // Only a build that scanned the whole catalog can vouch that every
+      // multi-song file now has its rows.
+      if (!options.filter) db.pragma(`user_version = ${SUBTUNE_BACKFILL_VERSION}`);
       console.log(`Database saved to ${DB_PATH}`);
     }
   })
@@ -826,4 +865,9 @@ processDirectory(CATALOG_DIR, '')
   .finally(() => {
     db.pragma('wal_checkpoint(TRUNCATE)'); // Forces all WAL data into the .db file
     db.close();
+    if (dryRunDbPath) {
+      for (const f of [dryRunDbPath, `${dryRunDbPath}-wal`, `${dryRunDbPath}-shm`]) {
+        try { fs.rmSync(f, { force: true }); } catch (e) { /* ignore */ }
+      }
+    }
   });

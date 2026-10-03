@@ -243,7 +243,7 @@ class App extends React.Component {
         }
       };
       // A multi-song file is a virtual folder: land inside it with the
-      // requested sub-song selected, rather than on the parent directory.
+      // requested sub-tune selected, rather than on the parent directory.
       // The server omits subtuneCount for plain files, so its absence
       // means the containing-folder flow below.
       if (window.__chipConfig?.subtuneCount > 1) {
@@ -252,7 +252,7 @@ class App extends React.Component {
           const folderContext = this.playContexts[playPath] || [];
           const target = subtune ?? 0;
           const index = folderContext.findIndex(ref => ref.path === playPath && ref.subtune === target);
-          // No subtune override: each entry already carries its own sub-song.
+          // No subtune override: each entry already carries its own sub-tune.
           this.playContext(folderContext, index < 0 ? 0 : index);
           seekToTime();
         });
@@ -715,7 +715,7 @@ class App extends React.Component {
 
   directoryListingToContext(items) {
     // Every non-directory item is playable: a file is a SongRef with subtune 0,
-    // a songfolder is its first sub-song, and the sub-songs of one file are
+    // a songfolder is its first sub-tune, and the sub-tunes of one file are
     // listed as their own items when browsing inside a song folder.
     return items
       .filter(item => item.type === 'file' || item.type === 'songfolder')
@@ -735,7 +735,7 @@ class App extends React.Component {
         items.forEach(item => {
           // Convert timestamp 1704067200 to ISO date 2024-01-01
           item.mtime = new Date(item.mtime * 1000).toISOString().split('T')[0];
-          // Sub-song rows carry a label from the server; don't clobber it.
+          // Sub-tune rows carry a label from the server; don't clobber it.
           item.name = item.name || item.path.split('/').pop();
           // XXX: Escape immediately: the escaped URL is considered canonical.
           //      The URL must be decoded for display from here on out.
@@ -909,7 +909,7 @@ class App extends React.Component {
     // TODO: Consolidate imageUrl under metadata.
     const metadata = this.state.currentSongMetadata;
     const { title: metadataTitle, subtitle } = titlesFromMetadata(metadata);
-    // A sub-song's label from the catalog takes precedence over the player's
+    // A sub-tune's label from the catalog takes precedence over the player's
     // generic track title.
     const title = this.state.subtuneTitle || metadataTitle;
     const imageUrl = metadata.imageUrl || this.state.imageUrl;

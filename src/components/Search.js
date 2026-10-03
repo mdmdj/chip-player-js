@@ -123,7 +123,7 @@ export default class Search extends PureComponent {
                 idx: i,
                 path: path,
                 subtune: subtune,
-                // Sub-song hits are labeled by their own title.
+                // Sub-tune hits are labeled by their own title.
                 name: item.title || path.substring(path.lastIndexOf('/') + 1),
                 href: getUrlFromFilepath(path),
                 type: 'file',

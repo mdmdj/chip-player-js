@@ -7,8 +7,8 @@ const MULTI_SLASH_REGEX = /\/{2,}/g;
 
 /**
  * A playable song is identified by a file path and an optional sub-tune index.
- * A file containing multiple songs (NSF/NSFE/SID) exposes one SongRef per
- * sub-song; a single-song file is just a SongRef with subtune 0. This is the
+ * A file containing multiple sub-tunes (NSF/NSFE/SID) exposes one SongRef per
+ * sub-tune; a single-song file is just a SongRef with subtune 0. This is the
  * common currency for play contexts, favorites, and share links.
  *
  * @typedef {{ path: string, subtune: number }} SongRef

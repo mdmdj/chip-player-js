@@ -37,7 +37,9 @@ typedef struct
     int track_mute_mask;
 	// Accumulates frame durations in microseconds so position_ms does not lose
 	// the truncated fraction of each frame (which made seeks overshoot badly).
-	long position_us;
+	// Must be 64-bit: on wasm32 `long` is 32 bits, which wraps at ~2147s
+	// (35.8 min) and leaves position_ms negative.
+	int64_t position_us;
 
 } t_mdxmini;
 

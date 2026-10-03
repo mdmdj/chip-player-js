@@ -65,10 +65,10 @@ export default class Browse extends React.PureComponent {
                              isBackLink={item.isBackLink}>{item.name}</DirectoryLink>
             </div>
             <div className="BrowseList-colDir">
-              {isSongFolder ? <>&lt;SONGS&gt;</> : <>&lt;DIR&gt;</>}
+              {isSongFolder ? <>&lt;TUNES&gt;</> : <>&lt;DIR&gt;</>}
             </div>
             <div className="BrowseList-colCount"
-                 title={isSongFolder ? `Contains ${item.count} sub-songs` : `Contains ${item.count} direct child items`}>
+                 title={isSongFolder ? `Contains ${item.count} sub-tunes` : `Contains ${item.count} direct child items`}>
               {item.count}
             </div>
             <div className="BrowseList-colMtime">

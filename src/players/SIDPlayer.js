@@ -49,6 +49,10 @@ export default class SIDPlayer extends Player {
     this.playerKey = 'sid';
     this.name = 'SID Player';
     this.speed = 1;
+    // Bumped per load. getSidMetadata() below is a network fetch, so a slower
+    // older load can resume after a newer selection has already started and
+    // would otherwise reset the shared core to its own sub-tune and resume it.
+    this.loadGeneration = 0;
     this.fileExtensions = fileExtensions;
     this.bufferL = this.core._malloc(this.bufferSize * 4);
     this.bufferR = this.core._malloc(this.bufferSize * 4);
@@ -111,6 +115,9 @@ export default class SIDPlayer extends Player {
   }
 
   async loadData(data, filepath, persistedSettings, subtune = 0) {
+    // Claim this load. Anything still awaiting below checks it before touching
+    // the shared core, so a superseded load cannot restart the previous song.
+    const generation = ++this.loadGeneration;
     if (!this.initialized) {
       this.core._sid_init(this.sampleRate);
       this.initialized = true;
@@ -134,6 +141,9 @@ export default class SIDPlayer extends Player {
     const ptr = this.core._sid_get_song_md5();
     const md5 = this.core.UTF8ToString(ptr);
     await this.getSidMetadata(md5);
+    // A newer load took over while we fetched; it owns the core and the state
+    // emit now, so stop here rather than resuming this song over the top of it.
+    if (generation !== this.loadGeneration) return;
 
     this.mask = Array(18).fill(true);
     this.core._sid_set_voice_mask(0);

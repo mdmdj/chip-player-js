@@ -286,7 +286,7 @@ function parseNSFe(buf) {
   // NSFE does not embed a base NSF header; counts come from the INFO chunk.
   // `trackCount` is the number of tracks physically present in the DATA chunk.
   // The `plst` (playlist) chunk, when present, is the authoritative list of
-  // sub-songs (and their order/remapping), mirroring game-music-emu.
+  // sub-tunes (and their order/remapping), mirroring game-music-emu.
   let trackCount = 1;
   let startingSong = 1;
 

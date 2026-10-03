@@ -153,14 +153,22 @@ const UserProvider = ({ children }) => {
         } else {
           await addFavorite(fave);
         }
+      } catch (e) {
+        setFaves(oldFaves);
+        console.log('Couldn\'t update favorites in Firebase.', e);
+        return;
+      }
+      // The mutation is committed from here on, so a failed re-read must not
+      // roll the optimistic state back -- that would show the song as un-favorited
+      // until the next refresh, and a retry would then invert it.
+      try {
         // Re-read so every entry carries the catalog's size and sub-tune title.
         // Only apply the latest refresh: rapid toggles can resolve out of order.
         const token = ++favesRefreshToken.current;
         const res = await getWithAuth(user, `${API_BASE}/user/favorites`);
         if (res && token === favesRefreshToken.current) setFaves(res.favorites);
       } catch (e) {
-        setFaves(oldFaves);
-        console.log('Couldn\'t update favorites in Firebase.', e);
+        console.log('Couldn\'t refresh favorites after updating Firebase.', e);
       }
     }
   };

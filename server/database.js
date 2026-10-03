@@ -33,7 +33,7 @@ const dbStatements = {
       ORDER BY rank
       LIMIT ?
   `),
-  // Search within sub-song titles. Returned rows carry the parent file's path
+  // Search within sub-tune titles. Returned rows carry the parent file's path
   // and song_id plus the 0-based subtune, so results are playable directly.
   searchSubtuneStmt: db.prepare(`
       SELECT m.path as file, m.song_id as song_id, st.subtune as subtune, st.title as title
@@ -55,7 +55,7 @@ const dbStatements = {
       WHERE directory_id = ?
       ORDER BY type, sort_order, path COLLATE NOCASE
   `),
-  // The sub-songs of a single multi-song file, in play order.
+  // The sub-tunes of a single multi-song file, in play order.
   getSubtunesStmt: db.prepare(`
       SELECT st.subtune, st.title, st.length_ms, st.date
       FROM subtune st
@@ -70,7 +70,7 @@ const dbStatements = {
       WHERE m.path = ?
       LIMIT 1
   `),
-  // Metadata for one sub-song of a file.
+  // Metadata for one sub-tune of a file.
   getSubtuneMetadataStmt: db.prepare(`
       SELECT st.title
       FROM subtune st
@@ -200,7 +200,7 @@ const dbStatements = {
   `),
 
   // Top Charts
-  // Grouped by (song_id, subtune), so sub-songs rank individually. Old
+  // Grouped by (song_id, subtune), so sub-tunes rank individually. Old
   // playbacks have no subtune and fall back to 0.
   getGlobalTopStmt: db.prepare(`
       SELECT

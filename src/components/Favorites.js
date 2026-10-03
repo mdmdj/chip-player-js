@@ -43,7 +43,7 @@ const FavoriteRow = (props) => {
 
 /**
  * Group favorites under the path that contains them: a single-song file is
- * listed under its directory, and a sub-song under its song folder (the parent
+ * listed under its directory, and a sub-tune under its song folder (the parent
  * file). This mirrors Browse (path above, songs below) and Search. Favorite
  * order is preserved within a directory, while a song folder's sub-tunes are
  * listed in index order.

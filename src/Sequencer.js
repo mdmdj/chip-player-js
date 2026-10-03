@@ -72,10 +72,10 @@ export default class Sequencer extends EventEmitter {
         this.nextSong();
       }
     } else {
-      // The player can change sub-tune on its own for the footer tune buttons
-      // and when auto-advancing at the end of a sub-song. Keep the transient
-      // SongRef in sync for metadata/share/favorites, but never mutate the
-      // context: its entries are the navigation list.
+      // Keep the transient SongRef in sync for metadata/share/favorites if a
+      // player ever reports a different sub-tune than the one we asked for
+      // (a tail restart, or an engine that advances internally), but never
+      // mutate the context: its entries are the navigation list.
       const { subtune } = playerState;
       if (this.currSongRef && subtune != null && this.currSongRef.subtune !== subtune) {
         this.currSongRef = { ...this.currSongRef, subtune };
@@ -94,7 +94,7 @@ export default class Sequencer extends EventEmitter {
 
   /**
    * Begin playing a context (an ordered list of SongRefs).
-   * `subtune` is an optional override for the first song, used by share links
+   * `subtune` is an optional override for the first entry, used by share links
    * (?play=...&subtune=N); normally the sub-tune comes from the SongRef.
    */
   playContext(context, index = 0, subtune = null) {

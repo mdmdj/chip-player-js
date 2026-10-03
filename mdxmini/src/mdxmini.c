@@ -388,9 +388,9 @@ int  mdx_get_length( t_mdxmini *data )
    this right after get_length). 0 when the song does not loop. */
 int  mdx_get_loop_start_ms( t_mdxmini *data )
 {
-    long first  = mdx_parse_mml_get_loop_first_us(data->self);
-    long second = mdx_parse_mml_get_loop_second_us(data->self);
-    long loop_us, intro_us;
+    int64_t first  = mdx_parse_mml_get_loop_first_us(data->self);
+    int64_t second = mdx_parse_mml_get_loop_second_us(data->self);
+    int64_t loop_us, intro_us;
     if (first <= 0 || second <= first)
         return 0;
     loop_us = second - first;
@@ -400,8 +400,8 @@ int  mdx_get_loop_start_ms( t_mdxmini *data )
 
 int  mdx_get_loop_length_ms( t_mdxmini *data )
 {
-    long first  = mdx_parse_mml_get_loop_first_us(data->self);
-    long second = mdx_parse_mml_get_loop_second_us(data->self);
+    int64_t first  = mdx_parse_mml_get_loop_first_us(data->self);
+    int64_t second = mdx_parse_mml_get_loop_second_us(data->self);
     if (first <= 0 || second <= first)
         return 0;
     return (int)((second - first) / 1000);

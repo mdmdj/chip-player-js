@@ -61,8 +61,8 @@ typedef struct _mdxmml_ym2151_instances {
 
   /* Song loop bookkeeping, recorded while parsing (see mdx_get_loop_*). */
   int loop_min_seen;       /* last observed song-wide infinite-loop count */
-  long loop_first_us;      /* elapsed at the 1st loop (intro + loop) */
-  long loop_second_us;     /* elapsed at the 2nd loop (intro + 2 * loop) */
+  int64_t loop_first_us;   /* elapsed at the 1st loop (intro + loop) */
+  int64_t loop_second_us;  /* elapsed at the 2nd loop (intro + 2 * loop) */
 } mdxmml_ym2151_instances;
 
 /* ------------------------------------------------------------------ */
@@ -409,14 +409,14 @@ mdx_parse_mml_get_tempo(void* in_self)
  return 1000*1024*(256 - self->mdx->tempo)/4000;
 }
 
-long
+int64_t
 mdx_parse_mml_get_loop_first_us(void* in_self)
 {
   if (!in_self) return 0;
   return ((mdxmml_ym2151_instances *)in_self)->loop_first_us;
 }
 
-long
+int64_t
 mdx_parse_mml_get_loop_second_us(void* in_self)
 {
   if (!in_self) return 0;

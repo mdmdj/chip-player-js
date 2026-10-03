@@ -220,7 +220,6 @@ async function main() {
     const { p, core } = await makePlayer();
     p.setLooping(true);
     assert.strictEqual(core.lastMaxLoopArg, 0, '0 = forever');
-    assert.strictEqual(p.restartAtEndPending, false);
     await drive(p, core, [BAND_START + 1000, BAND_END + 1000, BAND_END + B + 1000]);
     assert.strictEqual(core.abs > DURATION + FADE_MS, true, 'position keeps climbing past the fade');
     assert.strictEqual(p.stopped, false, 'a capped-out engine would have ended by now');
@@ -339,10 +338,16 @@ async function main() {
 
   await check('repeat one past the region: native loop, no late restart seek', async () => {
     const { p, core } = await makePlayer();
-    core.advanceTo(BAND_END + 2000);
+    // loopEnd..fadeStart, i.e. past the loop but before mdxmini has latched its
+    // two-pass fade (the next check covers enabling once the fade is running).
+    core.advanceTo(BAND_START + 2000);
     p.setLooping(true);
     assert.strictEqual(core.lastMaxLoopArg, 0);
-    assert.strictEqual(p.restartAtEndPending, false, 'native looping, no late restart');
+    // Native looping owns this case, so the transport must not be rewound.
+    await drive(p, core, [BAND_END + B]);
+    assert.ok(p.getPositionMs() > BAND_END,
+      'position keeps climbing instead of being rewound');
+    assert.strictEqual(p.stopped, false, 'and the song is still playing');
   });
 
   await check('enabling repeat one during the fade tail keeps the head on the tail', async () => {

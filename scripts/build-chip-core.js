@@ -322,8 +322,6 @@ const chipModules = [
       '_mdx_calc_log',
       '_mdx_get_title',
       '_mdx_get_length',
-      '_mdx_get_loop_start_ms',
-      '_mdx_get_loop_length_ms',
       '_mdx_set_max_loop',
       '_mdx_get_loop_start_ms',
       '_mdx_get_loop_length_ms',

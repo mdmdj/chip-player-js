@@ -309,8 +309,8 @@ app.get('/preview', cache1Hour, async (req, res) => {
 /**
  * Returns: { items: [ { file, song_id, title?, subtune? }, ... ], total }
  *
- * Searches both song titles (music_fts) and sub-song titles (subtune_fts).
- * Items with a `subtune` are individual sub-songs; items without are files.
+ * Searches both file titles (music_fts) and sub-tune titles (subtune_fts).
+ * Items with a `subtune` are individual sub-tunes; items without are files.
  */
 router.get('/search', cache1Hour, (req, res) => {
   const { limit = 100, query } = req.query;
@@ -332,11 +332,11 @@ router.get('/search', cache1Hour, (req, res) => {
     }
   }
 
-  // Append matches that were found in sub-song titles rather than file titles.
+  // Append matches that were found in sub-tune titles rather than file titles.
   if (ftsQuery) {
     try {
       const subtuneItems = searchSubtuneStmt.all(ftsQuery, limit);
-      // Drop sub-songs of files that already matched at the file level.
+      // Drop sub-tunes of files that already matched at the file level.
       const seen = new Set(items.map(item => item.file));
       for (const item of subtuneItems) {
         if (!seen.has(item.file)) {
@@ -344,7 +344,7 @@ router.get('/search', cache1Hour, (req, res) => {
         }
       }
     } catch (e) {
-      console.error('Sub-song search error:', e.message);
+      console.error('Sub-tune search error:', e.message);
     }
   }
 
@@ -368,8 +368,8 @@ router.get('/total', cache1Hour, (req, res) => {
 /**
  * Returns: { items: [ { path, subtune }, ... ], total }
  *
- * A multi-song file is shuffled as one of its sub-songs, so shuffle plays
- * individual songs rather than always landing on sub-tune 0.
+ * A multi-song file is shuffled as one of its sub-tunes, so shuffle plays
+ * individual sub-tunes rather than always landing on sub-tune 0.
  */
 function toShuffledSongRefs(rows) {
   return rows.map(({ path, subtune_count }) => ({
@@ -415,9 +415,9 @@ function toUnixSeconds(value) {
  * Returns: [ { path, type, size, mtime, idx, count }, ... ]
  *
  * `path` may name either a directory or a multi-song file. When it names a
- * multi-song file, this returns that file's sub-songs as `type: 'file'` rows
+ * multi-song file, this returns that file's sub-tunes as `type: 'file'` rows
  * (each with a `subtune` index), which is how the client drills into a
- * "song folder". A file with two or more sub-songs appears in its parent
+ * "song folder". A file with two or more sub-tunes appears in its parent
  * directory as `type: 'songfolder'`.
  */
 router.get('/browse', cache1Hour, async (req, res) => {
@@ -454,7 +454,7 @@ router.get('/browse', cache1Hour, async (req, res) => {
       const children = getDirChildrenStmt.all(dirRow.id, dirRow.id);
 
       const result = children.map((child) => {
-        // A file containing multiple sub-songs is presented as a folder.
+        // A file containing multiple sub-tunes is presented as a folder.
         const isSongFolder = child.type === 'file' && child.subtune_count > 1;
         return {
           path: normalizedPath ? `${normalizedPath}/${child.path}` : child.path,
@@ -472,12 +472,12 @@ router.get('/browse', cache1Hour, async (req, res) => {
 
       res.json(result);
     } else if (getSubtunesStmt.all(normalizedPath).length > 0) {
-      // The requested path is a multi-song file: return its sub-songs.
+      // The requested path is a multi-song file: return its sub-tunes.
       const song = getSongByPathStmt.get(normalizedPath);
       const subtunes = getSubtunesStmt.all(normalizedPath);
 
       const result = subtunes.map((sub) => {
-        // A sub-song lives inside its parent file, so reuse the file's size.
+        // A sub-tune lives inside its parent file, so reuse the file's size.
         // For the date, prefer per-sub-tune metadata, then file metadata, then
         // the file system mtime.
         const dateValue = sub.date || song?.release_date || song?.mtime;
@@ -582,7 +582,7 @@ async function getCsdbImageUrl(csdbid) {
  *   subtuneTitle: string|null
  * }
  *
- * Pass `subtune=N` to get metadata for a specific sub-song (its title).
+ * Pass `subtune=N` to get metadata for a specific sub-tune (its title).
  */
 router.get('/metadata', cache1Hour, (req, res, next) => {
   const { path: reqPath, subtune } = req.query;
@@ -616,7 +616,7 @@ router.get('/metadata', cache1Hour, (req, res, next) => {
       soundfont = parts.map(encodeURIComponent).join('/');
     }
 
-    // Resolve the sub-song title when a subtune index is supplied.
+    // Resolve the sub-tune title when a subtune index is supplied.
     let subtuneTitle = null;
     if (subtune !== undefined) {
       const sub = getSubtuneMetadataStmt.get(normalizedPath, parseInt(subtune, 10));

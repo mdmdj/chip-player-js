@@ -428,6 +428,33 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
 >   overlay-only, there is nothing to change here — do not "fix" the getters to
 >   chase our tree. Only `duration` is genuinely non-invariant, and that is
 >   pre-existing master code, not ours.
+> - **What we have inferred about Matt's build that CONFLICTS with this
+>   repo.** Consolidated 2026-10-03, because it is the root cause of most of
+>   this branch's remaining uncertainty: we cannot assume the vendored trees are
+>   what anyone else builds. Every row below is a symbol we checked, not an
+>   assumption. Prod was probed live at `https://chiptune.app` via
+>   `typeof window.ChipPlayer.chipCore[name]`.
+>
+>   | # | Evidence | Conflict with this repo |
+>   | --- | --- | --- |
+>   | 1 | prod exports `_xmp_seek_time_frame`; master **and** feature list it, but the vendored libxmp has no `seek_time_frame` anywhere | **Matt's libxmp is >= 4.7; ours is 4.5.** Our own script could not link against our own tree — the overlay comments it out for that reason |
+>   | 2 | prod exports `_gme_disable_echo`; master and feature list it, vendored `game-music-emu` has no `disable_echo` | **Matt's GME is >= 0.6.4; ours is the 2018 tree** |
+>   | 3 | prod's position advances 1.98x at 2x speed, ours 1.00x, with a byte-identical `lvgm_get_position_ms` | **prod's libvgm is not our vendored 91b6542** |
+>   | 4 | prod exports `_sid_set_speed`; **no** branch's build script lists it, yet master `SIDPlayer.js:145` calls it unguarded | our `EXPORTED_FUNCTIONS` is a **strict subset** of prod's. It works in prod and cannot work from this repo as configured — a latent break in *master*, not ours |
+>   | 5 | prod exports `_fluid_synth_get_active_voice_count`; the overlay dropped it (no call site) | same subset gap; confirms the overlay diverges from prod deliberately |
+>   | 6 | prod **does** export `_mdx_set_max_loop` | **an earlier note here claimed it did not** ("Prod ships MDX ... but not mdx_set_max_loop"). That was wrong; corrected 2026-10-03. Our `mdx_set_max_loop(0)` lever is therefore usable on prod's tree too |
+>
+>   Net: **rows 1 and 2 mean master itself cannot be built against this repo's
+>   vendored trees.** That is the strongest available proof that Matt builds
+>   against newer forks than we vendor, and it is why "just build the feature
+>   branch locally" is not a verification strategy — that build fails on
+>   pre-existing master ground, for reasons unrelated to any change of ours.
+>   Corollary for review: anything proved only against our trees (speed
+>   behaviour, the MDX loop getters, the XMP band) carries tree risk, and rows
+>   1-3 show that risk is real rather than theoretical.
+>   Unverifiable from here: the actual commits. Nothing in the repo, the wasm
+>   (exports are minified), or the JS glue names them.
+>
 > - **libvgm counts loops correctly — no patch is needed.** `VGMPlayer::Cmd_
 >   EndOfData()` in `player/vgmplayer_cmdhandler.cpp:574` does `_curLoop ++` on
 >   every loop (and fires `PLREVT_LOOP` with it), reset only in

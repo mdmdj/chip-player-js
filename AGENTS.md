@@ -467,9 +467,16 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
 >     unreal superhero, ZOOL-1_RAVE, zuma, Unreal Tournament Menu), so the header
 >     carries no usable restart order.
 >   - **The time table is non-monotonic for all 9**, with the shape
->     `0, 0, ~6, ~125, 64, <large>, 0, ~6` — order 6 resets to 0 and order 7
->     repeats order 2. That is per-sequence overwriting, not a cumulative
->     timeline, so the values cannot be read as order start times.
+>     `0, 0, ~6, ~125, 64, <large>, 0, ~6` — order 6 reads 0 and order 7
+>     mirrors order 2. Mechanism (`scan.c:196`): `xxo_info[].time` is assigned
+>     only `if (info->time < 0)`, so it records **the time the scan walk first
+>     reached that order**, and reuse collapses it — the init comment says so
+>     outright ("prevent overwrite when a position is used multiple times at
+>     different starting points, see janosik.xm"). With XM/IT sub-sequences,
+>     pattern jumps and repeated patterns, that is a scan-walk artifact, not a
+>     position in a linear playthrough, so the values cannot be read as order
+>     start times. (An earlier note here blamed "per-sequence overwriting",
+>     which is not the mechanism; corrected 2026-10-03.)
 >   - **The header also disagrees with the engine.** `rst = 0` says "restart at
 >     the beginning", but TECHTRIS actually jumps **11 -> 1** (the learned band
 >     starts at order 1 = 3940 ms). `player.c:1397` falls back to

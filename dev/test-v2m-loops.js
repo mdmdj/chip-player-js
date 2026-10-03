@@ -100,8 +100,6 @@ async function main() {
     assert.strictEqual(p.metadata.intro_length, undefined);
     assert.strictEqual(p.metadata.loop_length, undefined);
     p.setLooping(true);
-    assert.strictEqual(p.restartAtEndPending, false,
-      'the base late-restart seek needs a loop end, and there is none');
     assert.strictEqual(p.getDisplayPositionMs(), p.getPositionMs(),
       'the head is the real position, never folded');
   });

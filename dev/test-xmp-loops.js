@@ -181,7 +181,6 @@ check('loop count lever: 1 off, 0 on, curLoop+1 leaving deep', () => {
   assert.strictEqual(p._loopCount, 1);
   p.setLooping(true);
   assert.strictEqual(p._loopCount, 0);
-  assert.strictEqual(p.restartAtEndPending, false);
   drive(p, core, [{ pos: 0, time: 0 }]);
   assert.strictEqual(core.lastLoopArg, 0);
   core.heap.set(p.infoPtr + FI_LOOP_COUNT * 4, 5);

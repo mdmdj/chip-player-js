@@ -49,7 +49,9 @@ a list of commits to remember:
 
 Workflow: commit feature changes on the feature branch; commit dev/overlay changes
 only on `dev/overlay`; then `git rebase feature/subtunes-as-first-class` on the
-overlay branch to pick up feature moves. Note that "promote" is its own step and
+overlay branch to pick up feature moves — use `-X theirs`, and expect
+*duplicated* content in path-listed files, so check the tree against the
+pre-rebase tip (see the handoff notes). Note that "promote" is its own step and
 is **the user's to trigger** — see "Dev overlay & promotion" below before going
 near `dev/promote-apply.sh` or `dev/.promote-armed`. Never commit overlay changes to the
 feature branch, and never push either branch to `upstream` — everything stays in
@@ -1086,6 +1088,22 @@ checks no longer work. Compare a live context to a stored one with
     scratch branch first, then require `git diff <old-tip> HEAD` to be empty
     (mine was, after the fixup). That diff is the whole proof that no DEV region
     or vendored fix was lost — it is what caught the `-X ours` damage.
+  - **Expect *duplicated* content after promote-then-rebase, not just lost
+    content (2026-10-03).** The promote writes *stripped* content onto the feature
+    branch and skips path-listed files entirely, so those files keep whatever an
+    *older* promote (or the branch split) left there. Replaying the overlay
+    commits that touch them can then land on top of content the base already
+    has. Seen once: `scripts/build-chip-core.js` (path-listed, so the promote
+    left the feature copy alone) ended up listing `_mdx_get_loop_start_ms` and
+    `_mdx_get_loop_length_ms` **twice** in `EXPORTED_FUNCTIONS`. Same mechanism
+    would duplicate a DEV region's contents or a vendored hunk. Harmless there
+    (Emscripten exports a name once), and the feature branch was never affected
+    (1 occurrence, promote skipped it) — but it is residue, and the tree diff is
+    the only thing that finds it: the rebase exited 0 with no conflicts and
+    10f640889 dropped cleanly as "already upstream". **So treat a non-empty
+    tree diff after a rebase as a real finding to diagnose, not as noise to
+    re-run away** — read it, fix the duplicate back to the pre-rebase content
+    (`508023685`), and only then require the diff to be empty.
 - **Bug verification (2026-10-02) — two confirmed, one dead, one masked.** A sweep
   of the feature diff for defects *we caused* produced ~25 candidates; root-value
   verification settled four, and the rest were judged not worth the risk of

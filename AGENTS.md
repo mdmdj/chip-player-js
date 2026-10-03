@@ -1490,6 +1490,20 @@ only armed when `silenceDuration >= 0`, and both arms must end the song):
   absolute and survive seeks, so seeking then looping normally still learns
   correctly; a from-the-start loop learns nothing (full-span highlight says
   nothing), and files without a backward jump keep today's UI.
+  **Known limitation, and the obvious future polish:** learning needs the
+  engine's *first* backward order jump, so the band cannot exist during the
+  first pass — on TECHTRIS that is ~80s in, which makes the feature look
+  broken for as long as a listener waits. Confirmed in-app 2026-10-03 by
+  driving the real UI: jump `11->1`, `intro_length` 3940, band
+  `[3940, 80700]`, rendered as `Slider-loop` from 4.9% to 100% of the slider.
+  **Polish: resolve the loop region at load instead of learning it.** libxmp
+  knows the module's restart order, so a new wrapper export (the restart
+  position/order) would let the first pass resolve the loop start exactly —
+  the band would exist from the first frame and `learnLoopFromOrder` would
+  degrade to a fallback for files the export cannot describe. This needs a
+  wrapper export plus a `build-chip-core.js` `EXPORTED_FUNCTIONS` entry, so it
+  is new capability rather than a fix; it was deliberately left out of the
+  sub-tunes PR to keep that diff reviewable.
   Catalog loop census: only TECHTRIS.MOD (11→1), 01-Title.xm (13→1), Bgm01.xm
   (43→10) and zuma.it (23→0) loop (single-outer-loop each; IT effects are
   numeric, B=2 — an ASCII decode misses them); everything else plays straight
@@ -1566,6 +1580,19 @@ Testing gotchas learned the hard way:
   the load's `playerStateUpdate`.
 - The preview throttles background timers (~½ speed), so seek near a boundary
   to observe short windows.
+- **Prefer driving the real UI over devtools internals** when the question is
+  what a listener sees (the loop band, the footer, the repeat button). Two
+  silent traps, both of which look like a working call: `__cpDev.setRepeat`
+  takes the *numeric* `REPEAT_ONE` (2), so `setRepeat('one')` no-ops without
+  error; and a loose `text=` locator can click the wrong row (a `text=TECHTRIS.MOD`
+  click landed on `THALAMUS.MOD`, and every order-stream conclusion drawn from
+  it was void). Click rows by `href` and verify `sequencer.currSongPath` before
+  trusting player state. Always assert the effect (`player.looping`,
+  `sequencer.repeat`) rather than assuming the call worked.
+- Players are `auto-bind`ed, so instrumenting a prototype method is a no-op: the
+  instance carries its own bound copy and shadows the prototype. A patched
+  `learnLoopFromOrder` therefore looks "never called" while running fine. Sample
+  player fields (`_lastPos`, `_orderFirstSeen`) instead of patching.
 
 ## Conventions & cautions
 

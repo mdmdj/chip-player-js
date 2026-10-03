@@ -233,6 +233,16 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
     real files under `catalog/`, including RSID fixtures).
   - `node dev/test-build.js` — build-music round-trip on a temp catalog subdir
     (sub-tune rows, dates, idempotency, FK-safe delete); cleans up after itself.
+    **It runs the builder against the REAL `server/catalog.db`**, so it now
+    snapshots that file (WAL checkpointed first) and restores it in a `finally`.
+    Do not add a schema-mutating check without that guard: on 2026-10-03 a
+    `--dryrun` check run against the *pre-fix* builder dropped `subtune_count`
+    and let the dry run re-add it with `DEFAULT 1`, silently resetting all 6788
+    rows to `subtune_count = 1`. The 1140 `subtune` rows survived, so a plain
+    `node scripts/build-music.js` (no `-n`) repaired it — and only because the
+    fix forces a reprocess while the backfill marker is unset. Symptom to
+    recognise: `subtune` rows exist but `SELECT COUNT(*) FROM music WHERE
+    subtune_count > 1` returns 0 (should be 87).
   - `node dev/test-sequencer.js` — sequencer navigation with a fake player
     (each sub-tune plays once, mixed contexts advance entry-by-entry). Uses an
     inline Babel require hook; no new deps.

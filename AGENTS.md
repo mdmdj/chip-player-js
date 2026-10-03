@@ -377,6 +377,37 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
 >   `intro_length=76, loop_length=29867` (band [29943, 59810]) for
 >   `16 Hurry Up!.vgz`; AGENTS.md's matrix records A=342/B=800. Re-measure before
 >   trusting the matrix.
+>
+> - **Playback speed desyncs from the transport clock in OUR build only — prod
+>   is correct.** Measured 2026-10-03 on `16 Hurry Up!.vgz`, position advance in
+>   ms per wall-ms, with `curLoop` confirming the engine really is faster:
+>
+>   | build | 1x | 2x | duration 1x -> 2x |
+>   | --- | --- | --- | --- |
+>   | prod (chiptune.app) | 1.005 | **1.979** | 33761 -> 34261 (+1.5%) |
+>   | our dev core | 1.006 | **1.005** | 6442 -> **10942** (+70%) |
+>
+>   So prod's position scales with speed and its duration is ~speed-invariant,
+>   i.e. prod already behaves the way the UI is designed to behave ("absolute
+>   1x time, so the bar runs 2x as fast at 2x"). Our build reports position in
+>   wall-clock regardless of speed, and inflates duration because
+>   `lvgm_get_duration_ms` mixes bases — `Tick2Second` (speed-divided) for the
+>   pass and `Sample2Second` (speed-multiplied) for fade/silence, then one
+>   `* GetPlaybackSpeed()`. That is exactly `1942 + 9000` at 2x and
+>   `1942 + 2250` at 0.5x. The cause is the **stale vendored libvgm tree**
+>   (overlay-only): both getters are byte-identical to master, so the PR does
+>   not carry this, and `dev/promote-paths.txt` excludes `libvgm/**`.
+>   **Do not "fix" it by multiplying position by speed in the wrapper** — that
+>   would match our stale tree and double-count against the newer libvgm prod
+>   uses. Fixing our build means refreshing the tree (see the libvgm pin
+>   section), which is engine work, not JS.
+>   **Open risk for the PR:** our loop getters multiply `Tick2Second` by
+>   `GetPlaybackSpeed()`, which is only correct if `Tick2Second` divides by
+>   speed in whatever tree the reader builds. That holds for our stale vendored
+>   tree (`_tsDiv *= genOpts.pbSpeed` in `RefreshTSRates`) and is unverified
+>   against the newer libvgm prod is built from. If Matt's tree does not
+>   divide there, the band and the folded head will be off by the speed factor
+>   at non-1x. Cheap to confirm once a newer tree is built.
 
 Real audio works locally. `scripts/build-subprojects.sh` + changes to
 `scripts/build-chip-core.js` build all vendored engines into

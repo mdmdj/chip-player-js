@@ -455,6 +455,39 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
 >   Unverifiable from here: the actual commits. Nothing in the repo, the wasm
 >   (exports are minified), or the JS glue names them.
 >
+> - **XMP band at load: tried libxmp's own per-order time table, it does NOT
+>   work.** Attempted and reverted 2026-10-03. The idea was good — libxmp
+>   precomputes `module_data.xxo_info[].time`, the start time of every order,
+>   and uses that table itself when seeking (`control.c` walks it in
+>   `xmp_seek_time`), so `xxo_info[mod->rst].time` should be the loop start with
+>   no waiting and no pattern scanning. Added a `src/bindings/libxmp-wrapper.cpp`
+>   reading `common.h` (`ctx->m.xxo_info[]`, `ctx->m.mod.rst`), three exports,
+>   and a guarded JS resolution; relinked and measured. It fails on the catalog:
+>   - **`rst` is 0 for all 9 mods** (TECHTRIS, 01-Title, Bgm01, THALAMUS, tim6,
+>     unreal superhero, ZOOL-1_RAVE, zuma, Unreal Tournament Menu), so the header
+>     carries no usable restart order.
+>   - **The time table is non-monotonic for all 9**, with the shape
+>     `0, 0, ~6, ~125, 64, <large>, 0, ~6` — order 6 resets to 0 and order 7
+>     repeats order 2. That is per-sequence overwriting, not a cumulative
+>     timeline, so the values cannot be read as order start times.
+>   - **The header also disagrees with the engine.** `rst = 0` says "restart at
+>     the beginning", but TECHTRIS actually jumps **11 -> 1** (the learned band
+>     starts at order 1 = 3940 ms). `player.c:1397` falls back to
+>     `seq_data[p->sequence].entry_point` whenever `rst` is not in the current
+>     sequence, so the real restart order is not `mod->rst`.
+>   So this is worse than a false-positive risk: it is systematically wrong for
+>   exactly the files we care about. **Do not retry this without first checking
+>   `rst` on real files**, and note that a correct-looking `rst` would still not
+>   predict the jump target. Scanning the patterns in JS instead is not the
+>   answer either — it means reimplementing libxmp's sequencer (Fxx tempo/speed,
+>   F06 loops and breaks, F9x/FEx delays, multi-sequence entry points), where a
+>   single missed effect yields a *wrong* band rather than none. The XMP band
+>   stays learned from playback, and keeps its known cost: it appears only after
+>   the engine's first backward order jump (see the `learnLoopFromOrder` rules).
+>   Side finding worth keeping: libxmp 4.5 spells the context type
+>   `xmp_context` (`typedef char *`), while 4.6+ uses `xmp_ctx` — another cheap
+>   version marker alongside `xmp_seek_time_frame`.
+>
 > - **libvgm counts loops correctly — no patch is needed.** `VGMPlayer::Cmd_
 >   EndOfData()` in `player/vgmplayer_cmdhandler.cpp:574` does `_curLoop ++` on
 >   every loop (and fires `PLREVT_LOOP` with it), reset only in

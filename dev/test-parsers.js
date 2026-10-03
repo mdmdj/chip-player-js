@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// DEV-ONLY test harness for the sub-song metadata parsers.
+// DEV-ONLY test harness for the sub-tune metadata parsers.
 //
 // Uses synthetic buffers for edge cases and (when present) real files under
 // catalog/ for integration coverage. Run: node dev/test-parsers.js

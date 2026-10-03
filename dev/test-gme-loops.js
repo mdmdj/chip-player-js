@@ -6,7 +6,7 @@
 // fade, and when the engine reports the track ended, restart the *track* in
 // buffer (no refetch, no gap). Tracks whose driver loops internally never
 // report "ended", so nothing restarts and the loop stays seamless. That is the
-// whole contract, plus the sub-song surface (GME carries multi-song NSF/NSFE).
+// whole contract, plus the sub-tune surface (GME carries multi-song NSF/NSFE).
 // Run: node dev/test-gme-loops.js
 'use strict';
 
@@ -187,7 +187,7 @@ async function main() {
     assert.ok(core.state.startTracks.length >= 2,
       `the track is re-run (starts: ${core.state.startTracks.length})`);
     assert.deepStrictEqual([...new Set(core.state.startTracks)], [0],
-      'the same sub-song is re-run');
+      'the same sub-tune is re-run');
     assert.strictEqual(p.stopped, false, 'the song never ends under repeat one');
     // The restart must not leave a fade behind that would cut the next pass.
     assert.ok(core.state.fades.every(f => f === 200000000),
@@ -248,15 +248,15 @@ async function main() {
     assert.strictEqual(p.getDisplayPositionMs(), 12345, 'the head runs on');
   });
 
-  await check('sub-songs are selectable and each has its own metadata', async () => {
-    const tracks = [ONE_SONG, { ...ONE_SONG, title: 'Second Sub-Song', play_length: 30000 }];
+  await check('sub-tunes are selectable and each has its own metadata', async () => {
+    const tracks = [ONE_SONG, { ...ONE_SONG, title: 'Second Sub-Tune', play_length: 30000 }];
     const { p, core } = await makePlayer({ tracks });
     assert.strictEqual(p.getNumSubtunes(), 2);
     assert.strictEqual(p.getSubtune(), 0);
     p.playSubtune(1);
     assert.strictEqual(p.getSubtune(), 1);
-    assert.strictEqual(p.metadata.title, 'Second Sub-Song');
-    assert.strictEqual(p.getDurationMs(), 30000, 'duration follows the sub-song');
+    assert.strictEqual(p.metadata.title, 'Second Sub-Tune');
+    assert.strictEqual(p.getDurationMs(), 30000, 'duration follows the sub-tune');
     assert.deepStrictEqual(core.state.startTracks, [0, 1], 'each selection starts that track');
   });
 
@@ -266,7 +266,7 @@ async function main() {
     drive(p, core, ONE_SONG.play_length + 50);
     assert.strictEqual(p.fadingOut, true);
     p.playSubtune(0);
-    assert.strictEqual(p.fadingOut, false, 'the new sub-song is not born fading');
+    assert.strictEqual(p.fadingOut, false, 'the new sub-tune is not born fading');
     assert.strictEqual(p.fadeStartMs, null);
     assert.strictEqual(p.fadeFinished, false);
   });

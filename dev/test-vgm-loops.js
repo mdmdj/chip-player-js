@@ -249,7 +249,6 @@ async function main() {
     const after = p.getDisplayPositionMs();
     assertNoJump(p, 'enable in the lead-in', before, after);
     assert.strictEqual(core.lastLoopArg, 0, 'loop count 0 = forever');
-    assert.strictEqual(p.restartAtEndPending, false, 'libvgm loops natively');
     // First pass plays through live, then the head cycles inside the band.
     await drive(p, core, [BAND_START + 1000]);
     assertDisplay(p, BAND_START + 1000, 'first pass in the band');
@@ -305,6 +304,28 @@ async function main() {
     assertDisplay(p, BAND_END + 1000, 'mid tail');
     await driveToEnd(p, core, FADE_START_OFF + 1000);
     assert.strictEqual(p.stopped, true, 'the fade finishes and the song ends');
+  });
+
+  await check('repeat one enabled past the loop end: no seek back, engine takes over', async () => {
+    // The base class used to carry a "late repeat" flag for this case, but every
+    // player cleared it, so the branch was unreachable. Pin what actually
+    // governs it instead: libvgm loops natively, so the transport must not be
+    // rewound and the position must keep climbing.
+    //
+    // The window is loopEnd..fadeStart (BAND_START..BAND_END). Later than that
+    // and libvgm has already latched its two-pass fade, which SetLoopCount(0)
+    // does not clear -- the song ends, per the indefinite-playback xfail below.
+    const { p, core } = await makePlayer();
+    await seek(p, core, BAND_START + 2000); // past the loop, fade not yet running
+    assert.strictEqual(core.fadeStartedAtMs, null, 'precondition: no fade running');
+    const beforeDisplay = p.getDisplayPositionMs();
+    p.setLooping(true);
+    assertNoJump(p, 'enable past the loop end', beforeDisplay, p.getDisplayPositionMs());
+    assert.strictEqual(core.lastLoopArg, 0, 'the engine takes the repeat, not a seek');
+    await drive(p, core, [BAND_END + 1000, BAND_END + B + 1000]);
+    assert.ok(p.getPositionMs() > BAND_END + B,
+      'position keeps climbing forward instead of being rewound');
+    assert.strictEqual(p.stopped, false, 'and the song is still playing');
   });
 
   await check('#8 repeat one from the start: head cycles in the band, abs climbs', async () => {

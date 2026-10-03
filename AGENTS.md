@@ -1275,7 +1275,7 @@ checks no longer work. Compare a live context to a stored one with
    build-music round-trips (`dev/test-build.js`), sequencer navigation, the
    SongRef identity model, the loop model of every engine (VGM/GME/MDX/MIDI/XMP
    plus V2M's tier-3 contract), the SID/N64 end detector, and the sub-tune server
-   API -- 159 checks via `./dev/run-tests.sh` (2 reported known failures: the VGM
+   API -- 164 checks via `./dev/run-tests.sh` (2 reported known failures: the VGM
    indefinite-playback fade, a known limit, and the unguarded
    `lvgm_get_cur_loop` sentinel). Every engine now has a harness, including the
    GME in-buffer `restartTrack` path. Not yet harnessed: the client component
@@ -1286,7 +1286,17 @@ checks no longer work. Compare a live context to a stored one with
    (matching the repo, which has no test runner or CI). If Matt wants a durable
    suite, the same harnesses could move to a tracked `test/` dir and run via
    `node --test` with no new deps.
-3. Known unsupported formats (don't add to `FORMATS` without a player/parser):
+3. **Changelog page with video examples** (next PR prep step, agreed
+   2026-10-03). Record short videos of the feature working and publish them on a
+   changelog web page. Practical notes for whoever picks this up: the preview tab
+   is the recording surface (`http://mms-1:8080`, not `localhost`), screen
+   recording runs through the host's preview tab, and `window.__cpDev` can
+   script a repeatable take (`setRepeat`, `seek`, `click`) so the same clip can
+   be re-shot after a change. Worth capturing the things that are hard to
+   describe in prose: a song folder expanding into sub-songs, the time-slider
+   loop band, Repeat One toggling without a jump, and per-sub-tune favouriting.
+   Keep the page a static addition consistent with the rest of the site.
+4. Known unsupported formats (don't add to `FORMATS` without a player/parser):
    plain `.usf` sets (only `.miniusf` is supported), PSF/PSX (`psflib` is reused
    only by the USF loader; no PSX core), and PSM (`libxmp-lite` = it/mod/s3m/xm;
    the files here are the MASI variant, which needs full libxmp).
@@ -1773,6 +1783,39 @@ Testing gotchas learned the hard way:
   instance carries its own bound copy and shadows the prototype. A patched
   `learnLoopFromOrder` therefore looks "never called" while running fine. Sample
   player fields (`_lastPos`, `_orderFirstSeen`) instead of patching.
+
+### Pitfalls that cost real time on 2026-10-03 (read before engine work)
+
+The recurring theme was **asserting engine/version behaviour from reading source
+instead of measuring it**, and three separate conclusions were overturned that
+way. Cheap to state, expensive to learn:
+
+- **Measure engine behaviour; do not derive it.** The playback-speed desync was
+  "obvious" from `Tick2Second` vs `Sample2Second` — and the opposite was true in
+  the other tree. Prod at 2x scales position 1.98x, ours does not, with a
+  byte-identical getter. Reasoning from source produced three wrong answers in a
+  row here; measuring took minutes and settled each one.
+- **Never reason about prod (or anyone's build) from our tree.** Our own note
+  asserted prod used this repo's vendored libvgm, on a tie-breaker that did not
+  hold. It does not. We also proved master *cannot* be built against our vendored
+  trees (`_gme_disable_echo`, `_xmp_seek_time_frame` are listed but absent from
+  them), so "it works locally" is not evidence about a reviewer's build.
+- **Make the harness non-destructive BEFORE running a negative control.** This is
+  the expensive one. A negative control that ran the *pre-fix* builder, after the
+  new test had dropped a column on the real `server/catalog.db`, silently reset
+  `subtune_count` for all 6788 rows. `dev/test-build.js` now snapshots and
+  restores the database. If a test touches live state, add the guard in the same
+  commit as the test — not after it has cost you a rebuild.
+- **Check the premise before defending a design.** Hours went into restoring an
+  at-load XMP band that never existed: every version of that code set the band on
+  a backward order jump, and it is not persisted. `git log -S` over the real
+  history settles "did this ever work?" in one command.
+- **A wrong band is worse than a late one.** Two XMP shortcuts were rejected on
+  this basis (see the `xxo_info` note): both would have produced a plausible but
+  incorrect region. Prefer nothing over something false.
+- **Re-verify claims inherited from notes.** "mdxmini `position_us` overflow is
+  unreachable" was wrong — it wraps at 35.8 min and a review bot found it
+  independently.
 
 ## Conventions & cautions
 

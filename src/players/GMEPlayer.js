@@ -126,6 +126,8 @@ export default class GMEPlayer extends Player {
       // the track length: that would cut a seamlessly looping driver with a
       // hard restart.
       if (trackEnded) {
+        // Restarting also resets getPositionMs(), so the elapsed label
+        // restarts with it. Looping drivers never get here and keep climbing.
         this.restartTrack();
         trackEnded = false;
       }

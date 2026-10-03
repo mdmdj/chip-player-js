@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// DEV-ONLY SongRef check: the client identity model sub-songs rest on. A
+// DEV-ONLY SongRef check: the client identity model sub-tunes rest on. A
 // playable thing is { path, subtune }; everything else (highlights, favorites,
 // React keys, the share link, the sequencer context) compares those, so a
 // mistake here shows up as the wrong song playing rather than as an error.
@@ -60,7 +60,7 @@ check('an existing ref or a browse row passes through unchanged', () => {
   const ref = { path: NSFE, subtune: 3 };
   assert.deepStrictEqual(songRef(ref), ref);
   assert.deepStrictEqual(songRef(ref, 9), ref, 'an object carries its own sub-tune');
-  // A /browse sub-song row: same shape as a ref.
+  // A /browse sub-tune row: same shape as a ref.
   const row = { path: NSFE, name: 'Tune 4', subtune: 3, song_id: 'abc', type: 'file' };
   assert.deepStrictEqual(songRef(row), { path: NSFE, subtune: 3 });
 });
@@ -78,14 +78,14 @@ check('null stays null, so callers can test for "no song"', () => {
   assert.strictEqual(songRefKey(null), null);
 });
 
-check('the key distinguishes sub-songs of the same file', () => {
+check('the key distinguishes sub-tunes of the same file', () => {
   assert.notStrictEqual(songRefKey(NSFE, 1), songRefKey(NSFE, 2));
   assert.notStrictEqual(songRefKey(NSFE, 0), songRefKey(SONG, 0));
   assert.strictEqual(songRefKey(NSFE, 3), songRefKey({ path: NSFE, subtune: 3 }));
 });
 
 check('the key cannot be faked by a crafted path (NUL separator)', () => {
-  // Two different songs must never collide, whatever their names.
+  // Two different sub-tunes must never collide, whatever their names.
   const a = { path: 'x\u00001', subtune: 0 };
   const b = { path: 'x', subtune: 1 };
   assert.notStrictEqual(songRefKey(a), songRefKey(b));

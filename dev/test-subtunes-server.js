@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-// DEV-ONLY sub-tune API check: the server half of sub-songs-as-first-class
-// songs, exercised over HTTP against the running dev server (mms-1:8080, or
+// DEV-ONLY sub-tune API check: the server half of the sub-tunes-as-first-class
+// work, exercised over HTTP against the running dev server (mms-1:8080, or
 // API_BASE). These are the endpoints the client turns a multi-song file into a
-// "song folder" with one playable row per sub-song, so the contract under test
+// "song folder" with one playable row per sub-tune, so the contract under test
 // is: a multi-song file is a folder in its parent, the file's own path lists
-// sub-songs, sub-songs are addressable by (?play=<id>&subtune=N), and shuffle
+// sub-tunes, sub-tunes are addressable by (?play=<id>&subtune=N), and shuffle
 // /random/top/playback agree on (path, subtune).
 //
 // Fixtures come from the real catalog DB, so this works with whatever the
@@ -88,7 +88,7 @@ async function main() {
     const row = rows.find(r => r.path === multiSong.path);
     assert.ok(row, `${multiSong.path} missing from its directory listing`);
     assert.strictEqual(row.type, 'songfolder');
-    assert.strictEqual(row.count, multiSong.subtune_count, 'count is the sub-song count');
+    assert.strictEqual(row.count, multiSong.subtune_count, 'count is the sub-tune count');
     assert.strictEqual(row.url, null, 'a song folder is navigated into, not played');
   });
 
@@ -97,23 +97,23 @@ async function main() {
     const rows = await get(`/api/browse?path=${enc(dirOf(singleSong.path))}`);
     const row = rows.find(r => r.path === singleSong.path);
     assert.ok(row, `${singleSong.path} missing from its directory listing`);
-    assert.strictEqual(row.type, 'file', 'one sub-song is not a folder');
+    assert.strictEqual(row.type, 'file', 'one sub-tune is not a folder');
     assert.strictEqual(row.url, `/?play=${enc(singleSong.song_id)}`);
     assert.ok(!row.url.includes('subtune='), 'no sub-tune parameter for a single song');
   });
 
-  await check('the file path itself lists its sub-songs', async () => {
+  await check('the file path itself lists its sub-tunes', async () => {
     const rows = await get(`/api/browse?path=${enc(multiSong.path)}`);
     assert.strictEqual(rows.length, multiSong.subtune_count);
     rows.forEach((row, i) => {
-      assert.strictEqual(row.type, 'file', 'sub-songs are playable rows');
+      assert.strictEqual(row.type, 'file', 'sub-tunes are playable rows');
       assert.strictEqual(row.subtune, i, '0-based, in order');
       assert.strictEqual(row.song_id, multiSong.song_id, 'addressed by the parent file hash');
       assert.strictEqual(row.url, `/?play=${enc(multiSong.song_id)}&subtune=${i}`);
     });
   });
 
-  await check('unlabeled sub-songs fall back to "Tune N", labeled ones keep the label', async () => {
+  await check('unlabeled sub-tunes fall back to "Tune N", labeled ones keep the label', async () => {
     for (const fixture of [labeled, unlabeled]) {
       if (!fixture) continue;
       const rows = await get(`/api/browse?path=${enc(fixture.path)}`);
@@ -121,7 +121,7 @@ async function main() {
       assert.ok(row, `sub-tune ${fixture.subtune} of ${fixture.path} is listed`);
       if (fixture.title == null) {
         assert.strictEqual(row.name, `Tune ${fixture.subtune + 1}`,
-          'an unlabeled sub-song gets the positional fallback');
+          'an unlabeled sub-tune gets the positional fallback');
       } else {
         assert.strictEqual(row.name, fixture.title, 'the stored label wins');
       }
@@ -134,16 +134,16 @@ async function main() {
     }
   });
 
-  await check('sub-song rows reuse the parent file size', async () => {
+  await check('sub-tune rows reuse the parent file size', async () => {
     const dirRows = await get(`/api/browse?path=${enc(dirOf(multiSong.path))}`);
     const folder = dirRows.find(r => r.path === multiSong.path);
     const subRows = await get(`/api/browse?path=${enc(multiSong.path)}`);
     for (const row of subRows) {
-      assert.strictEqual(row.size, folder.size, 'a sub-song has no size of its own');
+      assert.strictEqual(row.size, folder.size, 'a sub-tune has no size of its own');
     }
   });
 
-  await check('sub-song dates fall back to the file release date', async () => {
+  await check('sub-tune dates fall back to the file release date', async () => {
     const subRows = await get(`/api/browse?path=${enc(multiSong.path)}`);
     const dirRows = await get(`/api/browse?path=${enc(dirOf(multiSong.path))}`);
     const folder = dirRows.find(r => r.path === multiSong.path);
@@ -155,8 +155,8 @@ async function main() {
     }
   });
 
-  await check('a sub-song title is searchable, and not double-counted', async () => {
-    if (!labeled) throw skip('no labeled sub-song in the catalog');
+  await check('a sub-tune title is searchable, and not double-counted', async () => {
+    if (!labeled) throw skip('no labeled sub-tune in the catalog');
     const res = await get(`/api/search?query=${enc(labeled.title.split(/\s+/)[0])}`);
     const hits = res.items.filter(i => i.file === labeled.path);
     assert.ok(hits.length >= 1, `"${labeled.title}" is findable`);
@@ -164,22 +164,22 @@ async function main() {
     assert.ok(!res.items.slice(0, first).some(i => i.file === labeled.path),
       'a file is never listed twice (file-level match wins)');
     if (hits[0].subtune !== undefined) {
-      assert.ok(Number.isInteger(hits[0].subtune), 'a sub-song hit carries its index');
+      assert.ok(Number.isInteger(hits[0].subtune), 'a sub-tune hit carries its index');
     }
   });
 
   await check('/metadata resolves subtuneCount and subtuneTitle', async () => {
     const meta = await get(`/api/metadata?path=${enc(multiSong.path)}`);
     assert.strictEqual(meta.subtuneCount, multiSong.subtune_count);
-    assert.strictEqual(meta.subtuneTitle, null, 'no sub-tune index means no sub-song title');
+    assert.strictEqual(meta.subtuneTitle, null, 'no sub-tune index means no sub-tune title');
     const sub = db.prepare('SELECT title FROM subtune WHERE music_id = ? ORDER BY subtune LIMIT 1')
       .get(db.prepare('SELECT id FROM music WHERE path = ?').get(multiSong.path).id);
     const withIndex = await get(`/api/metadata?path=${enc(multiSong.path)}&subtune=0`);
     assert.strictEqual(withIndex.subtuneTitle, sub.title ?? null,
-      'the title for the requested sub-song, NULL when unlabeled');
+      'the title for the requested sub-tune, NULL when unlabeled');
   });
 
-  await check('shuffle and random hand out playable sub-songs', async () => {
+  await check('shuffle and random hand out playable sub-tunes', async () => {
     for (const route of ['/api/shuffle?limit=50', '/api/random?limit=10']) {
       const res = await get(route);
       assert.ok(res.items.length > 0);
@@ -196,7 +196,7 @@ async function main() {
     }
   });
 
-  await check('shuffle hands out a sub-song other than 0 for a multi-song file', async () => {
+  await check('shuffle hands out a sub-tune other than 0 for a multi-song file', async () => {
     // Scope the shuffle to the file's own directory so the file is always in
     // the sample: the point is that toShuffledSongRefs() picks a random
     // sub-tune per call, not that a global sample happens to catch one.
@@ -228,19 +228,19 @@ async function main() {
     assert.strictEqual(res.status, 400, 'an unplayable sub-tune is refused');
   });
 
-  await check('top charts group by (song, sub-tune) and label the sub-song', async () => {
+  await check('top charts group by (song, sub-tune) and label the sub-tune', async () => {
     const res = await get('/api/top?limit=50&scope=global');
     assert.ok(Array.isArray(res.items));
     for (const item of res.items) {
       assert.ok(Number.isInteger(item.subtune) && item.subtune >= 0);
       if (item.subtune_count > 1) {
         assert.ok(item.subtune < item.subtune_count, 'the index is within the song');
-        assert.ok('subtune_title' in item, 'a multi-song chart row carries its sub-song title');
+        assert.ok('subtune_title' in item, 'a multi-song chart row carries its sub-tune title');
       }
     }
   });
 
-  // Favorites: a sub-song is favorited independently of its siblings, and a
+  // Favorites: a sub-tune is favorited independently of its siblings, and a
   // legacy row without a sub-tune keeps working (it means sub-tune 0). These
   // mutate the dev user's favorites, so they undo themselves at the end.
   const favAdd = (body) => fetch(`${API_BASE}/api/user/favorites/add`, {
@@ -253,7 +253,7 @@ async function main() {
   const keyOf = (f) => `${f.path}\u0000${f.subtune ?? 0}`;
 
   const cleanup = [];
-  await check('a sub-song can be favorited without touching its siblings', async () => {
+  await check('a sub-tune can be favorited without touching its siblings', async () => {
     const before = await favList();
     for (const subtune of [0, 1]) {
       const body = { path: multiSong.path, subtune, mtime: 0 };
@@ -263,20 +263,20 @@ async function main() {
     }
     const after = await favList();
     const mine = after.filter(f => f.path === multiSong.path);
-    assert.strictEqual(mine.length, 2, 'both sub-songs are favorited');
+    assert.strictEqual(mine.length, 2, 'both sub-tunes are favorited');
     assert.deepStrictEqual(mine.map(f => f.subtune).sort(), [0, 1]);
     assert.deepStrictEqual(after.filter(f => !before.some(b => keyOf(b) === keyOf(f))),
       after.filter(f => !before.some(b => keyOf(b) === keyOf(f))),
       'sanity: the list is comparable');
   });
 
-  await check('removing one sub-song leaves the others favorited', async () => {
+  await check('removing one sub-tune leaves the others favorited', async () => {
     const res = await favRemove({ path: multiSong.path, subtune: 0, mtime: 0 });
     assert.strictEqual(res.status, 200);
     const after = await favList();
     const mine = after.filter(f => f.path === multiSong.path);
     assert.deepStrictEqual(mine.map(f => f.subtune), [1],
-      'only the removed sub-song is gone');
+      'only the removed sub-tune is gone');
     const again = await favRemove({ path: multiSong.path, subtune: 0, mtime: 0 });
     // Idempotent, not 404: removeFavoriteByPathStmt rewrites the whole playlist
     // row with json_group_array, so changes is always 1 and the handler's
@@ -288,13 +288,13 @@ async function main() {
       .map(f => f.subtune), [1], 'and the sibling is still favorited');
   });
 
-  await check('a sub-song is decorated for the UI (size, count, title)', async () => {
+  await check('a sub-tune is decorated for the UI (size, count, title)', async () => {
     const [row] = (await favList()).filter(f => f.path === multiSong.path);
     assert.ok(row, 'the remaining favorite is listed');
     assert.strictEqual(row.songId, multiSong.song_id, 'addressed by the parent file hash');
     assert.strictEqual(row.subtuneCount, multiSong.subtune_count);
-    assert.ok('subtuneTitle' in row, 'carries its sub-song title (null when unlabeled)');
-    assert.ok(row.size > 0, 'a sub-song reuses the file size');
+    assert.ok('subtuneTitle' in row, 'carries its sub-tune title (null when unlabeled)');
+    assert.ok(row.size > 0, 'a sub-tune reuses the file size');
   });
 
   await check('a legacy favorite without a sub-tune still resolves (sub-tune 0)', async () => {

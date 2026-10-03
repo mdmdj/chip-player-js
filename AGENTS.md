@@ -345,7 +345,8 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
 >   paths (leak a home directory). Known gap: the SID submodule parser reports 1
 >   submodule where `git submodule status --recursive` shows 2 (`resid` on
 >   `montag-dev`, plus the xa65 `driver`) — fix before trusting SID's pin.
-> - **Prod IS built from this repo's vendored libvgm.** Probed 2026-10-02
+> - **Prod's *wrapper* is ours; its *libvgm tree* is NOT established, and
+>   probably differs from ours.** Probed 2026-10-02
 >   against prod's `static/js/main.acd8.js` (Emscripten export names survive as
 >   string literals even though the wasm is stripped). Prod's libvgm surface is
 >   19 names, every one byte-identical to ours (`lvgm_init`, `_load_data`,
@@ -354,11 +355,46 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
 >   `lvgm_get_{loop_start,loop_end,fade_start,playlist_position}_ms`,
 >   `lvgm_get_indefinite_playback`, `lvgm_reset`) — so **prod ships no VGM
 >   loop-region feature at all**, and our Repeat One baseline is new capability,
->   not a port. The tie-breaker for *which* tree prod used:
->   `lvgm_get_voice_chip_name` exists in **no** upstream libvgm — it is ours,
->   added to the wrapper 2024-06-17 (`27ad9ee11`, moved to `src/bindings/` by
->   `cad9a5545`) — and prod exports it. So prod is built from this repo's wrapper
->   and therefore this repo's `libvgm/`. (Prod ships MDX — `mdx_open` and
+>   not a port. `lvgm_get_voice_chip_name` exists in **no** upstream libvgm — it
+>   is ours, added to the wrapper 2024-06-17 (`27ad9ee11`, moved to
+>   `src/bindings/` by `cad9a5545`) — and prod exports it, so prod builds from
+>   **this repo's wrapper**. That does **not** identify the tree: a wrapper is
+>   compiled against whatever libvgm happens to be present, so one wrapper
+>   links against many trees. An earlier version of this note concluded "and
+>   therefore this repo's `libvgm/`" — that was an invalid inference.
+>   **Disproof, measured 2026-10-03:** with a byte-identical
+>   `lvgm_get_position_ms`, prod's position scales with playback speed (1.98x
+>   at 2x) while our vendored tree's does not (1.00x). Same getter, opposite
+>   behaviour, so prod's tree is not ours. Treat the target tree as unknown and
+>   never reason about prod behaviour from our tree.
+>
+> - **What libvgm are *we* on, and what that does and does not pin.** Ours is
+>   upstream **91b6542**, recorded by `scripts/build-info.js` as
+>   `{ name: 'libvgm', tier: 'verified', note: 'upstream 91b6542' }` — "verified"
+>   meaning the vendored content was matched byte-for-byte against that upstream
+>   commit. It landed as a plain subtree in `3f936ea0f` (2026-09-27) and there
+>   is **no `.git` and no upstream remote inside `libvgm/`**, so `91b6542` is a
+>   *note in a script*, not a fetchable ref: nothing re-verifies it, and
+>   `build-info.js`/`config/webpack.config.common.js` are both path-listed so
+>   none of this reaches the PR.
+>   It is also **not guaranteed to be what we link**: `normalizeInput()`
+>   prefers a sibling `../libvgm` when one exists, which silently swaps the
+>   engine. The only guard is `build-chip-core.js`'s engine-content gate (fails
+>   the build if an engine's content hash moved off the recorded manifest,
+>   `CHIP_ALLOW_ENGINE_FALLBACK=1` to override). Verify with
+>   `JSON.parse(window.ChipCoreBuildInfo)` in a running app.
+>   **So: our tree is documented; the tree *Matt* builds against is not
+>   documented anywhere and cannot be inferred from the repo.** That is the
+>   standing risk behind the `* GetPlaybackSpeed()` assumption above.
+>   **Version-independent fix, if we want to stop guessing:** express the loop
+>   region through the *same* conversion chain `lvgm_get_position_ms` already
+>   uses — `Sample2Second(Tick2Sample(ticks))` instead of
+>   `Tick2Second(ticks) * GetPlaybackSpeed()`. Both `Tick2Sample` and
+>   `Sample2Second` are public on `PlayerBase`, and `GetCurTime()` is
+>   `Sample2Second(GetCurPos(PLAYPOS_SAMPLE))`, so the band would land in the
+>   position's own units *by construction* — correct on any tree, no assumption
+>   about whether `Tick2Second` divides by speed. (Prod ships MDX —
+>   `mdx_open` and
 >   `mdx_calc_sample` present — but not `mdx_set_max_loop`.)
 > - **libvgm counts loops correctly — no patch is needed.** `VGMPlayer::Cmd_
 >   EndOfData()` in `player/vgmplayer_cmdhandler.cpp:574` does `_curLoop ++` on

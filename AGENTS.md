@@ -386,16 +386,32 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
 >   **So: our tree is documented; the tree *Matt* builds against is not
 >   documented anywhere and cannot be inferred from the repo.** That is the
 >   standing risk behind the `* GetPlaybackSpeed()` assumption above.
->   **Version-independent fix, if we want to stop guessing:** express the loop
->   region through the *same* conversion chain `lvgm_get_position_ms` already
->   uses — `Sample2Second(Tick2Sample(ticks))` instead of
->   `Tick2Second(ticks) * GetPlaybackSpeed()`. Both `Tick2Sample` and
->   `Sample2Second` are public on `PlayerBase`, and `GetCurTime()` is
->   `Sample2Second(GetCurPos(PLAYPOS_SAMPLE))`, so the band would land in the
->   position's own units *by construction* — correct on any tree, no assumption
->   about whether `Tick2Second` divides by speed. (Prod ships MDX —
->   `mdx_open` and
->   `mdx_calc_sample` present — but not `mdx_set_max_loop`.)
+>   **Why no tick-math fix settles it** (checked 2026-10-03; this rules out the
+>   obvious patch): `PlayerBase::Sample2Second()` is
+>   `samples / _outSmplRate` — pure wall-clock, speed-agnostic — which is why
+>   `GetCurTime()` makes position a **wall-clock** value. `Tick2Second()` is
+>   instead `ticks * _ttMult / _tsDiv`, and `_tsDiv` carries `pbSpeed`. The two
+>   conversions therefore differ by exactly the speed factor, and which unit the
+>   band *must* be in depends on the tree:
+>   - `Sample2Second(Tick2Sample(t))` → `t/88200` at 2x — matches position in
+>     **our** tree.
+>   - `Tick2Second(t) * GetPlaybackSpeed()` → `t/44100` at 2x — matches
+>     position in **prod's** tree.
+>   Mutually exclusive; both cannot be right, and the target tree is unknown, so
+>   guessing is the one thing to stop doing. (`Tick2Sample` also truncates — it
+>   returns `UINT32` and can be 0 for sub-sample tick counts, which would
+>   silently collapse the band.)
+>   `Sample2Second` is *uniform* across our variants — every per-player override
+>   (`vgmplayer.hpp:176`, `droplayer.hpp:121`, `gymplayer.hpp:97`,
+>   `s98player.hpp:97`) is commented out, so VGM/DRO/GYM/S98 all inherit
+>   `samples / _outSmplRate`. The unknown tree, not engine variety, is the risk.
+>   **Version-independent fix: stop converting units.** Derive the band by
+>   observing the engine at its own loop boundary — record `getPositionMs()`
+>   when `getCurLoop()` increments. That is in position's units *by
+>   construction* on any tree, and it is already what `XMPPlayer` does (learn
+>   the band from the first backward order jump). Both getters exist. Cost: the
+>   band appears after the first loop instead of at load — the same limitation
+>   XMP has today.
 > - **libvgm counts loops correctly — no patch is needed.** `VGMPlayer::Cmd_
 >   EndOfData()` in `player/vgmplayer_cmdhandler.cpp:574` does `_curLoop ++` on
 >   every loop (and fires `PLREVT_LOOP` with it), reset only in

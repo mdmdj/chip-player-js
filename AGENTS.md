@@ -407,11 +407,27 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
 >   `samples / _outSmplRate`. The unknown tree, not engine variety, is the risk.
 >   **Version-independent fix: stop converting units.** Derive the band by
 >   observing the engine at its own loop boundary — record `getPositionMs()`
->   when `getCurLoop()` increments. That is in position's units *by
->   construction* on any tree, and it is already what `XMPPlayer` does (learn
->   the band from the first backward order jump). Both getters exist. Cost: the
->   band appears after the first loop instead of at load — the same limitation
->   XMP has today.
+>   when `getCurLoop()` increments. That would be in position's units by
+>   construction on any tree. **Rejected 2026-10-03: it costs the band at load**
+>   (it can only appear after the first loop), and the tick math it would
+>   replace is already correct — see below.
+>
+> - **The band at load is correct as written; keep it.** `Tick2Second(t) *
+>   GetPlaybackSpeed()` is `t / (ticks per second at 1x)`, i.e. the song's true
+>   playing time at 1x — a physical property of the file, not of the tree.
+>   Measured 2026-10-03, it is **speed-invariant**: band `[1142, 1942]`,
+>   `intro=342`, `loop=800` at 1x, 2x *and* 0.5x, while `duration` over the same
+>   sweep went 6442 / 10942 / 4192. So the multiplication is doing its job —
+>   cancelling the speed term — and the band is stable and physically right in
+>   every tree.
+>   **The earlier "open PR risk" was overstated.** The band is not a guess that
+>   might be wrong; it is a correct song-time value. The real asymmetry is that
+>   **`position` means different things per tree** (wall-clock in ours, song-time
+>   in prod's), so on *our* tree the band and position disagree at non-1x while
+>   on prod's they agree. Since prod is the reference and our tree is
+>   overlay-only, there is nothing to change here — do not "fix" the getters to
+>   chase our tree. Only `duration` is genuinely non-invariant, and that is
+>   pre-existing master code, not ours.
 > - **libvgm counts loops correctly — no patch is needed.** `VGMPlayer::Cmd_
 >   EndOfData()` in `player/vgmplayer_cmdhandler.cpp:574` does `_curLoop ++` on
 >   every loop (and fires `PLREVT_LOOP` with it), reset only in

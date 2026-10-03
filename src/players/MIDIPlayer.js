@@ -582,11 +582,9 @@ export default class MIDIPlayer extends Player {
   }
 
   // Repeat One wraps the JS event loop back to the second pass at the end of
-  // the list; the base "late repeat" seek would fight it (same as VGMPlayer).
-  // Files without a loop region keep the stop-and-reload fallback.
+  // the list. Files without a loop region keep the stop-and-reload fallback.
   setLooping(looping) {
     super.setLooping(looping);
-    this.restartAtEndPending = false;
     if (this.midiFilePlayer) this.midiFilePlayer.setLooping(looping);
   }
 

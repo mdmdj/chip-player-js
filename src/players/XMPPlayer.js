@@ -276,8 +276,6 @@ export default class XMPPlayer extends Player {
   setLooping(looping) {
     const wasLooping = this.looping;
     super.setLooping(looping);
-    // The engine loops natively; the base "late repeat" seek would fight it.
-    this.restartAtEndPending = false;
     if (this.looping) {
       this._loopCount = 0;
     } else if (wasLooping) {

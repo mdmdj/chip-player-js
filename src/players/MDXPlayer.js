@@ -180,8 +180,6 @@ export default class MDXPlayer extends Player {
     // Capture before applyLoopCount() changes the pass count.
     this.syncFadeTailCapture(looping);
     super.setLooping(looping);
-    // The engine loops natively; the base "late repeat" seek would fight it.
-    this.restartAtEndPending = false;
     this.applyLoopCount(wasLooping);
   }
 

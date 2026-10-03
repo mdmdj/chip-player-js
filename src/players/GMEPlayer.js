@@ -193,7 +193,6 @@ export default class GMEPlayer extends Player {
     this.fadingOut = false;
     this.fadeStartMs = null;
     this.fadeFinished = false;
-    this.restartAtEndPending = false;
     this.subtune = subtune;
     this.metadata = this._parseMetadata(subtune);
     this.emit('playerStateUpdate', {
@@ -212,7 +211,6 @@ export default class GMEPlayer extends Player {
     this.fadingOut = false;
     this.fadeStartMs = null;
     this.fadeFinished = false;
-    this.restartAtEndPending = false;
     this.seekTargetMs = null;
     this.seekRequestId = null;
     this.currentFileExt = pathe.extname(filepath);

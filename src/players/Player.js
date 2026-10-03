@@ -43,7 +43,6 @@ export default class Player extends EventEmitter {
     this.params = {};
     this.infoTexts = [];
     this.looping = false; // infinite looping mode (vs. normal mode where it stops at end of song)
-    this.restartAtEndPending = false; // repeat-one enabled after the loop end
     this.silenceDuration = -1;
     this.silenceSamplesRemaining = 0;
     this.onSilenceEnd = null;
@@ -297,11 +296,6 @@ export default class Player extends EventEmitter {
 
   setLooping(looping) {
     this.looping = looping;
-    // If repeat-one is switched on while playback is already past the end of
-    // the loop region, never jump the transport back into the loop. Finish the
-    // song, then restart from the top (handled in processAudio).
-    this.restartAtEndPending = looping && this.getLoopEndMs() != null &&
-      this.getPositionMs() > this.getLoopEndMs();
   }
 
   // End of the loop region in ms, or null when the track defines no loop.
@@ -393,16 +387,6 @@ export default class Player extends EventEmitter {
         }
       }
       return;
-    }
-
-    // Repeat-one was enabled after the loop end: don't jump back into the
-    // loop, but restart the whole song once it reaches the end.
-    if (this.looping && this.restartAtEndPending) {
-      const duration = this.getDurationMs();
-      if (duration > 0 && this.getPositionMs() >= duration) {
-        this.restartAtEndPending = false;
-        this.seekMs(0);
-      }
     }
 
     const start = performance.now();

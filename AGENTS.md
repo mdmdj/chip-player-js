@@ -1426,11 +1426,15 @@ only armed when `silenceDuration >= 0`, and both arms must end the song):
   the live app, `intro_length`/`loop_length` stay -1. The driver loops
   internally, so Repeat One never restarts: the track just keeps rendering
   past `play_length` (restarting there would cut a seamless loop with a hard
-  restart; `  restartTrack()` is only for `track_ended` one-shots). Blind-loop
+  restart; `restartTrack()` is only for `track_ended` one-shots). Blind-loop
   UI: indefinite with no band, once past the track length, parks the slider
   head at the end (it rides the first pass normally), lets the elapsed time
   climb unbounded, and labels the duration "Looping"
-   (`AppFooter.isBlindLoopNow` + `TimeSlider`). The past-the-end condition is
+   (`AppFooter.isBlindLoopNow` + `TimeSlider`). The exception is a genuine
+  one-shot: it restarts in-buffer, which resets `getPositionMs()`, so the head
+  *and* the elapsed label drop back to zero each cycle rather than
+  accumulating. Drivers that loop internally never take that path, so for them
+  the label really does climb. The past-the-end condition is
    the scoping: SID ends at its length and loops via stop + reload, so it
    never dwells there and keeps the normal slider (MIDI and XMP used to be in
    this group before they got native looping). Toggling repeat off

@@ -111,7 +111,6 @@ export default class VGMPlayer extends Player {
 
     this.resolveParamValues(persistedSettings);
     this.setTempo(persistedSettings.tempo || 1);
-    this.restartAtEndPending = false;
     this.fadeTailStartMs = null;
     this.durationExtended = false;
     this.applyLoopCount(false);
@@ -340,8 +339,6 @@ export default class VGMPlayer extends Player {
     // Capture before applyLoopCount() reconfigures the loop count.
     this.syncFadeTailCapture(looping);
     super.setLooping(looping);
-    // VGM loops natively; the base "late repeat" seek would fight it.
-    this.restartAtEndPending = false;
     this.applyLoopCount(wasLooping);
   }
 

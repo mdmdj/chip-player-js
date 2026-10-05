@@ -379,9 +379,21 @@ ranges), so it cannot drift from the code it describes.
 
 Single `index.html`, two-column clip rows (video left at the chosen aspect,
 prose right), no framework, no external requests — uploadable as a directory.
-Clips are served with `preload="none"` and a generated poster frame, with explicit
-`width`/`height` so the box is reserved before play; see FINDINGS.md for why the
-obvious `preload="metadata"` pulled all 35 MB on load.
+
+Two delivery requirements, both learned the hard way and both confirmed by the
+user after the fix (2026-10-05):
+
+- **Serve with Range support.** Without it `video.seekable` is empty and clips show
+  a first frame that will not play. `serve.mjs` is `express.static`.
+- **`preload="none"`, with a poster per clip.** `preload="metadata"` fetches all 14
+  clips on page load — measured **35 MB** — and a browser only runs ~6 downloads at a
+  time per site, so 8 of them queue and clicking play on a queued one stalls.
+  *Inconsistently*, because it depends on link speed and file size, which is why it
+  read as "randomly broken". With `preload="none"`: 0 MB on load, 14/14 still play.
+  Posters are generated at build time, and each `<video>` carries explicit
+  `width`/`height` because a `preload="none"` element has no size until it plays.
+
+FINDINGS.md has the plain-language version and the measured one.
 
 ```
 Header          what changed, in one paragraph, link to the PR
@@ -409,6 +421,7 @@ before any content work.
 | M5 | In-depth section | one clip per engine's Repeat One mechanism, same | **done, 8 clips** — `vgm-native`, `gme-looping-driver`, `mdx-native`, `midi-cc102`, `xmp-learned-band`, `sid-tail-restart`, `n64-indefinite`, `v2m-tier3` |
 | M6 | Page | `build-site.mjs` emits `site/`; prose per clip; relative URLs only | **done** — `dev/record/build-site.mjs` + `site.mjs` + `site.css`; 7 snippets with build-time line ranges; 0 external requests; `preload="none"` + generated posters; `./dev/record/serve.sh` (now `serve.mjs`, express — a range-less server, or a preload that pulls 35 MB before you click, makes clips unplayable; see FINDINGS.md) |
 | M7 | PR hand-off | decide with the maintainer whether anything of the page belongs in the PR (probably not) | not started |
+| M8 | Page plays reliably | every clip starts on click, first try, in a real browser | **done** — two delivery bugs found and fixed (Range support, `preload`), both invisible to file-level checks; confirmed by the user after headless automation passed 14/14 |
 
 ## 11. Risks
 

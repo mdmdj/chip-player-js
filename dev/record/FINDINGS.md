@@ -190,12 +190,80 @@ dependency we already have does it correctly. `serve.sh` is now a wrapper.
 `vidcheck.mjs` reproduces this (reports readyState / networkState / error /
 buffered / seekable and whether `currentTime` actually moves).
 
-The same failure mode has a second contributor worth knowing: `preload="metadata"`
-on every clip makes the page pull ~34 MB before you press play. Over a
-range-less server every one of those is a full file.
+Caveat that survives the fix: the Range half was a **local preview** bug. The
+uploaded page depends on the real host supporting ranges — worth confirming there,
+not assuming.
 
-Caveat that survives the fix: this is a **local preview** bug. The uploaded page
-depends on the real host supporting ranges — worth confirming there, not assuming.
+## `preload="metadata"` on 14 videos is not free, and it fails *intermittently*
+
+**Confirmed fixed** (2026-10-05): after `preload="none"` the user reports playback
+is consistent. The file-level checks never showed this one — see "what made it
+invisible" below.
+
+### The plain version, because the technical one does not explain "inconsistent"
+
+The page has 14 videos on it. `preload="metadata"` told the browser to fetch each
+one as soon as the page loaded — before you touched anything. Measured: **35 MB,
+all 14 files, on every page load.**
+
+A browser will only run about **6 downloads at a time** to the same site. That
+limit is not a bug; it is decades-old HTTP/1.1 behaviour, there so one page
+cannot hog the network from every other tab. So of our 14 videos, **8 sat in a
+queue** waiting for a free slot.
+
+Now the part that makes it feel random: whether a given clip worked when you
+clicked it depended on whether it happened to have a free slot *at that moment*,
+and that depended on how fast the link was and how big the files were (`songfolder`
+is 17 s and 5.3 MB; `share-link` was 0.2 MB). Slow link or big file → you clicked
+and it sat there. Fast link → it had already finished fetching and started
+instantly. **Same page, same clips, different results — which is exactly the
+"works sometimes" report**, and why clearing the cache and hard-reloading changed
+nothing: the cache was never the problem, the queue was.
+
+The fix is one attribute: **`preload="none"`** — fetch nothing until a click.
+Measured after: **0 MB on load**, and all 14 still play (from `readyState=0`,
+i.e. genuinely nothing preloaded). Two consequences to handle, both done:
+
+- No first frame to show, so `build-site.mjs` generates a **poster** per clip
+  (1.8 MB for all 14, ~120 KB each). A side benefit: the page reads better than
+  black boxes.
+- A `preload="none"` element has **no intrinsic size until it is asked to play**,
+  so `width:100%; height:auto` collapsed every row to nothing and then jumped.
+  Fixed with explicit `width`/`height` attributes from `ffprobe`, which is what
+  those attributes are for.
+
+Also changed: `express.static`'s default is `max-age=0`, i.e. "revalidate before
+every use", so every visit re-pulled all 35 MB anyway. Now the HTML revalidates
+(rebuilds show up) and the media is cached for an hour.
+
+### The technical version
+
+A browser's metadata probe is an **open-ended** `Range: bytes=0-`. Because
+faststart puts the `moov` atom first, the browser only *needs* the first few KB —
+and then cancels the request. But the server has already committed to writing the
+whole file, so every one of those probes became a full-file `206`:
+
+```
+load finished in 6447 ms, 14 mp4 responses, 35.43 MB transferred
+songfolder.mp4   206   5538612 B   bytes 0-5538611/5538612   <- whole file
+```
+
+14 whole files, competing for 6 connection slots.
+
+### What made it invisible
+
+Everything a file-level check would ask came back clean: `ffprobe` reported every
+clip as valid H.264 High / AAC-LC, `canPlayType` said `probably` for every codec,
+and `vidall.mjs` played 14/14 with `readyState=4` and no media errors. Automation
+passed *because* headless Chromium has no connection pressure and a null audio
+sink. The bug lived in the gap between "the file is fine" and "the page asks for
+14 of them at once" — which is why it had to be reproduced in a real browser
+before it was found, and why the user's confirmation, not the test suite, is what
+closed it.
+
+The general lesson, and the reason the delivery checks are separate tools:
+**assert on the artefact, not on the state you manipulated** — here the artefact
+is "what the page fetches, and when", which `vidleak.mjs` measures.
 
 ## The sync mark must be green, not white
 
@@ -227,6 +295,7 @@ follow a section marked historical.
 | `recordVideo.size`: never the dsf product, unset is not 1:1 either | **current** (framing) |
 | A selector that matches nothing cannot fail an assertion | **current** (read before writing a step that clicks) |
 | A page served without Range support looks like a broken encode | **current** (preview) |
+| `preload="metadata"` on 14 videos is not free, and it fails *intermittently* | **current** (page delivery) — plain-language version first; confirmed fixed by the user |
 | The sync mark must be green | **current** (sync) |
 | Two clocks, and the audio offset | **current** |
 | Load the song *inside* the recorded window | **current** |

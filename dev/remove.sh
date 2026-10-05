@@ -36,4 +36,8 @@ node dev/patch-server.js --revert
 rm -f src/chip-player-devtools.js
 echo "[dev]   removed src/chip-player-devtools.js"
 
+# Staged clip-recording shim (same deal; see dev/record/README.md)
+rm -f src/chip-player-record.js
+echo "[dev]   removed src/chip-player-record.js"
+
 echo "[dev] Done. (Left in place: catalog/, server/*.db. Delete manually if desired.)"

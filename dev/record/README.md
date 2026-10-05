@@ -27,7 +27,7 @@ Quick start:
 node dev/record/shoot.mjs <clip-id>   # record one clip (starts the receiver itself)
 ./dev/record/plan.sh <clip-id>        # the scenario as data: steps + assertions
 ./dev/record/build-site.mjs           # registry + proofs -> site/
-./dev/record/serve.sh                 # look at site/ in a browser
+./dev/record/serve.sh                 # look at site/ in a browser (express; needs Range)
 ```
 
 Requires `playwright` installed without touching `package.json` (see the npm trap
@@ -56,38 +56,43 @@ Batch re-shoot (each clip is independent — `shoot.mjs` starts its own receiver
 browser, so a failure leaves no state for the next one to trip over):
 
 ```sh
-for id in subtune-is-a-song songfolder labels favorite-subtune share-link \
-          loop-band repeat-toggle-smooth repeat-leave-fade blind-loop \
-          show-loop-area vgm-native gme-looping-driver mdx-native midi-cc102 \
-          xmp-learned-band sid-tail-restart n64-indefinite v2m-tier3; do
+for id in songfolder favorite-subtune loop-band repeat-toggle-smooth \
+          repeat-leave-fade blind-loop vgm-native gme-looping-driver mdx-native \
+          midi-cc102 xmp-learned-band sid-tail-restart n64-indefinite v2m-tier3; do
   node dev/record/shoot.mjs "$id" 2>&1 | tail -3
 done
 node dev/record/build-site.mjs
 ```
 
-### Open: the last three clips
+### Curation pass (2026-10-05): 18 clips → 14, all green
 
-These fail for a reason worth reading before touching them: **the assertion does
-not match the claim, or the fixture does not support the claim.** The pipeline is
-recording them faithfully and the verdict is correctly red. Loosening an
-assertion until it passes would be worse than leaving it red, because the page
-publishes these numbers as verification.
+The three red clips are resolved and four were removed on purpose. Both halves of
+that are worth reading before adding a clip, because the failures were not
+pipeline faults — the page was publishing **green verdicts over clips that never
+did the thing they claimed.**
 
-| clip | recorded | what is wrong |
+**Merged away** (each was a duplicate of a clip that already carried the claim):
+
+| removed | folded into | why |
 | --- | --- | --- |
-| `blind-loop` | yes | Fixture `clip_5b.nsf` is a ~1 s test tone that **ends**, so position restarts in-buffer — the one-shot case, the opposite of "the driver loops internally". Needs a track that never reports the track ended. `no-band` and `indefinite` already pass. |
-| `gme-looping-driver` | yes | `still-rendering` asserts `s.positionMs > s.durationMs`, but the blind-loop UI **parks the head at** the duration, so strict `>` can never hold. The honest assertion is "position keeps advancing and never resets". |
-| `sid-tail-restart` | yes | `past-listed-length` asserts `s.positionMs > 30000` but the take is 6 s, so position reaches ~6 000 ms. Either lengthen the take or assert the actual claim (free-running past the HVSC length with the tail detector armed). |
+| `subtune-is-a-song` | `songfolder` | same navigation, said less; its "no footer widget / no Tune N of M" claim is now a `watch` bullet and part of the `before` line |
+| `labels` | `songfolder` | real labels are a parser detail, not a user-visible change worth 5 s of page |
+| `share-link` | `songfolder` | not new — the format is unchanged, `/?play=…&subtune=N` either way — so it is a note, not a video |
+| `show-loop-area` | `loop-band` | the band clip already shows the slider; the toggle belongs there with the band in view |
 
-The catalog constraint behind `blind-loop`: every `nes-audio-tests` file is a
-sub-second test tone, and the longest plain NSF in the catalog is ~1.1 s declared.
-So "renders past its listed length" needs either a longer fixture added to
-`catalog/`, or the clip reframed around what a short track can honestly show
-(parked head + `Looping` label + no band).
+**Fixed, after measuring rather than reading:**
+
+| clip | was | now |
+| --- | --- | --- |
+| `blind-loop` | `clip_5b.nsf`, a ~1.3 s test tone that *ends*, so position sawtoothed and the parked head never appeared | `nsfe/Akumajou Densetsu (VRC6).nsfe` sub-tune 3 — GME reports `play_length` 101000 ms, so a seek to `play_length − 1000` puts the parked head and the `Looping` label on screen. Audio verified at full level after the seek (RMS 0.099 vs 0.093), so it is the music and not a silent tail |
+| `gme-looping-driver` | same tone; `no-restart` compared only first vs last sample, so it **passed on a sawtooth** | same fixture; monotonic no-reset over the whole trace, which can fail on the case it was written for |
+| `sid-tail-restart` | `positionMs > 30000` on a 5 s take — and the real listed length is 350 000 ms, so the number meant nothing | `sid/Bionic_Commando.sid` sub-tune 2, played from 0, 13 s take: HVSC genuinely lists it at `0:03`, so the trip gate is 0 and the restart lands at ~10 s. Asserts the detector is armed, the position free-ran past the length, a restart happened in place, and the song ref never changed |
 
 Registry bugs found and fixed by the batch run — `until` deadlocks, missing
 preloads, invented fixture names, a song-folder row that navigates instead of
-playing, and the absent `navigate` step — are written up in FINDINGS.md.
+playing, and the absent `navigate` step — are written up in FINDINGS.md, as is the
+class of failure that produced three green-but-wrong clips: **a selector that
+matches nothing cannot fail an assertion.**
 
 ## 1. Scope
 
@@ -124,7 +129,7 @@ preview tab cannot reach `localhost:8080`).
 
 | piece | what it is | measured |
 | ----- | ---------- | -------- |
-| video | **Playwright** `recordVideo`, viewport 720x720 at dsf 2, size unset | vp8/webm, 720x720, constant 25 fps, DPR-correct (hard glyph edges). Written straight to disk: no transfer cap, and the whole take runs in one node process so no tool-call latency. `size` must stay unset — setting it pads the frame. |
+| video | **Playwright** `recordVideo`, viewport 900x720 at dsf 2, `size` set to exactly 900x720 | vp8/webm, 900x720, constant 25 fps, DPR-correct (hard glyph edges). Written straight to disk: no transfer cap, and the whole take runs in one node process so no tool-call latency. `size` must equal the viewport: unset only stays 1:1 while the frame fits inside 800x800 (past that the viewport is resampled), and the dsf product pads the frame — see FINDINGS.md. |
 | (rejected) | the host tab recorder, `preview_recording_start` | h264 mp4 but **captured at 1x CSS px and upscaled 1.5x** (visibly soft vs a native render), variable frame rate declaring `1/1`, no quality option, and takes over 50 MiB are lost in transfer. Fine for previewing, not for publishing. |
 | audio | in-page `MediaRecorder` fed from the app's own bus: `ChipPlayer.gainNode.connect(audioCtx.createMediaStreamDestination())` | 48 KB opus for 3 s, works with no sound device present (there is none: no `/proc/asound`, no pulse) |
 | driver | `shoot.mjs` in node, against `window.__cpRec` | the scenario registry is data; the page runs it on its own timers and returns a verdict. Single clicks reach every row we need: song folders and sub-tune rows are `<a>` elements |
@@ -227,8 +232,9 @@ deterministic and needs no agent in the loop, which is why it is the only step
 that must not be improvised. It:
 
 1. starts `upload-server.mjs` (the page cannot write to disk),
-2. launches Playwright: viewport 720x720 at `deviceScaleFactor` 2,
-   **`recordVideo.size` unset** (see FINDINGS.md — setting it pads the frame),
+2. launches Playwright: viewport 900x720 at `deviceScaleFactor` 2,
+   **`recordVideo.size` set to exactly 900x720** (see FINDINGS.md — unset only
+   stays 1:1 below the 800px frame cap, and the dsf product pads the frame),
    `--autoplay-policy=no-user-gesture-required`,
 3. navigates to the scenario's `browse` (+ `?r=N` to defeat the bundle cache) and
    waits for `.BrowseList-row` and `window.__cpRec`,
@@ -319,19 +325,21 @@ Format columns: fixture (pinned), script, and the verdict that must hold.
 
 ### 7a. Main section — one clip per feature
 
+Six clips, after the curation pass above merged four away. The `songfolder` row
+carries the labels, the absent footer widget and the share-link format as prose,
+because those are notes about the same navigation rather than separate changes.
+
 | id | feature | fixture | script | verdict must show |
 | -- | ------- | ------- | ------ | ----------------- |
-| `songfolder` | A multi-song file browses as a folder (`<TUNES>` + count) | `nsfe/Akumajou Densetsu (VRC6).nsfe` (28 tunes) | browse `/browse/nsfe`, click the folder, land inside | folder row has `<TUNES>` and count 28; URL is the file path |
-| `subtune-is-a-song` | A sub-tune is a normal song: play Tune 2, footer shows the whole file path, no `Tune N of M` | same | click `?play=…&subtune=1` | `currSongRef.subtune === 1`; footer shows the file path; no footer sub-tune controls exist |
-| `favorite-subtune` | Favourite one sub-tune; Favorites groups it under a song-folder heading | same | heart Tune 2, open Favorites | entry appears under the song-folder heading, labelled `Epitaph`, not under a plain directory |
-| `share-link` | `?play=<id>&subtune=N` lands inside the folder on that tune | same | navigate to the link cold | lands on the folder URL with `subtune=1` playing |
-| `top-charts-subtunes` | Sub-tunes rank separately, labelled `file (Tune N)` | `nsfe/…` | open Top | rows carry `subtune` + a label |
-| `labels` | Per-track labels where the format has them, `Tune N` where it does not | `nsfe/Gimmick!.nsfe` (73/73 labelled) vs `gbs/DMG-KYJ.gbs` (15, unlabelled) | open both song folders | label present vs `Tune N` |
-| `loop-band` | The shaded band on the slider, head folding inside it | `arcade-capcom/Ghosts'N_Goblins_(Arcade)/16 Hurry Up!.vgz` | play, `setRepeat(2)` | `band = {start,end}` ms from `getLoopBandMs()`; `displayMs` inside band across ≥2 loops |
+| `songfolder` | A multi-song file browses as a folder (`<TUNES>` + count), and its rows are ordinary songs: real labels, no `Tune N of M` widget, share links unchanged | `nsfe/Akumajou Densetsu (VRC6).nsfe` (28 tunes) + `nsfe/Mega Man 2.nsfe` (22) | browse `/browse/nsfe`, into the folder, play `Mad Forest`, `..` back, into `Mega Man 2`, play `Stage Select` | `<TUNES>` + count; ends inside the *second* folder on sub-tune 3 of 22; both sub-tunes are separate songs |
+| `favorite-subtune` | Favourite one sub-tune; Favorites groups it under a song-folder heading | same | play `Epitaph`, click the **footer** heart, open Favorites | the heart's `.isFavorite` flips; the Favorites page holds exactly one row, labelled `Epitaph`, under the folder heading |
+| `loop-band` | The shaded band on the slider, head folding inside it, and Settings → "Show Loop Area" toggling it without touching playback | `arcade-capcom/Ghosts'N_Goblins_(Arcade)/16 Hurry Up!.vgz` | Repeat One, untick the band, tick it again | `band = {start,end}` ms from `getLoopBandMs()`; `displayMs` inside the band across ≥2 loops; band absent from the DOM for a stretch and back at the end; the checkbox was genuinely clickable (topmost element at its own centre) |
 | `repeat-toggle-smooth` | Enabling Repeat One mid-song: head continuous, no jump | same | play 6 s, toggle One | `displayMs` monotonic across the toggle (±1 tick) |
 | `repeat-leave-fade` | Leaving a deep repeat plays the current pass + full fade, then ends | same | loop deep, toggle off | position keeps advancing; song ends after the fade; `durationExtended` set |
-| `blind-loop` | No known region: head parks at the end, label reads `↻ Looping` | a looping NSF from `catalog/nes-audio-tests/` | play, Repeat One, run past `durationMs` | `isPlayingIndefinitely()` true, band null, `positionMs >= durationMs` |
-| `show-loop-area` | Settings → "Show Loop Area" hides the band; playback unchanged | same as `loop-band` | toggle the checkbox | band gone from the DOM, `displayMs` unchanged across the toggle |
+| `blind-loop` | No known region: head parks at the end, label reads `↻ Looping` | `nsfe/Akumajou Densetsu (VRC6).nsfe` sub-tune 3 (`play_length` 101000 ms) | Repeat One, seek to `play_length − 1000` | `isPlayingIndefinitely()` true, band null, `positionMs >= durationMs`, `Looping` in the DOM |
+
+Removed, with their claims folded in: `subtune-is-a-song`, `labels`,
+`share-link`, `show-loop-area`. `top-charts-subtunes` was planned and never cut.
 
 ### 7b. In-depth section — per-format / per-variant
 
@@ -371,6 +379,9 @@ ranges), so it cannot drift from the code it describes.
 
 Single `index.html`, two-column clip rows (video left at the chosen aspect,
 prose right), no framework, no external requests — uploadable as a directory.
+Clips are served with `preload="none"` and a generated poster frame, with explicit
+`width`/`height` so the box is reserved before play; see FINDINGS.md for why the
+obvious `preload="metadata"` pulled all 35 MB on load.
 
 ```
 Header          what changed, in one paragraph, link to the PR
@@ -391,12 +402,12 @@ before any content work.
 | # | milestone | done when | state |
 | - | --------- | --------- | ----- |
 | M0 | Fixture manifest | every path in §7 exists; committed as data; no catalog rebuild | done |
-| M1 | Recorder design proven | one clip recorded end to end **with audio**, muxed and trimmed to the mark. Also: pick the framing. | **done** — `loop-band`, verdict green. Framing settled by measurement: Playwright, 720 CSS px at dsf 2, `recordVideo.size` unset → 720×720 at a constant 25 fps, DPR-correct. The host tab recorder was rejected (1× capture upscaled 1.5×, VFR, 50 MiB transfer loss). |
+| M1 | Recorder design proven | one clip recorded end to end **with audio**, muxed and trimmed to the mark. Also: pick the framing. | **done** — `loop-band`, verdict green. Framing settled by measurement: Playwright, **900×720 CSS px at dsf 2**, `recordVideo.size` set to exactly the viewport → 900×720 at a constant 25 fps, DPR-correct. Widened from 720×720 on 2026-10-05 because the browse list truncated item names at 239 px (419 px at 900). The host tab recorder was rejected (1× capture upscaled 1.5×, VFR, 50 MiB transfer loss). |
 | M2 | Shim additions | `__cpRec` staged by `dev/apply.sh`; `pinDefaults()` provably neutralises the stale `tempo: 2`; generic loop fields in `snap()` | **done** — `dev/shims/recorder.js`; pins both the localStorage and server copies; see FINDINGS.md for the three bugs it took |
-| M3 | Registry + validator | every clip in `scenarios.mjs`; `scenarios.check.mjs` fails on a missing fixture, duplicate id, dead harness, assertion-free scenario or vacuous quantifier; wired into `dev/run-tests.sh` | **done** — 18 clips, validator green |
-| M4 | Main section | all 10 clips of §7a recorded, muxed, verified, with proof JSON | **9/10 recorded, 8 passing** — `blind-loop` records but fails on its own claim (see "Open: the last three clips") |
-| M5 | In-depth section | all 8 clips of §7b, same | **8/8 recorded, 6 passing** — `sid-tail-restart` and `gme-looping-driver` fail on their claims |
-| M6 | Page | `build-site.mjs` emits `site/`; prose per clip; relative URLs only | **done** — `dev/record/build-site.mjs` + `site.mjs` + `site.css`; 7 snippets with build-time line ranges; 0 external requests; `./dev/record/serve.sh` to look at it |
+| M3 | Registry + validator | every clip in `scenarios.mjs`; `scenarios.check.mjs` fails on a missing fixture, duplicate id, dead harness, assertion-free scenario or vacuous quantifier; wired into `dev/run-tests.sh` | **done** — 14 clips, validator green |
+| M4 | Main section | one clip per user-visible change, recorded, muxed, verified | **done, 6 clips** — `songfolder`, `favorite-subtune`, `loop-band`, `repeat-toggle-smooth`, `repeat-leave-fade`, `blind-loop`. Curated down from 10: `subtune-is-a-song`, `labels`, `share-link` and `show-loop-area` were merged into the clips they duplicated (see "Curation pass") |
+| M5 | In-depth section | one clip per engine's Repeat One mechanism, same | **done, 8 clips** — `vgm-native`, `gme-looping-driver`, `mdx-native`, `midi-cc102`, `xmp-learned-band`, `sid-tail-restart`, `n64-indefinite`, `v2m-tier3` |
+| M6 | Page | `build-site.mjs` emits `site/`; prose per clip; relative URLs only | **done** — `dev/record/build-site.mjs` + `site.mjs` + `site.css`; 7 snippets with build-time line ranges; 0 external requests; `preload="none"` + generated posters; `./dev/record/serve.sh` (now `serve.mjs`, express — a range-less server, or a preload that pulls 35 MB before you click, makes clips unplayable; see FINDINGS.md) |
 | M7 | PR hand-off | decide with the maintainer whether anything of the page belongs in the PR (probably not) | not started |
 
 ## 11. Risks

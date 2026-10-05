@@ -46,21 +46,27 @@ section { padding: 2rem 0; border-top: 1px solid var(--border); }
 section h2 { font-size: 1.35rem; margin: 0 0 .5rem; }
 .section-note { color: var(--dim); max-width: 46rem; margin-top: 0; }
 
-/* Clip rows: video in a portrait frame, prose beside it.
-   The column is 480px rather than something smaller on purpose: the recorder
-   captures 1350x1350 and the clip is at source quality (SSIM 0.9956 against the
-   capture), so the only thing between the viewer and a sharp image is how much
-   the browser has to shrink it. At 340px that was a 4x downscale and read as
-   "low quality" even though the file was fine. */
+/* Clip rows: video beside the prose. The column is 600px rather than something
+   smaller on purpose: the clip is a straight x264 encode of the capture, so the
+   only thing between the viewer and a sharp image is how much the browser has to
+   shrink it. At 340px that was a 4x downscale and read as "low quality" even
+   though the file was fine. 600px keeps a 900px-wide capture at 1.5:1, so the
+   browse list is still legible without a click to go fullscreen. */
 .clip {
   display: grid;
-  grid-template-columns: minmax(280px, 480px) 1fr;
+  grid-template-columns: minmax(280px, 600px) 1fr;
   gap: 1.75rem;
   padding: 1.5rem 0;
   border-bottom: 1px solid var(--border);
 }
 .clip-media video {
-  width: 100%; aspect-ratio: 1 / 1;   /* the recorder captures 1:1 at 900x900 */
+  /* Intrinsic size, not a declared aspect-ratio: clips do not all share one. Most
+     capture 900x720, but a scenario may ask for a taller frame (loop-band does,
+     because its checkbox has to clear the footer -- see shoot.mjs), so a fixed
+     ratio here would letterbox or crop one of them. `preload="metadata"` means the
+     browser has the moov atom -- and therefore the dimensions -- before paint, so
+     nothing reflows as the clips load. */
+  width: 100%; height: auto;
   background: #000; border: 1px solid var(--border); border-radius: 6px;
   display: block;
 }
@@ -97,5 +103,5 @@ footer { padding-top: 2rem; color: var(--dim); font-size: .9rem; }
 
 @media (max-width: 720px) {
   .clip { grid-template-columns: 1fr; }
-  .clip-media video { max-width: 480px; }
+  .clip-media video { max-width: 600px; }
 }

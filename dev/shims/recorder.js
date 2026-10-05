@@ -78,12 +78,27 @@ const snap = () => {
     subtune: typeof p.getSubtune === 'function' ? p.getSubtune() : null,
     subtunes: typeof p.getNumSubtunes === 'function' ? p.getNumSubtunes() : null,
   };
+  // The length the app is working from is engine-reported rather than catalogued
+  // (GME parses play_length at load; SID fetches HVSC lengths over HTTP and falls
+  // back to a default), so it cannot be read from the DB -- a clip that asserts
+  // "past the reported length" has to see the number the player used. tripAtMs is
+  // the tail detector's trip gate, which is what the SID clip's claim is about.
+  if (typeof p.getEndDetectTripAtMs === 'function') s.tripAtMs = p.getEndDetectTripAtMs();
+  if (p.params && 'detectSongEnd' in p.params) s.detectSongEnd = !!p.params.detectSongEnd;
   // libvgm's own loop counter: the one engine-specific number worth showing.
   if (p.vgmCtx && p.core && typeof p.core._lvgm_get_cur_loop === 'function') {
     s.curLoop = p.core._lvgm_get_cur_loop(p.vgmCtx);
     s.fadeStartMs = p.core._lvgm_get_fade_start_ms(p.vgmCtx);
   }
   if (typeof p.maxLoopCount !== 'undefined') s.maxLoopCount = p.maxLoopCount;
+  // Is the *current* song a favourite? Favourites live in UserProvider's state, not
+  // on the player, so the only observable is the button's own class -- which is
+  // exactly what the eye checks, and it only flips once the POST has landed and the
+  // context has re-fetched. A clip that claims to favourite something needs this,
+  // because "the row is on the Favorites page" is also true of the previous take.
+  // Scoped to the footer: the browse list has a heart per row, so an unscoped query
+  // answers for row 1 rather than for what is playing.
+  s.fav = !!document.querySelector('.AppFooter button.FavoriteButton.isFavorite');
   return s;
 };
 
@@ -108,7 +123,13 @@ const startTrace = (intervalMs = 100) => {
       looping: s.looping,
       loop: s.curLoop,
       ind: s.indefinite,
-      sub: s.subtune,
+sub: s.subtune,
+      fav: s.fav,
+      // Is the band element in the DOM right now? The engine still reports a band
+      // while it is hidden (the setting is visual only), so a clip that toggles the
+      // band off and on cannot be checked from `s.band` -- it needs the DOM, on every
+      // tick, to show the band was actually absent for a stretch.
+      hasBand: !!document.querySelector('.Slider-loop'),
     });
   };
   trace.mark('start');
@@ -331,6 +352,17 @@ const dev = {
    *                                             so they are matched by label
    */
   async clickRow({ dir, name, subtune = null }) {
+    // ".." is not a listing row: App.js unshifts it client-side (and omits it at
+    // the top level), so there is nothing to look up over the browse API. Click the
+    // rendered anchor by exact text instead. Kept ahead of the fetch so a back
+    // navigation costs one round trip less, not one more.
+    if (name === '..') {
+      const cell = [...document.querySelectorAll('.BrowseList-row .BrowseList-colName')]
+        .find((c) => c.querySelector('a')?.textContent.trim() === '..');
+      if (!cell) throw new Error('no ".." row rendered (top level has none)');
+      cell.querySelector('a').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+      return { name: '..', type: 'directory', url: null, subtune: null };
+    }
     const rows = await (await fetch(`${API_BASE}/browse?path=${encodeURIComponent(dir)}`)).json();
     const wantPath = `${dir.replace(/\/$/, '')}/${name}`;
     let row = null;
@@ -414,6 +446,51 @@ const dev = {
     a.setState({ tempo: clean.tempo, repeat: clean.repeat });
     if (a.sequencer.setRepeat) a.sequencer.setRepeat(clean.repeat);
     return clean;
+  },
+
+  /**
+   * Empty the signed-in user's favourites, so a take that demonstrates favouriting
+   * starts from an empty list and the row the viewer sees appear is unambiguously
+   * the one the clip just added.
+   *
+   * Needed because the Favorites page is *virtualized*: measured 33 rows in the DOM
+   * against a 33-row list that the nsfe group sat outside of. A clip that clicks the
+   * heart and then shows the page cannot claim "your favourite is listed" if the
+   * group is scrolled out of frame -- and worse, "Epitaph" and the folder name are
+   * on screen anyway in the *footer*, which still shows the playing song, so text
+   * assertions pass while the claim is not visible. Accumulated dev-user favourites
+   * also made the page content differ from take to take.
+   *
+   * Dev-only and reversible in the sense that matters: it only empties the dev user's
+   * list, and the next take re-adds what it needs. The server has no bulk clear, so
+   * this removes them one at a time through the same endpoint the UI uses.
+   */
+  async clearFavorites() {
+    const a = app();
+    const user = a.props && a.props.userContext && a.props.userContext.user;
+    if (!user || typeof user.getIdToken !== 'function') return { cleared: 0, skipped: 'no user' };
+    const token = await user.getIdToken();
+    const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
+    const res = await fetch(`${API_BASE}/user/favorites`, { headers });
+    if (!res.ok) throw new Error(`clearFavorites: GET /user/favorites -> ${res.status}`);
+    const { favorites } = await res.json();
+    let cleared = 0;
+    // Toggle through the app rather than POSTing /favorites/remove directly, and that
+    // is the fix for the second silent no-op this function had. `faves` is seeded from
+    // localStorage, so clearing only the *server* left the client still believing the
+    // old favourites existed -- the clip's heart click then read "already favourited"
+    // and REMOVED it, and the take ended with an empty list. handleToggleFavorite
+    // re-reads the server and rewrites localStorage on every call, so going through it
+    // keeps all three stores (React state, localStorage, server) in step.
+    //
+    // Sequential on purpose: each toggle re-reads the whole list, so overlapping them
+    // would race the state this is resetting.
+    for (const f of favorites || []) {
+      // eslint-disable-next-line no-await-in-loop
+      await a.props.userContext.handleToggleFavorite(f.path, f.subtune ?? 0, f.songId);
+      cleared++;
+    }
+    return { cleared, had: (favorites || []).length };
   },
 
   /** Resolve once a player exists and the engine has actually started moving. */

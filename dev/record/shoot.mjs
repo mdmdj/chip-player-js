@@ -43,17 +43,36 @@ const WORK = path.join(ROOT, 'dev/record/.work');
 const SITE = path.join(ROOT, 'site');
 const BASE = process.env.RECORD_BASE || 'http://mms-1:8080';
 
-const VIEWPORT = { width: 720, height: 720 };
+// 900x720 rather than square: the browse list truncates item names at 720 CSS px
+// (measured with dev/record/vidgeom.mjs: the list column grows 239px -> 419px
+// between 720 and 900, which is the difference between "Castlevania III - Dracula's…"
+// and the full name). Width was the short axis. Both numbers are even, so yuv420p
+// has no chroma-sampling problem.
+const VIEWPORT = { width: 900, height: 720 };
 const SCALE = 2;
-// Playwright's recordVideo.size is deliberately NOT set. Unset, it defaults to
-// the viewport size (capped at 800), so a 720 px viewport yields a 720x720 frame
-// captured 1:1 -- no upscale, no padding. Setting it to viewport x deviceScaleFactor
-// (1440) *pads* the screencast frame instead: the app ends up occupying ~57% of the
-// picture, the rest is page backdrop, and a full-viewport white flash stops being
-// detectable because it only lights a third of the frame -- which is exactly how
-// find-flash.sh first reported "no flash". 720 CSS px also sits above the app's
-// 500 px breakpoints (which hide the mtime column, the footer art and the
-// shuffle/repeat buttons), so the whole UI stays in frame.
+// recordVideo.size IS set, to exactly the viewport, and that is load-bearing.
+//
+// Measured (dev/record/vidgeom.mjs for the geometry, dev/record/vidcap.mjs for the
+// pixels) rather than read off the docs, which only say the default is "the viewport
+// scaled down to fit in 800x800" and not what an explicit larger value does:
+//
+//   size UNSET     720x720 -> 720x720   1:1, no scale      <- fitted inside the cap
+//   size UNSET     800x720 -> 800x720   1:1, no scale      <- exactly the cap
+//   size UNSET     900x720 -> 800x640   0.889x RESAMPLED  <- over the cap
+//   size EXPLICIT  900x720 -> 900x720   1:1, fills frame  <- what we want
+//
+// So the default scales the *viewport* down once the frame would exceed 800 on either
+// axis, resampling an already-supersampled page and softening the glyph edges dsf=2
+// exists to keep. Stating the size bypasses that. The failure this comment used to
+// describe was a different mistake: setting size to viewport x deviceScaleFactor
+// (1440) pads the frame and leaves the app at ~57% of the picture. So the rule is
+// "size == viewport exactly", never the dsf product. vidcap.mjs asserts the app fills
+// the frame -- paint a known colour, read the corners back out of the encode -- since
+// the padded case still reports the requested dimensions and only pixels give it away.
+//
+// 900 CSS px is well above the app's 500 px breakpoints (which hide the mtime column,
+// the footer art and the shuffle/repeat buttons), so the whole UI stays in frame, and
+// the framing assertion below fails loudly if that ever stops being true.
 
 const id = process.argv[2];
 const keep = process.argv.includes('--keep');
@@ -96,6 +115,16 @@ async function ensureReceiver() {
 }
 
 const span = Math.max(...scenario.steps.map((s) => s.atMs || 0), 0);
+// A scenario may ask for a taller frame (see loop-band). The reason is measured, not
+// aesthetic: with the Settings panel open, VGM's per-chip toggles push "Show Loop
+// Area" down to y=532-551 while the footer starts at y=509, so at 720 the control
+// sits *behind* the footer -- elementFromPoint at its centre returns a footer
+// transport button. A synthetic click still fires the React handler, which is how a
+// DOM assertion can be green over a click no viewer could make. Nothing in the panel
+// scrolls, so height is the only lever: 780 gives 18px of clearance, 840 gives 78px,
+// chosen as margin for footers that grow with song metadata. Declared here, after
+// `scenario`, because it reads it.
+const viewport = scenario.viewport || VIEWPORT;
 
 async function main() {
   fs.mkdirSync(WORK, { recursive: true });
@@ -104,9 +133,10 @@ async function main() {
   const shotDir = fs.mkdtempSync(path.join(WORK, 'shot-'));
   const browser = await chromium.launch({ headless: !headed, args: ['--autoplay-policy=no-user-gesture-required'] });
   const context = await browser.newContext({
-    viewport: VIEWPORT,
+    viewport,
     deviceScaleFactor: SCALE,
-    recordVideo: { dir: shotDir },
+    // Exactly the viewport -- see the note above. Unset would resample to 800x640.
+    recordVideo: { dir: shotDir, size: { width: viewport.width, height: viewport.height } },
   });
   const page = await context.newPage();
   page.on('pageerror', (e) => console.error('[pageerror]', String(e).slice(0, 160)));
@@ -117,6 +147,13 @@ async function main() {
   await page.waitForSelector('.BrowseList-row', { timeout: 30000 });
   await page.waitForFunction(() => !!window.__cpRec, null, { timeout: 30000 });
   await page.evaluate((s) => window.__cpRec.pinDefaults(s), scenario.settings || {});
+// Opt-in, and off the settings object so it never reaches the app's settings POST.
+// A scenario that demonstrates favouriting needs an empty list to start from -- see
+// clearFavorites in the shim for why (virtualized list, and the footer satisfies
+// text assertions regardless).
+if (scenario.clearFavorites) {
+  console.log('cleared favorites: ' + JSON.stringify(await page.evaluate(() => window.__cpRec.clearFavorites())));
+}
   // Wait for the listing to settle: clicking during the first paint races the
   // fetch and the row is not in the DOM yet.
   await page.waitForTimeout(800);
@@ -164,8 +201,8 @@ async function main() {
   const dims = (await sh('bash', ['-c',
     `ffprobe -v error -select_streams v -show_entries stream=width,height -of csv=p=0 ${JSON.stringify(videoPath)}`])).out.trim();
   const got = dims.split(',').map((n) => Number(n));
-  if (got[0] !== VIEWPORT.width || got[1] !== VIEWPORT.height) {
-    throw new Error(`capture is ${dims}, expected ${VIEWPORT.width}x${VIEWPORT.height} -- recordVideo scaled or padded the frame (see the note above)`);
+  if (got[0] !== viewport.width || got[1] !== viewport.height) {
+    throw new Error(`capture is ${dims}, expected ${viewport.width}x${viewport.height} -- recordVideo scaled or padded the frame (see the note above)`);
   }
 
   const flash = (await sh('bash', ['dev/record/find-flash.sh', videoPath])).out.trim().split('\n')[0];

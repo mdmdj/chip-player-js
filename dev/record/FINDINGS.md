@@ -17,8 +17,11 @@ re-litigated.
   Chromium render at the same DPR the glyph edges are visibly smeared — it
   matches a *1x render blown up 1.5x*, not a DPR-aware render. `preview_recording_start`
   exposes no quality, scale or codec option, so it cannot be fixed from its side.
-- **Playwright is DPR-correct.** `deviceScaleFactor` with `recordVideo.size` unset
-  gives a 1:1 frame with hard glyph edges.
+- **Playwright is DPR-correct.** `deviceScaleFactor` gives hard glyph edges — but
+  by supersampling, not by a bigger frame: output is CSS resolution (720 CSS px at
+  dsf 2 → 720x720, not 1440x1440). And `recordVideo.size` must be set to exactly
+  the viewport, because unset only stays 1:1 while the frame fits inside 800x800.
+  See the size section below.
 - **The host recorder loses takes over 50 MiB** — the transfer fails and the file
   stays on the desktop (measured: a 56 s take vanished).
 - **Tool-call latency made the window impossible to bound.** With the recorder
@@ -57,30 +60,142 @@ each one cheap and each one about the *output*, not the state:
 
 Read it as: assert on the artefact, not just on the state you manipulated.
 
-## Do NOT set recordVideo.size: it pads the frame
+## recordVideo.size: never the dsf product, and unset is not "1:1" either
 
-The obvious-looking `size: viewport * deviceScaleFactor` is wrong. Playwright's
-screencast frame is then *padded* to that size: the app occupies ~57% of the
-picture, the rest is page backdrop, and a full-viewport colour mark stops being
-detectable because it only lights a third of the frame — `find-flash.sh` reported
-"no flash" for takes that had one. Unset, the default is the viewport size (capped
-at 800), so a 720 px viewport yields a 720x720 frame captured 1:1.
+Two separate mistakes live in this one setting, and the first round of notes
+("Do NOT set recordVideo.size: it pads the frame") only described the first. Both
+were found by measurement (`dev/record/vidgeom.mjs` for the geometry,
+`vidcap.mjs` for the pixels), because the docs settle neither: Playwright says
+only that an unset size is "the viewport scaled down to fit in 800x800", which
+does not say what an explicit larger value does.
 
-Measured matrix (all with the app loaded, flash present, no backdrop):
+**Mistake 1 — `size: viewport * deviceScaleFactor`.** Playwright's screencast
+frame is then *padded* to that size: the app occupies ~57% of the picture, the
+rest is page backdrop, and a full-viewport colour mark stops being detectable
+because it only lights a third of the frame — `find-flash.sh` reported "no flash"
+for takes that had one.
 
-| viewport | dsf | recordVideo.size | output | flash found | app fills frame |
+**Mistake 2 — assuming unset means 1:1.** It does, *right up to 800*. Past that
+the default scales the **viewport** down to fit, which resamples an
+already-supersampled page and softens the glyph edges `deviceScaleFactor` exists to
+protect. Widening the viewport alone would have silently resampled every clip:
+
+| viewport | dsf | recordVideo.size | output | scale | app fills frame |
 | --- | --- | --- | --- | --- | --- |
-| 900 | 1.5 | default | 800x800 | yes | yes |
-| 900 | 1.5 | 1350 | 1350x1350 | **no** | **no (padded)** |
-| 720 | 2 | default | 720x720 | yes | yes |
-| 640 | 2 | default | 640x640 | yes | yes |
-| 1280 | 1 | default | 800x800 | yes | yes |
-| 900 | 1.5 | 900 | 900x900 | yes | yes |
+| 720 | 2 | unset | 720x720 | 1.000 | yes |
+| 800 | 2 | unset | 800x720 | 1.000 | yes |
+| 900 | 2 | unset | 800x640 | **0.889** | yes (resampled) |
+| 900 | 2 | **900x720** | 900x720 | 1.000 | yes |
+| 900 | 2 | 1350 | 1350x1350 | — | **no (padded)** |
+| 900 | 1.5 | unset | 800x800 | 0.889 | yes (resampled) |
+| 640 | 2 | unset | 640x640 | 1.000 | yes |
 
-Chosen: **720 CSS px at dsf 2, size unset**. 720 px sits above the app's 500 px
-breakpoints (which hide the mtime column, the footer art and the shuffle/repeat
-buttons), so the whole UI stays in frame. `shoot.mjs` asserts the capture is
-exactly the viewport size, so the padding failure cannot come back silently.
+So the rule is **size == viewport exactly**: that bypasses the 800 cap without
+padding. `vidcap.mjs` verifies it by painting the page a known colour and reading
+the corners back out of the *encode*, because the padded case still reports the
+requested dimensions — only pixels give it away. An earlier version of that probe
+used an ffmpeg corner-crop filter that silently produced no bytes when it failed,
+and the empty output read as "padded"; the failure was in the probe, not the frame.
+
+**Also measured: `deviceScaleFactor` buys antialiasing, not resolution.** Frame
+sizes are CSS resolution, not device resolution — 720 CSS px at dsf 2 yields a
+720x720 frame, not 1440x1440. The crispness comes from supersampling, so dsf must
+be held *constant* when comparing framings, or the comparison is not measuring the
+thing it claims to.
+
+Chosen: **900 CSS px wide at dsf 2, size set to 900x720.** Width was the short
+axis — at 720 px the browse list column measured 239 px and truncated names to
+"Castlevania III - Dracula's…", at 900 px it is 419 px. Both dimensions are even,
+so yuv420p has no chroma-sampling problem, and 5:4 needs no padding. 900 px is
+well above the app's 500 px breakpoints (which hide the mtime column, the footer
+art and the shuffle/repeat buttons), so the whole UI stays in frame, and
+`shoot.mjs` asserts the capture is exactly the viewport size so either failure
+cannot come back silently.
+
+## A selector that matches nothing cannot fail an assertion
+
+Three clips shipped **green** while not doing the thing they claimed, all in the
+same clip. Read this before writing a step that clicks something.
+
+| the selector | what it actually did |
+| --- | --- |
+| `button[title*="avorite"]` | matched **nothing** — `FavoriteButton` renders no `title` attribute |
+| `button.FavoriteButton` | matched the **first** one in the DOM: the browse list's per-row heart, not the footer's. The clip favourited "Prelude" while claiming "Epitaph" |
+| `a[href="/favorites"]` | matched **nothing** — the nav link is `to={{pathname, ...search}}` and `search` carries the driver's `?r=<cache-buster>`, so the href is `/favorites?r=…`. The take never left `/browse` |
+
+All three verdicts passed, because the assertions were `document.body.textContent`
+searches for "Epitaph", "Akumajou Densetsu" and a `subtune=1` href — **all true of
+the browse page too**. Two compounding reasons:
+
+1. A selector that matches nothing is not an error, it is a no-op. Nothing tells
+   you, so the clip looks fine until you watch it.
+2. `document.body.textContent` is not a scoped query. The **footer keeps showing
+   the playing song** on every route, so any text assertion about the current song
+   passes anywhere in the app.
+
+What actually caught them: asserting the **page**, not the content —
+`/favorites/.test(location.pathname)` and `.BrowseList`-scoped queries — plus
+checking the app's own state after the click (`.AppFooter button.FavoriteButton.isFavorite`).
+Two related traps in the same family:
+
+- **A synthetic click bypasses occlusion.** `Show Loop Area` was clicked while
+  *behind* the footer (`elementFromPoint` at its centre returned a transport
+  button), and the band assertions were green. Nothing in the panel scrolls, so
+  the fix was a taller capture (900x840) plus an assertion that the checkbox is
+  the topmost element at its own centre. If a clip claims "the viewer sees this
+  control being clicked", assert the control is *reachable*.
+- **A sampling window that ends at the event hides the event.** The SID restart
+  looked like it left the engine silent because the first watch window ended
+  exactly on the restart; instrumenting the instance calls showed
+  `playSubtune` firing every ~10.4 s with position → 0 and audio returning. Windows
+  must outlast what they demonstrate.
+
+The general form is the one already in this file: **assert on the artefact, not on
+the state you manipulated.**
+
+## A page served without Range support looks like a broken encode
+
+Symptom, and it is worth stating precisely because the obvious hypothesis is
+wrong: on the page every clip shows its **first frame** and the controls, pressing
+play does nothing, and **the same file opened in a new tab plays perfectly**. That
+reads exactly like an encoding problem, and the clips were fine.
+
+Cause: `serve.sh` used `python3 -m http.server`, which has no Range support at
+all. Every media request got a full-file `200` with no `Accept-Ranges`, so
+`video.seekable` came back **empty** — measured `0.00-0.00` against `0.00-14.04`
+for a correct server. With no seekable range the element cannot stream
+progressively and waits on bytes it will never be allowed to ask for. A new tab
+works because it is a plain progressive download with no `seekable` requirement,
+and by then the file is local.
+
+Measured, same page, two servers:
+
+| | `python3 -m http.server` | `express.static` |
+| --- | --- | --- |
+| response to `Range: bytes=100-200` | `200`, range ignored | `206 Partial Content` |
+| `video.seekable` | **`0.00-0.00`** | `0.00-14.04` |
+| `currentTime` advances on play | see note | yes |
+
+**Faststart was never the problem** — it controls *where the index sits* and does
+nothing about a server that ignores `Range`. Every clip already had `moov` ahead
+of `mdat` at offset 36 when this was diagnosed. Two real checks, because "the flag
+is in the command" proves nothing: `mux.sh` passes `-movflags +faststart`, and
+every published file was verified to have `moov` before `mdat`.
+
+Fix: `serve.mjs` — `express.static`, a dependency this repo already ships
+(`server/package.json`). Node has **no** built-in static file server (`node:http`
+is a socket API; there is no `serve` in stdlib), so "use the built-in" was not an
+option, but hand-rolling the header parsing was still the wrong call when a
+dependency we already have does it correctly. `serve.sh` is now a wrapper.
+`vidcheck.mjs` reproduces this (reports readyState / networkState / error /
+buffered / seekable and whether `currentTime` actually moves).
+
+The same failure mode has a second contributor worth knowing: `preload="metadata"`
+on every clip makes the page pull ~34 MB before you press play. Over a
+range-less server every one of those is a full file.
+
+Caveat that survives the fix: this is a **local preview** bug. The uploaded page
+depends on the real host supporting ranges — worth confirming there, not assuming.
 
 ## The sync mark must be green, not white
 
@@ -109,7 +224,9 @@ follow a section marked historical.
 | --- | --- |
 | The video half is Playwright | **current** |
 | A green verdict does not mean the published file is right | **current** (read this before trusting any check) |
-| Do NOT set `recordVideo.size` | **current** (framing) |
+| `recordVideo.size`: never the dsf product, unset is not 1:1 either | **current** (framing) |
+| A selector that matches nothing cannot fail an assertion | **current** (read before writing a step that clicks) |
+| A page served without Range support looks like a broken encode | **current** (preview) |
 | The sync mark must be green | **current** (sync) |
 | Two clocks, and the audio offset | **current** |
 | Load the song *inside* the recorded window | **current** |

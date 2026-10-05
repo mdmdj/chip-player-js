@@ -219,12 +219,32 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
   skips it. Root `better-sqlite3` is needed by `scripts/build-music.js`.)
 - Server deps: `npm install` inside `server/` (builds `better-sqlite3` and
   `skia-canvas` fine).
+- **`npm install --no-save` is a trap here; install everything in ONE command.**
+  Three separate `--no-save` installs cost three breakages, all silent until
+  something else failed:
+  - Each `--no-save` install **prunes the previous one** (npm resolves the whole
+    tree against `package.json`, which lists neither), so install playwright +
+    webpack together: `npm i --no-save --no-package-lock playwright@1.63.0
+    webpack@5.106.0`.
+  - It **upgrades existing deps** as a side effect: webpack went 5.106 → 5.111,
+    which **removed `webpack/hot/log.js`** and broke the dev build with a missing
+    module. Pin webpack to `5.106.0` explicitly and restart `npm run dev` after.
+  - It **rebuilds native modules against whatever `node` is on PATH**, and the
+    host default is 26.x, so `better-sqlite3` ended up compiled for the wrong ABI
+    and every `node scripts/build-music.js` (and therefore `dev/run-tests.sh`)
+    died with `NODE_MODULE_VERSION`. Repair with
+    `PATH="$HOME/.nvm/versions/node/v24.21.0/bin:$PATH" npm rebuild better-sqlite3`
+    — note `nvm use` alone does **not** fix PATH in a non-interactive shell.
+  - Invariant: **`package.json` must stay unmodified** and the lockfile too (hence
+    `--no-package-lock`); `node_modules` is gitignored. Verify with
+    `git diff --stat package.json package-lock.json` (empty) after installing.
 - **Dev shims** live in `dev/` on `dev/overlay` only (never on the feature
   branch), tracked so the dev environment is reproducible. They stage
   **untracked, gitignored** modules rather than patching tracked files, so a
   working tree stays clean (`git status` shows only intentional overlay edits):
   - `./dev/apply.sh` — stages untracked `src/chip-core.js`,
-    `src/chip-player-devtools.js`, `server/middleware/auth.dev.js` and a
+    `src/chip-player-devtools.js`, `src/chip-player-record.js`,
+    `server/middleware/auth.dev.js` and a
     placeholder Firebase config; patches a dev-user `UserProvider` and a
     silent-SID `SIDPlayer` (reversible, no backups); seeds `users.db` /
     `csdb.db`; writes `server/.env.local` (with `DEV_AUTH_MODULE`); builds
@@ -282,7 +302,8 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
   - Two tracked seams keep the untracked overrides loadable without touching
     feature files: `server/index.js` requires `process.env.DEV_AUTH_MODULE ||
     './middleware/auth.js'` (overlay-only delta), and the overlay-only
-    `config/webpack.config.dev.js` prepends `src/chip-player-devtools.js` to the
+    `config/webpack.config.dev.js` prepends `src/chip-player-devtools.js` (and
+    `src/chip-player-record.js` when staged) to the
     entry. `dev/shims/devtools.js` self-installs `window.__cpDev` (browser test
     hooks: `snapshot`, `setRepeat`, `seek`, `startRecord`, ...) and polls for
     `window.ChipPlayer`. See "Repeat One / looping model".
@@ -1304,16 +1325,67 @@ checks no longer work. Compare a live context to a stored one with
    (matching the repo, which has no test runner or CI). If Matt wants a durable
    suite, the same harnesses could move to a tracked `test/` dir and run via
    `node --test` with no new deps.
-3. **Changelog page with video examples** (next PR prep step, agreed
-   2026-10-03). Record short videos of the feature working and publish them on a
-   changelog web page. Practical notes for whoever picks this up: the preview tab
-   is the recording surface (`http://mms-1:8080`, not `localhost`), screen
-   recording runs through the host's preview tab, and `window.__cpDev` can
-   script a repeatable take (`setRepeat`, `seek`, `click`) so the same clip can
-   be re-shot after a change. Worth capturing the things that are hard to
-   describe in prose: a song folder expanding into sub-songs, the time-slider
-   loop band, Repeat One toggling without a jump, and per-sub-tune favouriting.
-   Keep the page a static addition consistent with the rest of the site.
+3. **Changelog page with video examples.** *Tooling built 2026-10-05; 15/18 clips
+   recorded, 12 passing and on the page, 3 recorded-but-red pending a decision about
+   what they assert.* `dev/record/` holds the whole pipeline: a clip registry
+   (`scenarios.mjs`, 18 scenarios, validated by `scenarios.check.mjs` and wired
+   into `dev/run-tests.sh`), the page-side recorder shim
+   (`dev/shims/recorder.js` → `src/chip-player-record.js`, `window.__cpRec`),
+   the flash/mux scripts, and a generator that emits a self-contained `site/`
+   (relative URLs only, no framework) to upload to a web server and link from the
+   PR. Start at `dev/record/README.md`, and read `dev/record/FINDINGS.md`
+   *before* changing the recorder — it records the measured gotchas, several of
+   them counter-intuitive and several of them about the *pipeline*, not the app.
+   The ones that shape everything else:
+   - **Video comes from Playwright, not the host tab recorder.** The host's
+     recorder captures at 1x CSS px and upscales (soft), declares a variable
+     `r_frame_rate` that ffmpeg's default CFR output resamples away (60 real
+     frames → 5, i.e. a slideshow), and loses takes over 50 MiB in transfer.
+     `dev/record/shoot.mjs` drives Playwright instead: viewport 720x720 at
+     `deviceScaleFactor` 2 with **`recordVideo.size` left unset** (setting it
+     pads the frame and shrinks the app to ~57% of the picture), giving 720x720 at
+     a constant 25 fps, DPR-correct, written straight to disk. It needs the
+     `--no-save` playwright install — see the npm trap in "Dev environment".
+   - **Audio still comes from the page**, not the capture: an in-page
+     `MediaStreamAudioDestinationNode` off `ChipPlayer.gainNode`, muxed with the
+     video. Playwright's `recordVideo` is silent and this host has no audio
+     device at all, so nothing else is available (this also kills
+     `canvas.captureStream()` / `getDisplayMedia` as options — a DOM app has no
+     canvas, and the preview tab exposes no `mediaDevices`).
+   - **The sync mark is green and detected by hue, not luma.** Playwright starts
+     recording *before* navigation, so every clip begins on a blank page; a white
+     mark was indistinguishable from that page load, `find-flash.sh` locked onto
+     the load, and clips were published ~3.5 s out of sync with their own audio
+     **while every assertion still passed**. Green (bright, both chroma channels
+     low) is unique in this app by construction.
+   - `-fps_mode passthrough` in `mux.sh` is mandatory for a VFR input, the trim
+     must start a frame *past* the mark, and `shoot.mjs` asserts the capture is
+     exactly the viewport so the padding failure can't return silently.
+   - `preview_evaluate` still fails intermittently **at the transport level** when
+     previewing; retry, and read `__cpRec._run` / `__cpRec.result()` to see
+     whether a "failed" call landed.
+   - **15 of 18 clips are recorded and passing** (9 main, 6 per-format); the three
+     that are recorded-but-red fail because their *assertion or fixture contradicts
+     their own claim*, not because of the pipeline. Do not loosen them to get green
+     — the page publishes those numbers as verification. The remaining work, and
+     the catalog constraint behind `blind-loop`, are in "Open: the last three
+     clips" in `dev/record/README.md`.
+   - Batch run lessons worth carrying: a scenario's `until` gate must never wait
+     for its own first step (an `open` that starts playback deadlocks a
+     `until: 'playing'` gate); a multi-tune file's row in its parent's listing is a
+     **song folder**, so `clickRow` navigates instead of playing and a preload
+     waits forever; opening a sub-tune leaves the browse route (its href is
+     `/?play=…&subtune=N`), so showing two directories needs the new
+     `__cpRec.navigate()` step; the trace sampler must record every field the
+     registered assertions read; and a virtualized listing is not a stable
+     assertion target — prefer trace marks over live DOM.
+   Worth capturing in the clips, per the original note: a song folder expanding
+   into sub-songs, the time-slider loop band, Repeat One toggling without a jump,
+   and per-sub-tune favouriting. The page deliberately says *feature-only* — no
+   master build, no A/B recording — with each clip's "Before:" line describing
+   what master did instead, and every clip publishing the numbers that verify its
+   claim. The page is hosted **separately** from the site (decision 1 in
+   `dev/record/README.md`), not added to `public/`.
 4. Known unsupported formats (don't add to `FORMATS` without a player/parser):
    plain `.usf` sets (only `.miniusf` is supported), PSF/PSX (`psflib` is reused
    only by the USF loader; no PSX core), and PSM (`libxmp-lite` = it/mod/s3m/xm;
@@ -1776,10 +1848,25 @@ player has no end detector the panel renders nothing (a `console.debug` only).
 
 Testing gotchas learned the hard way:
 
+- `preview_evaluate` fails intermittently **at the transport level** — the call
+  reports failure without reaching the page, and the same expression then
+  succeeds unchanged. Always retry, and read page state (`__cpRec._run`,
+  `__cpRec.result()`) to find out whether a "failed" call actually landed.
+  Correlates with calling it right after `preview_navigate`, while the app is
+  still fetching. See `dev/record/FINDINGS.md`.
 - Script a whole scenario (play → wait → toggle → record) inside ONE
   `evaluate` call; the preview host drops tabs between calls and evaluate
   times out at 15 s, so never rely on state surviving across calls for a
   6-second test track.
+- **An assertion passing says nothing about the file that gets published.** The
+  clip recorder's page-side verdict is green for the app's behaviour, but the
+  published mp4 is produced by ffmpeg afterwards — and a mis-detected sync mark
+  shipped clips 3.5 s out of sync with their own audio with every verdict green
+  (the mark was white; the capture *starts* on a blank page; the detector locked
+  onto the page load). Any pipeline stage that can silently produce a wrong file
+  needs its own post-condition: here the capture-size assertion, the first-frame
+  check on the output, and hue-based mark detection. Generalises past the
+  recorder: verify the artefact, not just the state.
 - The tab can serve a stale bundle after edits: force `?r=N`, and confirm the
   served build with `curl mms-1:8080/static/js/bundle.js | grep -c <newSymbol>`.
 - Parameter toggles made right after `playSong`/`playContext` are overwritten
@@ -1848,7 +1935,8 @@ way. Cheap to state, expensive to learn:
   shell; `mms-1` is the one that also works in the preview tab).
 - Dev shims stage **untracked, gitignored** modules rather than patching tracked
   files. `dev/apply.sh` writes `server/middleware/auth.dev.js`,
-  `src/chip-player-devtools.js`, `src/chip-core.js`, `src/config/firebaseConfig.js`
+  `src/chip-player-devtools.js`, `src/chip-player-record.js`,
+  `src/chip-core.js`, `src/config/firebaseConfig.js`
   and `server/.env.local`; `server/index.js` loads the auth module via
   `DEV_AUTH_MODULE`, and the dev webpack config prepends the devtools entry.
   `dev/remove.sh` deletes them. No `*.dev-backup`, no `--revert` for these. The

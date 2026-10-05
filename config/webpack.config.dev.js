@@ -40,9 +40,17 @@ module.exports = merge(commonConfig, {
   // DEV-ONLY (overlay): prepend the browser test-hooks bootstrap. Staged as an
   // untracked, gitignored file by dev/apply.sh; in a clean tree only the app
   // entry (from the common config, concatenated by merge) remains.
-  entry: fs.existsSync(path.resolve(paths.appSrc, 'chip-player-devtools.js'))
-    ? [path.resolve(paths.appSrc, 'chip-player-devtools.js')]
-    : [],
+  // Two shims, each independently optional: chip-player-devtools.js is the
+  // __cpDev harness, chip-player-record.js the __cpRec clip recorder
+  // (dev/record/README.md) -- audio mirror and sync flash for the videos.
+  entry: [
+    ...(fs.existsSync(path.resolve(paths.appSrc, 'chip-player-devtools.js'))
+      ? [path.resolve(paths.appSrc, 'chip-player-devtools.js')]
+      : []),
+    ...(fs.existsSync(path.resolve(paths.appSrc, 'chip-player-record.js'))
+      ? [path.resolve(paths.appSrc, 'chip-player-record.js')]
+      : []),
+  ],
   // These are the "entry points" to our application.
   // This means they will be the "root" imports that are included in JS bundle.
   // The first two entry points enable "hot" CSS and auto-refreshes for JS.

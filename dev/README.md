@@ -23,6 +23,25 @@ keep it out of the PR).
 npm run dev      # webpack dev server (:3000) + API server (:8080)
 ```
 
+Recording the clips for the PR communication page is a separate, occasional
+activity — see `dev/record/README.md` for the design and `dev/record/FINDINGS.md`
+before touching the recorder. Nothing about it runs as part of the normal dev
+loop.
+
+It needs two things the normal setup does not:
+
+- **`playwright`** in `node_modules`, installed without touching `package.json`:
+  `npm i --no-save --no-package-lock playwright@1.63.0 webpack@5.106.0`. One
+  command for both — each `--no-save` install prunes the previous one, and the
+  install also rebuilds `better-sqlite3` against whatever `node` is on PATH (the
+  host default is 26.x, so it ends up compiled for the wrong ABI). If
+  `dev/run-tests.sh` starts failing with `NODE_MODULE_VERSION`, run
+  `PATH="$HOME/.nvm/versions/node/v24.21.0/bin:$PATH" npm rebuild better-sqlite3`.
+  Full list of the ways this bites: AGENTS.md §Dev environment.
+- **Chromium**, already fetched into `~/.cache/ms-playwright`.
+
+Recording is one command per clip: `node dev/record/shoot.mjs <clip-id>`.
+
 ## Promoting feature work to the reviewable branch
 
 `dev/overlay` is the working branch; the reviewable PR branch
@@ -53,6 +72,7 @@ To revert:
 | `shims/firebaseConfig.js` | `src/config/firebaseConfig.js` | target gitignored | Placeholder Firebase config. |
 | `shims/server-auth.js` | `server/middleware/auth.dev.js` | staged file gitignored | Fixed `dev-user`; loaded via `DEV_AUTH_MODULE` in `server/.env.local`. No tracked file patched. |
 | `shims/devtools.js` | `src/chip-player-devtools.js` | staged file gitignored | Browser test hooks (`window.__cpDev`); injected by the dev webpack entry. |
+| `shims/recorder.js` | `src/chip-player-record.js` | staged file gitignored | Clip-recording hooks (`window.__cpRec`): settings pinning, an audio mirror off the app's gain node, the green sync mark, click-by-exact-name. For the PR communication page — see `dev/record/README.md`. |
 | `patch-server.js` | `server/index.js` | target tracked (reversible) | Makes `skia-canvas` optional. |
 | `seed-dbs.js` | `server/users.db`, `server/csdb.db` | gitignored | Creates `users`/`playlists`/`playbacks` schemas. |
 | `import-songlengths.js` | `server/csdb.db` (`hvsc_files`) | gitignored | Imports HVSC `Songlengths.txt` lengths for local SIDs, matched by the libsidplayfp fingerprint (not md5-of-file). Fetches the canonical copy to a tmp cache unless `--file` is given; `--dry-run` changes nothing. |

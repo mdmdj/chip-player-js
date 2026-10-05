@@ -38,6 +38,11 @@ node dev/patch-server.js
 cp dev/shims/devtools.js src/chip-player-devtools.js
 echo "[dev]   staged src/chip-player-devtools.js"
 
+# Clip-recording hooks (window.__cpRec): audio mirror + sync flash + settings
+# pinning for dev/record/. Staged the same way as the devtools shim.
+cp dev/shims/recorder.js src/chip-player-record.js
+echo "[dev]   staged src/chip-player-record.js"
+
 # 6. Seed sqlite databases (catalog.db is built separately by build-music.js)
 node dev/seed-dbs.js
 

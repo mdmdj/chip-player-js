@@ -380,20 +380,18 @@ ranges), so it cannot drift from the code it describes.
 Single `index.html`, two-column clip rows (video left at the chosen aspect,
 prose right), no framework, no external requests — uploadable as a directory.
 
-Two delivery requirements, both learned the hard way and both confirmed by the
-user after the fix (2026-10-05):
+Two delivery requirements. The first is established; the second's *cost* is
+measured but its role in the reported stalls is **not** — see the correction in
+FINDINGS.md before repeating any story about it.
 
-- **Serve with Range support.** Without it `video.seekable` is empty and clips show
-  a first frame that will not play. `serve.mjs` is `express.static`.
-- **`preload="none"`, with a poster per clip.** `preload="metadata"` fetches all 14
-  clips on page load — measured **35 MB** — and a browser only runs ~6 downloads at a
-  time per site, so 8 of them queue and clicking play on a queued one stalls.
-  *Inconsistently*, because it depends on link speed and file size, which is why it
-  read as "randomly broken". With `preload="none"`: 0 MB on load, 14/14 still play.
-  Posters are generated at build time, and each `<video>` carries explicit
-  `width`/`height` because a `preload="none"` element has no size until it plays.
-
-FINDINGS.md has the plain-language version and the measured one.
+- **Serve with Range support** (established). Without it `video.seekable` is empty
+  and clips show a first frame that will not play. `serve.mjs` is `express.static`.
+- **`preload="none"`, with a poster per clip and explicit `width`/`height`**
+  (correct on its merits, causal role unknown). `preload="metadata"` pulls all 14
+  clips on page load — measured **35 MB** — which is the wrong default for a page.
+  `preload="none"` measures 0 MB on load and all 14 clips still play. Posters are
+  generated at build time; `width`/`height` are needed because a `preload="none"`
+  element has no intrinsic size until it is played.
 
 ```
 Header          what changed, in one paragraph, link to the PR

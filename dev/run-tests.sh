@@ -41,3 +41,6 @@ node "$DIR/test-songrefs.js" 2>/dev/null
 echo
 echo "== devtools stall watch =="
 node "$DIR/test-devtools.js" 2>/dev/null
+echo
+echo "== clip scenario registry =="
+node "$DIR/record/scenarios.check.mjs"

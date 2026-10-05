@@ -1470,11 +1470,15 @@ checks no longer work. Compare a live context to a stored one with
      honest lever is trimming the pre-toggle hold, not the pauses around the clicks.
      `loop-band`'s assertions are still VGM-specific (`curLoop`, intro 342 / loop
      800) while MDX is now a viable fixture for the same claim (its checkbox is not
-     occluded; its band starts at 69 s, so it would need a seek). Not yet confirmed
-     by the user: whether the preload/Range fix made playback *consistent* in their
-     browser — every check here is headless Chromium on a host with **no audio
-     device**, so a working-audio browser that still stalls would point somewhere
-     this box cannot see.
+     occluded; its band starts at 69 s, so it would need a seek).
+   - **Playback delivery: fixed and confirmed by the user** (2026-10-05) after the
+     Range + preload fixes. Everything here was verified in headless Chromium first,
+     which is *not* the same thing — see the two delivery bugs in `FINDINGS.md` and
+     the plain-language version of the second one, which is the one that explains
+     the "inconsistent" symptom. Worth keeping in mind for any future page: both bugs
+     were invisible to file-level checks. `ffprobe` called every clip valid, every
+     codec was `probably` playable, and 14/14 played in automation — the failure was
+     in how the page asked for them.
 4. Known unsupported formats (don't add to `FORMATS` without a player/parser):
    plain `.usf` sets (only `.miniusf` is supported), PSF/PSX (`psflib` is reused
    only by the USF loader; no PSX core), and PSM (`libxmp-lite` = it/mod/s3m/xm;

@@ -62,11 +62,13 @@ for (const s of scenarios) {
     last = at;
   }
 
-  // The clip has to fit the measured evaluate budget (FINDINGS.md): the take
-  // is started and finished in two calls with the host recorder in between, so
-  // the scripted span is what has to stay short.
+  // A long take must stay long enough to show the thing it is about. This was a
+  // 9 s cap, written when the host's tab recorder held the take and the scripted
+  // span had to survive two flaky round trips; shoot.mjs now drives the whole take
+  // in one node process, so the cap protects nothing. The SID clip is the reason it
+  // moved: its restart cannot happen sooner than one quiet detector window (~10 s).
   const span = Math.max(...(s.steps || [{ atMs: 0 }]).map((st) => st.atMs || 0));
-  if (span > 9000) fail(s.id, `scripted span ${span}ms exceeds the 9s clip budget`);
+  if (span > 20000) fail(s.id, `scripted span ${span}ms exceeds the 20s clip budget`);
 
   if (s.harness && !fs.existsSync(path.join(ROOT, s.harness))) fail(s.id, `harness does not exist: ${s.harness}`);
   if (!s.harness) warnings.push(`${s.id}: no harness reference`);

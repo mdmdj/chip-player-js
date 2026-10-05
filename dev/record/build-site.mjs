@@ -17,6 +17,7 @@
 // build rather than rendering an empty <pre>.
 
 import fs from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -74,6 +75,22 @@ for (const s of scenarios) {
   clipRows.push({ s, proof, failed, mp4: `clips/${s.id}.mp4` });
 }
 
+// Clip dimensions come from ffprobe, not from the video element's own metadata: with
+// preload="none" the element has no intrinsic size until it is asked to play, so
+// `width:100%; height:auto` would collapse every clip row to nothing and then jump.
+// The width/height attributes reserve the box up front, which is what they are for.
+// Collected here, before the HTML is assembled -- clipHtml reads it, so declaring it
+// further down is a temporal-dead-zone ReferenceError.
+const dims = new Map();
+for (const { s, mp4 } of clipRows) {
+  try {
+    const out = execFileSync('ffprobe', ['-v', 'error', '-select_streams', 'v', '-show_entries',
+      'stream=width,height', '-of', 'csv=p=0', path.join(outDir, mp4)], { encoding: 'utf8' }).trim();
+    const [w, h] = out.split(',').map(Number);
+    if (Number.isFinite(w) && Number.isFinite(h)) dims.set(s.id, { w, h });
+  } catch { /* leave it out; the poster still renders */ }
+}
+
 // ------------------------------------------------------------------- pages --
 function clipHtml({ s, proof, failed, mp4 }) {
   const bullets = s.watch.map((w) => `<li>${esc(w)}</li>`).join('\n            ');
@@ -93,9 +110,10 @@ function clipHtml({ s, proof, failed, mp4 }) {
     ['tempo', proof.final && proof.final.tempo],
   ].filter(([, v]) => v != null && v !== '')
     .map(([k, v]) => `<span><em>${esc(k)}</em> ${esc(String(v))}</span>`).join('\n            ');
+  const d = dims.get(s.id);
   return `      <article class="clip" id="${esc(s.id)}">
         <div class="clip-media">
-          <video controls preload="metadata" playsinline src="${esc(mp4)}"></video>
+          <video${d ? ` width="${d.w}" height="${d.h}"` : ''} controls preload="none" playsinline poster="posters/${esc(s.id)}.jpg" src="${esc(mp4)}"></video>
         </div>
         <div class="clip-text">
           <h3>${esc(prose[s.id].title || s.title)}</h3>
@@ -190,6 +208,39 @@ ${limitations.map((l) => `      <li>${l}</li>`).join('\n')}
 
 fs.mkdirSync(path.join(outDir, 'clips'), { recursive: true });
 fs.writeFileSync(path.join(outDir, 'index.html'), html);
+
+// Poster frame per clip, taken at the clip's last mark rather than at 0s: the
+// published clip starts *after* the sync mark, so its first second is the app
+// settling, and a poster from t=0 is a black frame with a spinner.
+//
+// This exists because the video elements use preload="none" (see clipHtml). With
+// preload="metadata" the page asked the server for all 14 clips on load -- measured
+// 35.4 MB, every request answered with the whole file, because a browser's metadata
+// probe is an open-ended `Range: bytes=0-` and the moov is at the front (faststart)
+// so the browser cancels after a few KB but the server has already streamed the lot.
+// On HTTP/1.1's six-connections-per-host limit, eight of the fourteen requests queue,
+// and clicking play on a queued element can stall: exactly the "inconsistent, some
+// clips never start" report. preload="none" plus a poster fetches nothing until a
+// click, and gives the page a first frame to show instead of a black box.
+fs.mkdirSync(path.join(outDir, 'posters'), { recursive: true });
+const posters = [];
+for (const { s, mp4 } of clipRows) {
+  const src = path.join(outDir, mp4);
+  const dst = path.join(outDir, 'posters', `${s.id}.jpg`);
+  const at = (() => {
+    // A mark a little past the midpoint: past the loading, before the end.
+    const marks = (s.marks || []).map((m) => m.t).filter((t) => Number.isFinite(t));
+    return marks.length ? marks[Math.floor(marks.length / 2)] / 1000 : 1;
+  })();
+  try {
+    execFileSync('ffmpeg', ['-v', 'error', '-y', '-ss', String(at), '-i', src, '-frames:v', '1',
+      '-vf', 'scale=900:-1', '-q:v', '4', dst], { stdio: ['ignore', 'ignore', 'pipe'] });
+    posters.push(s.id);
+  } catch (e) {
+    console.warn(`poster failed for ${s.id}: ${String(e.message).split('\n')[0]}`);
+  }
+}
+console.log(`posters: ${posters.length}/${clipRows.length} written`);
 
 const manifest = {
   generated: new Date().toISOString(),

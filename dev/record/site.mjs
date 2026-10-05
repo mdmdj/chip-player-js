@@ -19,21 +19,17 @@ export const header = {
 };
 
 export const prose = {
-  'loop-band': {
+'loop-band': {
     title: 'The loop region, drawn on the slider',
-    before: 'master had no loop region at all: the slider was a plain progress bar, and Repeat One stopped the song and reloaded it from 0:00 with a gap.',
+    before: 'master had no loop region at all: the slider was a plain progress bar, and Repeat One stopped the song and reloaded it from 0:00 with a gap. The <em>Show Loop Area</em> setting is new too — master had no band to hide.',
   },
   songfolder: {
     title: 'A file with many songs is a folder',
-    before: 'master listed a multi-song NSF as one opaque file row; the only way to reach tune 3 was a separate widget in the footer.',
+    before: 'master listed a multi-song NSF as one opaque file row, and the only way to reach a sub-song was a separate footer widget — a "Tune N of M" label and prev/next buttons. Worth watching for what is <em>absent</em> here: no footer sub-tune widget, no "tune 8 of 28" counter.',
   },
   'favorite-subtune': {
     title: "A sub-tune can be favourited on its own",
     before: "master stored a favourite as a file, so a 28-tune NSF could only be loved or not loved as a whole.",
-  },
-  'share-link': {
-    title: "A share link points at one sub-song",
-    before: "master shared a file, so the link reopened whichever sub-tune the file happened to start on.",
   },
   'repeat-toggle-smooth': {
     title: "Turning Repeat One on mid-song is jump-free",
@@ -42,14 +38,6 @@ export const prose = {
   'repeat-leave-fade': {
     title: "Turning it off plays the song out",
     before: "master cut the song off at the loop point instead of finishing the pass and the fade.",
-  },
-  'show-loop-area': {
-    title: "Show Loop Area is a display setting",
-    before: "master had no loop band and therefore nothing to hide.",
-  },
-  'labels': {
-    title: "Real labels where the format has them",
-    before: "master showed a filename and a bare sub-tune number; a track label present in the file was never read.",
   },
   'vgm-native': {
     title: "VGM/VGZ — the engine loops, so nothing reloads",
@@ -75,11 +63,19 @@ export const prose = {
     title: "V2M — the honest fallback",
     before: "master behaved the same way here: this format has no loop points, so the song stops and reloads and the page says so rather than pretending.",
   },
-  'subtune-is-a-song': {
-    title: 'A sub-tune is an ordinary song',
-    before: 'master had a footer-only widget — a "Tune N of M" label and prev/next buttons that existed nowhere else in the app.',
+  'blind-loop': {
+    title: "No loop region? The head parks instead of lying",
+    before: "master clamped the head at the track length with nothing to say that playback would carry on past it.",
   },
-};
+  'gme-looping-driver': {
+    title: "NSF — a driver that loops on its own is never cut off",
+    before: "master had no way to tell a self-looping driver from a finished one; the only answer it had was to stop and reload.",
+  },
+  'sid-tail-restart': {
+    title: "SID — no loop API, so a tail detector restarts the tune",
+    before: "master could only stop at the tune's listed length and reload, cutting off anything that played past it.",
+  },
+  };
 
 export const snippets = [
   {

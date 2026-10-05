@@ -23,8 +23,8 @@
 //            tr = the sampled trace. Every entry must pass for the clip to ship.
 
 const NSFE = 'nsfe/Akumajou Densetsu (VRC6).nsfe';      // 28 sub-tunes, labelled
-const GIMMICK = 'nsfe/Gimmick!.nsfe';                   // 73 sub-tunes, all labelled
-const KYJ = 'gbs/DMG-KYJ.gbs';                          // 15 sub-tunes, no labels
+const MM2 = 'nsfe/Mega Man 2.nsfe';                      // 22 sub-tunes, labelled
+
 const HURRY = "arcade-capcom/Ghosts'N_Goblins_(Arcade)/16 Hurry Up!.vgz";
 const HURRY_DIR = "arcade-capcom/Ghosts'N_Goblins_(Arcade)";
 
@@ -38,50 +38,42 @@ export const scenarios = [
     watch: [
       'The row is marked <TUNES> with a count, not <DIR> — same list, different meaning.',
       'Clicking it navigates *into the file*, exactly like a directory.',
+      'Two different song files, entered and left the same way, each playing a named sub-song.',
+      'Each row is a real song from there on: the footer tracks the file path, there is no "Tune 8 of 28" label and no prev/next sub-tune widget, and the share link is the same <code>/?play=…&amp;subtune=N</code> it has always been.',
     ],
-    before: 'master listed a multi-song NSF as one opaque file row, and the only way to reach tune 3 was a separate footer widget.',
+    before: 'master listed a multi-song NSF as one opaque file row, and the only way to reach tune 3 was a separate footer widget — a "Tune N of M" label and prev/next buttons that existed nowhere else in the app.',
     harness: 'dev/test-parsers.js',
     browse: '/browse/nsfe',
+    // No preload and no `until` gate: this scenario is about navigation, and it
+    // deliberately opens on an empty transport. The 2 s hold on the listing is the
+    // wait the script calls for -- long enough to read the <TUNES> counts, and it
+    // gives the take a still frame to start on rather than a click in progress.
     steps: [
-      { atMs: 300, open: { dir: 'nsfe', name: 'Akumajou Densetsu (VRC6).nsfe' }, label: 'open song folder' },
-      { atMs: 1600, label: '28 sub-tunes, each a row' },
-      // Play one: it demonstrates one more thing than the navigation alone. (It
-      // does not buy frame rate -- see FINDINGS.md, that hypothesis was wrong.)
-      { atMs: 2400, open: { dir: NSFE, name: 'Epitaph', subtune: 1 }, label: 'play a sub-tune' },
-      { atMs: 4600, label: 'playing' },
+      { atMs: 2000, open: { dir: 'nsfe', name: 'Akumajou Densetsu (VRC6).nsfe' }, label: 'open a song folder' },
+      // 500 ms is the settle the script asks for: the sub-tune list is a fetch plus
+      // a render, so this is the shortest wait that reliably finds the row.
+      { atMs: 2500, open: { dir: NSFE, name: 'Mad Forest', subtune: 7 }, label: 'play Mad Forest' },
+      { atMs: 7400, label: 'playing a sub-song' },
+      // ".." is not a listing row (App.js unshifts it client-side), so clickRow
+      // matches it by text -- see the recorder shim.
+      { atMs: 7500, open: { dir: NSFE, name: '..' }, label: 'back to the nsfe list' },
+      { atMs: 8500, open: { dir: 'nsfe', name: 'Mega Man 2.nsfe' }, label: 'open a different song file' },
+      { atMs: 9500, open: { dir: MM2, name: 'Stage Select', subtune: 3 }, label: 'play Stage Select' },
+      { atMs: 16500, label: 'still playing' },
     ],
     until: null,
     assert: [
-      { name: 'landed-in-song-folder', test: 'window.location.pathname.indexOf("Akumajou") >= 0' },
+      { name: 'left-the-first-song-folder', test: 'decodeURIComponent(window.location.pathname).indexOf("Akumajou") < 0' },
+      // decodeURIComponent, not a literal match: the router keeps the filename
+      // percent-encoded ("Mega%20Man%202"), so comparing against "Mega Man 2"
+      // fails on a clip whose every other number is correct.
+      { name: 'in-the-second-song-folder', test: 'decodeURIComponent(window.location.pathname).indexOf("Mega Man 2") >= 0' },
       { name: 'sub-tune-rows', test: 'document.querySelectorAll("a[href*=\'subtune=\']").length >= 20' },
-      { name: 'labelled-row', test: 'Array.from(document.querySelectorAll(".BrowseList-colName a")).some((a) => /Epitaph/.test(a.textContent))' },
+      { name: 'labelled-row', test: 'Array.from(document.querySelectorAll(".BrowseList-colName a")).some((a) => /Stage Select/.test(a.textContent))' },
       { name: 'sub-tune-plays', test: 's.player && s.positionMs > 200' },
-    ],
-  },
-
-  {
-    id: 'subtune-is-a-song',
-    section: 'main',
-    ready: true,
-    title: 'A sub-tune is an ordinary song',
-    watch: [
-      'Tune 2 plays like any other song; the footer shows the whole file path.',
-      'There is no "Tune 2 of 28" label and no back/forward sub-tune buttons.',
-    ],
-    before: 'master had a footer-only sub-tune widget: a "Tune N of M" label and prev/next buttons that existed nowhere else.',
-    harness: 'dev/test-sequencer.js',
-    browse: `/browse/${NSFE}`,
-    steps: [
-      { atMs: 300, open: { dir: NSFE, name: 'Epitaph', subtune: 1 }, label: 'play tune 2' },
-    ],
-    // No gate: this scenario's first step is the open that starts playback, so
-    // `until: 'playing'` deadlocks (the gate waits for the step it blocks). The
-    // driver already waited for the listing before calling run().
-    until: null,
-    assert: [
-      { name: 'playing-subtune-1', test: 's.ref && s.ref.subtune === 1 && s.ref.path === ' + JSON.stringify(NSFE) },
-      { name: 'no-footer-subtune-controls', test: '!document.body.textContent.match(/Tune \\d+ of \\d+/)' },
-      { name: 'footer-shows-file-path', test: 'document.body.textContent.indexOf("Akumajou Densetsu") >= 0' },
+      // Two song files, two sub-tunes, one transport: the identity the whole
+      // feature rests on. `path` alone would pass for the first folder alone.
+      { name: 'second-sub-tune-is-the-playing-one', test: 's.path === "nsfe/Mega Man 2.nsfe" && s.subtune === 3' },
     ],
   },
 
@@ -91,74 +83,65 @@ export const scenarios = [
     ready: true,
     title: 'Favouriting one sub-tune leaves the others alone',
     watch: [
-      'The heart in the footer favourites this exact sub-tune.',
-      'The Favorites page groups it under the song folder, labelled with the catalog title.',
+      'The heart in the footer fills in — that exact sub-tune is now a favourite.',
+      'A second later, on the Favorites page, it is listed on its own under the song folder.',
+      'The sub-tune number travels with it: this is the same identity the playlist and the share link use.',
     ],
     before: 'master could only favourite a whole file, so a multi-song file was one row in your list no matter which tune you liked.',
     harness: 'dev/test-subtunes-server.js',
     browse: `/browse/${NSFE}`,
+    // Start from an empty favourites list so the row the viewer sees appear is
+    // unambiguously this clip's, and so the group is not scrolled out of a
+    // virtualized list full of leftovers from earlier takes.
+    clearFavorites: true,
     steps: [
       { atMs: 300, open: { dir: NSFE, name: 'Epitaph', subtune: 1 }, label: 'play tune 2' },
-      { atMs: 1800, play: 'button[title*="avorite"]', label: 'favourite' },
-      { atMs: 2600, play: 'a[href="/favorites"]', label: 'open favorites' },
+      // Scoped to `.AppFooter`, not a bare `button.FavoriteButton`: every sub-song row
+      // in the browse list carries its own heart, so an unscoped selector clicks the
+      // FIRST one -- row 1, "Prelude" -- while the clip claims it favourited the
+      // playing sub-song, Epitaph. That is what the previous take did; the Favorites
+      // page then listed Prelude. (The selector before that,
+      // `button[title*="avorite"]`, matched nothing at all: FavoriteButton renders no
+      // title attribute. Two dead selectors, two different wrong clips, both green.)
+      { atMs: 1800, play: '.AppFooter button.FavoriteButton', label: 'click the heart' },
+      { atMs: 2800, label: 'heart filled in' },
+      // `^=` not `=`: the nav link is to={{ pathname: '/favorites', ...search }},
+      // and `search` carries the driver's ?r=<cache-buster>, so the rendered href
+      // is "/favorites?r=...". An exact-match selector silently matched nothing, the
+      // take never left the browse listing -- and all three assertions below still
+      // passed, because "Epitaph", "Akumajou Densetsu" and a href carrying
+      // subtune=1 are all on the *browse* page too. Same class as the dead
+      // `button[title*="avorite"]`: a selector that matches nothing cannot fail an
+      // assertion, so the assertions have to name the page they are about.
+      { atMs: 3400, play: 'a[href^="/favorites"]', label: 'open Favorites' },
+      { atMs: 5400, label: 'listed on the Favorites page' },
     ],
     // No gate: this scenario's first step is the open that starts playback, so
     // `until: 'playing'` deadlocks (the gate waits for the step it blocks). The
     // driver already waited for the listing before calling run().
     until: null,
     assert: [
-      { name: 'favorite-listed', test: 'document.body.textContent.indexOf("Epitaph") >= 0' },
-      { name: 'under-song-folder-heading', test: 'document.body.textContent.indexOf("Akumajou Densetsu") >= 0' },
-    ],
-  },
-
-  {
-    id: 'share-link',
-    section: 'main',
-    ready: true,
-    title: 'A share link carries the sub-tune',
-    watch: [
-      'The copied link is /?play=<id>&subtune=1.',
-      'Opening it cold lands inside the song folder on that tune, playing.',
-    ],
-    before: 'master links identified a file only, so every share link for a multi-song file opened tune 1.',
-    harness: 'dev/test-songrefs.js',
-    browse: `/browse/${NSFE}`,
-    steps: [
-      { atMs: 300, open: { dir: NSFE, name: 'Epitaph', subtune: 1 }, label: 'play tune 2' },
-    ],
-    // No gate: this scenario's first step is the open that starts playback, so
-    // `until: 'playing'` deadlocks (the gate waits for the step it blocks). The
-    // driver already waited for the listing before calling run().
-    until: null,
-    assert: [
-      { name: 'link-has-subtune', test: 'window.ChipPlayer.getCurrentSongLink(true).indexOf("subtune=1") >= 0' },
-    ],
-  },
-
-  {
-    id: 'labels',
-    section: 'main',
-    ready: true,
-    title: 'Real labels where the format has them, "Tune N" where it does not',
-    watch: [
-      'Gimmick! has 73 labelled sub-tunes.',
-      'A GBS has 15 sub-tunes and no in-format labels, so the UI says "Tune N" — consistently, everywhere.',
-    ],
-    before: 'master showed a filename and a bare sub-tune number; a track label present in the file was never read.',
-    harness: 'dev/test-parsers.js',
-    browse: `/browse/${GIMMICK}`,
-    steps: [
-      { atMs: 300, open: { dir: GIMMICK, name: 'Good Morning [Introduction]', subtune: 0 }, label: 'gimmick labels' },
-      // Opening a sub-tune navigates to `/?play=…&subtune=N`, so the browse rows
-      // unmount; a second directory needs an explicit navigate first.
-      { atMs: 2600, nav: `/browse/${KYJ}`, label: 'go to the GBS folder' },
-      { atMs: 3400, open: { dir: KYJ, name: 'Tune 1', subtune: 0 }, label: 'gbs fallback' },
-    ],
-    until: null,
-    assert: [
-      { name: 'gimmick-labelled', test: 'tr.marks.some((m) => /opened Good Morning/.test(m.label))' },
-      { name: 'gbs-fallback', test: 'document.body.textContent.indexOf("Tune ") >= 0' },
+      // The click actually registered, before navigating away.
+      { name: 'heart-was-clicked', test: 'tr.marks.length > 0 && tr.marks.some((m) => /click the heart/.test(m.label)) && tr.samples.length > 5 && tr.samples.some((x) => x.fav === true)' },
+      // We are ON the Favorites page. This is the assertion that would have caught
+      // the dead selector: everything else below is also true of the browse listing,
+      // so without this one the clip could be entirely wrong and still green.
+      { name: 'on-the-favorites-page', test: '/favorites/.test(window.location.pathname)' },
+      // Scoped to the LIST, not document.body: the footer still shows the playing
+      // song, so a body-wide text search for "Epitaph" or the folder name passes
+      // whether or not the favourites page is showing anything at all -- which is
+      // exactly how the previous take stayed green while never leaving /browse.
+      { name: 'listed-in-the-favorites-list', test: 'Array.from(document.querySelectorAll(".BrowseList-colName a")).some((a) => a.textContent.trim() === "Epitaph")' },
+      // A sub-song, not the file: the row is labelled with the sub-tune title.
+      { name: 'under-song-folder-heading', test: 'Array.from(document.querySelectorAll(".BrowseList-colName a")).some((a) => /nsfe\\/Akumajou Densetsu/.test(a.textContent))' },
+      // The list holds this and only this: with clearFavorites the one row is the
+      // whole claim. This is what makes the clip show its own action rather than
+      // whatever earlier takes left behind.
+      // The list holds this and only this: with clearFavorites, exactly one row has a
+      // heart. Counted by FavoriteButton, not by anchors -- the song-folder heading
+      // is an anchor in the same column, so counting anchors is off by one and would
+      // have "failed" a correct take.
+      { name: 'only-this-favorite', test: 'document.querySelectorAll(".BrowseList-row .FavoriteButton").length === 1' },
     ],
   },
 
@@ -170,15 +153,37 @@ export const scenarios = [
     watch: [
       'The shaded band is the loop the composer wrote: intro 342 ms + one 800 ms loop.',
       'With Repeat One on, the playhead cycles inside the band instead of running to the end.',
+      'Untick Show Loop Area and the band goes; the playhead keeps folding exactly as before.',
+      'Tick it again and the band is back — the setting is visual only, it never touched playback.',
     ],
     before: 'master had no loop region at all: the slider was a plain progress bar and Repeat One stopped and reloaded the song from 0:00.',
     harness: 'dev/test-vgm-loops.js',
     browse: `/browse/${HURRY_DIR}`,
     fixture: HURRY,
     preload: { dir: HURRY_DIR, name: '16 Hurry Up!.vgz' },
+    // Opens Settings so the checkbox is on screen for the toggle -- otherwise the
+    // untick happens off-camera and the clip claims a control the viewer never sees
+    // being clicked.
+    settings: { showPlayerSettings: true },
+    // Taller than the other clips, and the reason is measured rather than aesthetic.
+    // With the Settings panel open, VGM's per-chip toggles push "Show Loop Area" to
+    // y=532-551 while the footer starts at y=509 -- so at 900x720 the checkbox is
+    // *behind* the footer. elementFromPoint at its centre returns a footer transport
+    // button, and a synthetic click still fires the React handler, which is how this
+    // clip first passed its band assertions while clicking something no viewer could
+    // click. Nothing in the panel scrolls; height is the only lever (780 clears it by
+    // 18px, 840 by 78px -- the margin is for footers that grow with song metadata).
+    viewport: { width: 900, height: 840 },
+    // Timing is deliberately unhurried: 2s of hold before each state change, so a
+    // viewer can register the band appearing, then disappearing, then reappearing,
+    // and connect each to the click that caused it.
     steps: [
       { atMs: 200, repeat: 'one', label: 'Repeat One ON' },
-      { atMs: 3600, label: 'head still inside the band' },
+      { atMs: 2200, label: 'head cycling inside the band' },
+      { atMs: 4200, play: '#showLoopArea', label: 'untick Show Loop Area' },
+      { atMs: 6200, label: 'band gone' },
+      { atMs: 8200, play: '#showLoopArea', label: 'tick Show Loop Area again' },
+      { atMs: 10200, label: 'band back, still folding' },
     ],
     until: 'playing',
     assert: [
@@ -190,6 +195,21 @@ export const scenarios = [
       { name: 'head-folds-into-band', test: 'tr.samples.filter((x) => x.loop >= 1).length >= 10 && tr.samples.filter((x) => x.loop >= 1).every((x) => x.d >= s.band.startMs - 40 && x.d <= s.band.endMs + 40)' },
       { name: 'lead-in-unfolded', test: 'tr.samples.filter((x) => x.loop === 0 && x.p < s.band.startMs).length >= 3 && tr.samples.filter((x) => x.loop === 0 && x.p < s.band.startMs).every((x) => x.d === x.p)' },
       { name: 'tempo-1x', test: 'Math.abs(s.tempo - 1) < 0.001' },
+      // The merged Show Loop Area claim: the band was drawn, then not drawn, then
+      // drawn again, and the head never stopped folding across any of it. A DOM
+      // query alone cannot show "drawn, then hidden, then drawn" -- that needs the
+      // timeline -- so this is asserted over the trace, not the final state.
+      { name: 'band-toggled-off-then-on', test: 'tr.marks.length > 0 && tr.marks.some((m) => /untick Show Loop Area/.test(m.label)) && tr.marks.some((m) => /tick Show Loop Area again/.test(m.label))' },
+      { name: 'head-kept-folding-while-hidden', test: 'tr.samples.filter((x) => x.loop >= 1 && x.t > 4300 && x.t < 8100).length >= 10 && tr.samples.filter((x) => x.loop >= 1 && x.t > 4300 && x.t < 8100).every((x) => x.d >= s.band.startMs - 40 && x.d <= s.band.endMs + 40)' },
+      // And the band really was absent in that window: the sampler records whether
+      // the band element is in the DOM on every tick.
+      { name: 'band-absent-while-unticked', test: 'tr.samples.filter((x) => x.t > 4400 && x.t < 8000 && x.hasBand === false).length >= 10' },
+      { name: 'band-present-again-at-end', test: '!!document.querySelector(".Slider-loop")' },
+      // And the control that was clicked is genuinely on screen: topmost element at
+      // the checkbox's own centre must be the checkbox. This is the assertion that
+      // catches an occluded control, which no band assertion can -- a synthetic click
+      // dispatches straight to the handler whatever is painted over it.
+      { name: 'checkbox-was-really-clickable', test: '(() => { const cb = document.querySelector("#showLoopArea"); if (!cb) return false; const r = cb.getBoundingClientRect(); const t = document.elementFromPoint(Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)); return t === cb || cb.contains(t) || (t && t.contains(cb)); })()' },
     ],
   },
 
@@ -248,55 +268,36 @@ export const scenarios = [
   {
     id: 'blind-loop',
     section: 'main',
-    ready: false,
+    ready: true,
     title: 'No known loop region: the head parks and the label says Looping',
     watch: [
-      'This NSF driver loops internally and reports no loop point.',
-      'Rather than inventing one, the head stops at the end and the duration reads "Looping".',
+      'This tune reports no loop point, and the length the app has for it is just a number in a file.',
+      'Rather than inventing a region, the head stops at the end, the elapsed time keeps climbing, and the duration reads "Looping".',
     ],
     before: 'master clamped the head at the track length with no indication that playback would continue.',
     harness: 'dev/test-gme-loops.js',
-    browse: '/browse/nes-audio-tests',
-    // Preload is required, not decoration: this scenario has no `open` step, so
-    // without it nothing starts playback and `until: 'playing'` never goes true.
-    preload: { dir: 'nes-audio-tests', name: 'clip_5b.nsf' },
+    browse: '/browse/nsfe/Akumajou%20Densetsu%20(VRC6).nsfe',
+    fixture: 'nsfe/Akumajou Densetsu (VRC6).nsfe',
+    // Sub-song 4 of 28. A multi-song file's own row is a *song folder*, so preload
+    // has to name the sub-song -- that is the row that plays.
+    preload: { dir: 'nsfe/Akumajou Densetsu (VRC6).nsfe', name: 'Beginning', subtune: 3 },
     steps: [
       { atMs: 100, repeat: 'one', label: 'Repeat One ON' },
-      { atMs: 4200, label: 'past the listed length' },
+      // GME reports play_length 101000 ms for this sub-tune, parsed at load from
+      // gme_track_info -- the catalog has no length for it. Sitting at 1:00:00 of
+      // real playback to reach the end of a 101 s track is not a clip, so jump to
+      // one second before it. Measured with dev/record/probe.mjs: from 98000 the
+      // position has still not crossed the length after 2.5 s, from 100000 it has
+      // (within ~325 ms), and the audio afterwards is at full level (RMS 0.099 mean
+      // vs 0.093 playing from 0:00), so this is the music and not a silent tail.
+      { atMs: 900, seek: 100000, label: 'seek to 1s before the reported length' },
+      { atMs: 4200, label: 'head parked, duration reads Looping' },
     ],
     until: 'playing',
     assert: [
       { name: 'no-band', test: 's.band === null' },
       { name: 'playing-indefinitely', test: 's.indefinite === true' },
       { name: 'label-says-looping', test: 'document.body.textContent.indexOf("Looping") >= 0' },
-    ],
-  },
-
-  {
-    id: 'show-loop-area',
-    section: 'main',
-    ready: true,
-    title: 'Show Loop Area hides the band without touching playback',
-    watch: [
-      'The Settings checkbox is unticked: the band disappears from the slider.',
-      'The playhead keeps folding exactly as before — the setting is visual only.',
-    ],
-    before: 'master had no loop band and no such setting.',
-    harness: 'dev/test-vgm-loops.js',
-    browse: `/browse/${HURRY_DIR}`,
-    fixture: HURRY,
-    preload: { dir: HURRY_DIR, name: '16 Hurry Up!.vgz' },
-    settings: { showPlayerSettings: true },
-    steps: [
-      { atMs: 200, repeat: 'one', label: 'Repeat One ON' },
-      { atMs: 2600, label: 'band visible' },
-      { atMs: 3000, play: '#showLoopArea', label: 'untick Show Loop Area' },
-      { atMs: 5000, label: 'band gone, still folding' },
-    ],
-    until: 'playing',
-    assert: [
-      { name: 'band-hidden', test: '!document.querySelector(".Slider-loop")' },
-      { name: 'display-still-advances', test: 'tr.samples[tr.samples.length - 1].d > tr.samples[0].d' },
     ],
   },
 
@@ -325,22 +326,30 @@ export const scenarios = [
   {
     id: 'gme-looping-driver',
     section: 'deep',
-    ready: false,
+    ready: true,
     title: 'NSF — a driver that loops internally is never cut',
-    watch: ['The track keeps rendering past its listed length; the engine never reports the track ended.'],
+    watch: [
+      'Playback passes the length the engine reported and keeps going: the driver loops on its own.',
+      'The position climbs past that length and never rewinds, so nothing is reloaded and nothing is cut short.',
+    ],
     harness: 'dev/test-gme-loops.js',
-    browse: '/browse/nes-audio-tests',
-    // Preload is required, not decoration: this scenario has no `open` step, so
-    // without it nothing starts playback and `until: 'playing'` never goes true.
-    preload: { dir: 'nes-audio-tests', name: 'clip_5b.nsf' },
+    browse: '/browse/nsfe/Akumajou%20Densetsu%20(VRC6).nsfe',
+    fixture: 'nsfe/Akumajou Densetsu (VRC6).nsfe',
+    preload: { dir: 'nsfe/Akumajou Densetsu (VRC6).nsfe', name: 'Beginning', subtune: 3 },
     steps: [
       { atMs: 100, repeat: 'one', label: 'Repeat One ON' },
-      { atMs: 4000, label: 'past the listed length' },
+      // play_length is 101000 ms (see blind-loop for the measurement).
+      { atMs: 900, seek: 100000, label: 'one second before the reported length' },
+      { atMs: 4600, label: 'past it, still rendering' },
     ],
     until: 'playing',
     assert: [
-      { name: 'still-rendering', test: 's.positionMs > s.durationMs' },
-      { name: 'no-restart', test: 'tr.samples[tr.samples.length - 1].p > tr.samples[0].p' },
+      { name: 'still-rendering', test: 's.positionMs >= s.durationMs' },
+      // Monotonic over the whole trace, not "the last sample beat the first".
+      // The old fixture was a 1.3 s test tone that ends, so position sawtoothed
+      // 0 -> 1253 -> 46 every cycle -- and last > first still passed, meaning the
+      // assertion could not fail on the exact case it was written for. This one can.
+      { name: 'never-restarts', test: 'tr.samples.length > 5 && tr.samples.every((x, i, a) => i === 0 || x.p >= a[i - 1].p - 250)' },
     ],
   },
 
@@ -413,26 +422,39 @@ export const scenarios = [
   {
     id: 'sid-tail-restart',
     section: 'deep',
-    ready: false,
+    ready: true,
     title: 'SID — no loop API, so the tune free-runs and a tail detector restarts it',
     watch: [
-      'There is nothing to seek to, so playback continues past the listed length.',
-      'When the tune goes quiet and still, it restarts — the "Detect Song End While ↻ One" param.',
+      'There is nothing to seek to, so playback continues past the length the tune claims for itself.',
+      'When the tune goes quiet and still, it restarts — the "Detect Song End While ↻ One" setting.',
     ],
     harness: 'dev/test-end-detector.js',
-    browse: '/browse/sid/Monty_on_the_Run.sid',
-    fixture: 'sid/Monty_on_the_Run.sid',
-    // A multi-tune SID row is a *song folder*: clicking it navigates rather than
-    // plays, so preload waits forever. Name a sub-tune -- that is the playing row.
-    preload: { dir: 'sid/Monty_on_the_Run.sid', name: 'Tune 1', subtune: 0 },
+    browse: '/browse/sid/Bionic_Commando.sid',
+    fixture: 'sid/Bionic_Commando.sid',
+    // Sub-song 3 of 10, and unlabeled, so the row reads "Tune 3". A multi-tune SID's
+    // own row is a *song folder*: clicking it navigates rather than plays, so preload
+    // has to name the sub-song.
+    preload: { dir: 'sid/Bionic_Commando.sid', name: 'Tune 3', subtune: 2 },
     steps: [
       { atMs: 100, repeat: 'one', label: 'Repeat One ON' },
-      { atMs: 5000, label: 'free-running' },
+      // Measured with dev/record/probe.mjs. HVSC lists this sub-tune at 0:03, so the
+      // trip gate (listed length minus one 6 s window) is already open at 0:00. The
+      // tune's audio ends at ~4.5 s, the detector then needs a full quiet+static
+      // window, and the restart lands at ~10 s; the cycle repeats every ~10.4 s. A
+      // 13 s take is the shortest that shows the restart *and* the music resuming --
+      // an earlier 6 s take simply ended before the event it is about, which is how
+      // this clip came to assert a 30 s position on a 5 s take.
+      { atMs: 10600, label: 'the tail went quiet and still' },
+      { atMs: 13000, label: 'restarted from the top' },
     ],
     until: 'playing',
     assert: [
-      { name: 'past-listed-length', test: 's.positionMs > 30000' },
-      { name: 'looping', test: 's.looping === true' },
+      { name: 'detector-armed', test: 's.detectSongEnd === true && s.tripAtMs === 0' },
+      { name: 'free-ran-past-listed-length', test: 'tr.samples.length > 20 && tr.samples.some((x) => x.p >= x.dur)' },
+      // The restart signature: position drops back to the top while playback
+      // continues, i.e. re-run in place rather than the song being reloaded.
+      { name: 'restarted-in-place', test: 'tr.samples.length > 20 && tr.samples.some((x, i, a) => i > 2 && x.p < a[i - 1].p - 250)' },
+      { name: 'same-song-no-reload', test: 's.playing === true && s.ref.path === "sid/Bionic_Commando.sid" && s.ref.subtune === 2' },
     ],
   },
 

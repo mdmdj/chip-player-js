@@ -297,6 +297,17 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
     Skips cleanly if the server or the catalog is absent.
   - `node dev/test-songrefs.js` — the `SongRef` identity model in `src/util.js`.
   - `node dev/test-devtools.js` — the `__cpDev` stall-watch latch.
+  - `dev/record/probe.mjs` — measure a fixture in the live app
+    (`node dev/record/probe.mjs "/?play=<id>&subtune=N" [seek|watch|calls|restart]`).
+    For the numbers a clip's assertions depend on when the catalog has none: engine
+    `play_length`, the SID end-detector trip gate, whether a driver free-runs past
+    its reported length. Taps the app's own gain node, so a seek into a silent tail
+    cannot pass as music.
+  - `dev/record/vid*.mjs` — page-delivery checks, all headless and none of them
+    needed by `run-tests.sh`: `vidcheck` (one clip's media pipeline state),
+    `vidall` (every clip, per-clip verdicts), `vidleak` (bytes pulled on load),
+    `vidgeom`/`vidcap`/`vidsharp` (what `recordVideo` and a window size actually
+    produce — see `dev/record/FINDINGS.md`).
   - `./dev/run-tests.sh` — runs all of the above. Dev-only, not part of the PR.
   - `dev/README.md` documents the shims.
   - Two tracked seams keep the untracked overrides loadable without touching
@@ -1325,10 +1336,10 @@ checks no longer work. Compare a live context to a stored one with
    (matching the repo, which has no test runner or CI). If Matt wants a durable
    suite, the same harnesses could move to a tracked `test/` dir and run via
    `node --test` with no new deps.
-3. **Changelog page with video examples.** *Tooling built 2026-10-05; 15/18 clips
-   recorded, 12 passing and on the page, 3 recorded-but-red pending a decision about
-   what they assert.* `dev/record/` holds the whole pipeline: a clip registry
-   (`scenarios.mjs`, 18 scenarios, validated by `scenarios.check.mjs` and wired
+3. **Changelog page with video examples.** *Tooling built 2026-10-05; **14/14 clips
+   recorded, passing and published** (6 main, 8 per-format), after a curation pass
+   merged four clips away.* `dev/record/` holds the whole pipeline: a clip registry
+   (`scenarios.mjs`, 14 scenarios, validated by `scenarios.check.mjs` and wired
    into `dev/run-tests.sh`), the page-side recorder shim
    (`dev/shims/recorder.js` → `src/chip-player-record.js`, `window.__cpRec`),
    the flash/mux scripts, and a generator that emits a self-contained `site/`
@@ -1364,17 +1375,85 @@ checks no longer work. Compare a live context to a stored one with
    - `preview_evaluate` still fails intermittently **at the transport level** when
      previewing; retry, and read `__cpRec._run` / `__cpRec.result()` to see
      whether a "failed" call landed.
-   - **15 of 18 clips are recorded and passing** (9 main, 6 per-format); the three
-     that are recorded-but-red fail because their *assertion or fixture contradicts
-     their own claim*, not because of the pipeline. Do not loosen them to get green
-     — the page publishes those numbers as verification. The remaining work, and
-     the catalog constraint behind `blind-loop`, are in "Open: the last three
-     clips" in `dev/record/README.md`.
+   - **All 14 clips are recorded, passing and published** (6 main, 8 per-format).
+     Four were *removed on purpose* rather than fixed, because they were redundant
+     with `songfolder` or with `loop-band`: `subtune-is-a-song`, `labels`,
+     `share-link` and `show-loop-area`. Their claims were folded into those two
+     clips' `watch` bullets and `before` lines, so nothing was lost — the page is
+     shorter and every clip earns its place.
+   - **The green-verdict trap, three times over.** The single most valuable lesson
+     from the curation pass, and all three instances shipped a *passing* clip that
+     did not do the thing it claimed:
+     1. `button[title*="avorite"]` — `FavoriteButton` renders no `title`, so the
+        selector **matched nothing** and nothing was favourited. Then unscoped
+        `button.FavoriteButton` clicked the **first row's heart** (Prelude) while
+        the clip claimed Epitaph. Then `a[href="/favorites"]` **never matched**
+        either, because the nav link spreads the search params and the href is
+        `/favorites?r=<cache-buster>` — the take never left `/browse`. All three
+        passed, because "Epitaph", the folder name and `subtune=1` are on the
+        browse page too. **A selector that matches nothing cannot fail an
+        assertion**, so an assertion has to name the page it is about.
+     2. `Show Loop Area` was clicked while **behind the footer**
+        (`elementFromPoint` at its centre returned a transport button). A synthetic
+        click fires the React handler regardless, so the band assertions were green
+        over a click no viewer could make. `loop-band` now records at 900x840 and
+        asserts the checkbox is genuinely the topmost element at its own centre.
+     3. `document.body.textContent` searches for a song title pass on any page,
+        because the **footer** keeps showing the playing song — scope assertions to
+        `.BrowseList` (or to the trace), never to `body`.
+     The general form: **assert on the artefact, not on the state you manipulated**,
+     and when the claim is "the viewer sees X happen", assert X is *visible*.
+   - **A clip's fixture must support its own claim.** Three fixtures were replaced
+     after measuring rather than after reading: a ~1.3 s test tone that *ends* for a
+     clip about a driver that loops internally (GME reports `play_length` 101000 ms
+     for `nsfe/Akumajou Densetsu (VRC6).nsfe` sub-tune 3, seek to `play_length -
+     1000`); HVSC's real listed lengths, which arrive over HTTP at load
+     (`sid/Bionic_Commando.sid` sub-tune 2 is genuinely `0:03`, and the trip gate
+     `durationMs − 6000` is therefore 0 — open from the start); and a SID restart
+     whose first sampling window ended *exactly* at the restart, which made a
+     working mechanism look like it left the engine silent. Sampling windows must
+     outlast the event being demonstrated.
+   - **Lengths are not in the catalog.** `subtune.length_ms` is NULL for NSF/NSFE
+     and SID; GME parses `play_length` at load, SID fetches `/api/hvsc?sidHash=`
+     over HTTP and falls back to 150 s. Any clip asserting "past the reported
+     length" has to read the number the *player* used — `dev/record/probe.mjs`
+     exists for exactly this (`seek`/`watch`/`calls`/`restart` modes, and it taps
+     the app's own gain node so a seek into a silent tail cannot pass as music).
+   - **The page must be served with Range support, and must not preload.**
+     `python3 -m http.server` has no Range support, so `video.seekable` came back
+     empty (`0.00-0.00`), clips showed a first frame that would not play, and the
+     same file played standalone — which reads exactly like a broken encode.
+     `dev/record/serve.mjs` is `express.static` (already a repo dependency). Then,
+     separately, `preload="metadata"` made the page pull **all 35 MB** before any
+     click: a metadata probe is an open-ended `Range: bytes=0-`, so the server
+     streams whole files even though the browser cancels after the (front-placed)
+     moov. On HTTP/1.1's six-connections-per-host limit that queues 8 of 14
+     requests, and clicking play on a queued one stalls — **inconsistently**,
+     depending on link speed. Now `preload="none"` + a generated poster frame +
+     explicit `width`/`height` (without them the box collapses, since a
+     `preload="none"` element has no intrinsic size until play), and media is
+     cached for an hour while the HTML revalidates. Measured: 0 MB on load, and
+     14/14 still play from `readyState=0`.
+   - `recordVideo.size` must be **exactly the viewport**, and past 800px the default
+     silently rescales: 900x720 unset gives an 800x640 frame (0.889x, softening the
+     glyph edges dsf exists to protect). Also measured: `deviceScaleFactor` buys
+     supersampled antialiasing, **not** a bigger frame — output is CSS resolution,
+     so dsf must be held constant when comparing framings. Clips capture 900x720;
+     a scenario may ask for more via `viewport` (loop-band needs 840 for the reason
+     above).
    - Batch run lessons worth carrying: a scenario's `until` gate must never wait
      for its own first step (an `open` that starts playback deadlocks a
      `until: 'playing'` gate); a multi-tune file's row in its parent's listing is a
      **song folder**, so `clickRow` navigates instead of playing and a preload
-     waits forever; opening a sub-tune leaves the browse route (its href is
+     waits forever; `clickRow` cannot find `..` (App.js unshifts it client-side, so
+     it is not in any listing) — the shim special-cases it by exact text; the
+     **Favorites page is virtualized** (measured 33 rows in the DOM with the nsfe
+     group scrolled out of frame), so a clip that demonstrates favouriting sets
+     `clearFavorites: true` and must not rely on accumulated dev-user state — and
+     note that clearing has to go through `handleToggleFavorite`, because `faves` is
+     seeded from `localStorage`, so a server-only clear leaves the client believing
+     the favourites still exist and the next heart click *removes* instead of adds;
+     opening a sub-tune leaves the browse route (its href is
      `/?play=…&subtune=N`), so showing two directories needs the new
      `__cpRec.navigate()` step; the trace sampler must record every field the
      registered assertions read; and a virtualized listing is not a stable
@@ -1386,6 +1465,16 @@ checks no longer work. Compare a live context to a stored one with
    what master did instead, and every clip publishing the numbers that verify its
    claim. The page is hosted **separately** from the site (decision 1 in
    `dev/record/README.md`), not added to `public/`.
+   - **Open for tomorrow (polish, not blockers):** `loop-band` is now 10.3 s and
+     4.6 MB — the longest clip, because four states need unhurried pauses; the
+     honest lever is trimming the pre-toggle hold, not the pauses around the clicks.
+     `loop-band`'s assertions are still VGM-specific (`curLoop`, intro 342 / loop
+     800) while MDX is now a viable fixture for the same claim (its checkbox is not
+     occluded; its band starts at 69 s, so it would need a seek). Not yet confirmed
+     by the user: whether the preload/Range fix made playback *consistent* in their
+     browser — every check here is headless Chromium on a host with **no audio
+     device**, so a working-audio browser that still stalls would point somewhere
+     this box cannot see.
 4. Known unsupported formats (don't add to `FORMATS` without a player/parser):
    plain `.usf` sets (only `.miniusf` is supported), PSF/PSX (`psflib` is reused
    only by the USF loader; no PSX core), and PSM (`libxmp-lite` = it/mod/s3m/xm;

@@ -18,6 +18,7 @@ src/-catalog-tests/
 src/chip-core.js
 src/chip-core.wasm.buildinfo.json
 src/chip-player-devtools.js
+src/chip-player-record.js
 server/middleware/auth.dev.js
 server/catalog.json
 server/directories.json
@@ -34,3 +35,8 @@ libxmp/lite/cmake/libxmp-checks.cmake
 _ignore/
 dev/nes-audio-tests/
 dev/.promote-armed
+
+# Clip recording for the PR communication page (dev/record/README.md): .work holds
+# the raw per-take audio/proof, site/ is the generated upload directory.
+dev/record/.work/
+site/

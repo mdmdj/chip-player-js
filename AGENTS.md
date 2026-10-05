@@ -1419,21 +1419,26 @@ checks no longer work. Compare a live context to a stored one with
      length" has to read the number the *player* used — `dev/record/probe.mjs`
      exists for exactly this (`seek`/`watch`/`calls`/`restart` modes, and it taps
      the app's own gain node so a seek into a silent tail cannot pass as music).
-   - **The page must be served with Range support, and must not preload.**
-     `python3 -m http.server` has no Range support, so `video.seekable` came back
-     empty (`0.00-0.00`), clips showed a first frame that would not play, and the
-     same file played standalone — which reads exactly like a broken encode.
-     `dev/record/serve.mjs` is `express.static` (already a repo dependency). Then,
-     separately, `preload="metadata"` made the page pull **all 35 MB** before any
-     click: a metadata probe is an open-ended `Range: bytes=0-`, so the server
-     streams whole files even though the browser cancels after the (front-placed)
-     moov. On HTTP/1.1's six-connections-per-host limit that queues 8 of 14
-     requests, and clicking play on a queued one stalls — **inconsistently**,
-     depending on link speed. Now `preload="none"` + a generated poster frame +
-     explicit `width`/`height` (without them the box collapses, since a
-     `preload="none"` element has no intrinsic size until play), and media is
-     cached for an hour while the HTML revalidates. Measured: 0 MB on load, and
-     14/14 still play from `readyState=0`.
+   - **The page must be served with Range support.** `python3 -m http.server` has no
+     Range support, so `video.seekable` came back empty (`0.00-0.00`), clips showed
+     a first frame that would not play, and the same file played standalone — which
+     reads exactly like a broken encode. `dev/record/serve.mjs` is `express.static`
+     (already a repo dependency).
+   - **The intermittent stalls are fixed but NOT explained — do not repeat the
+     explanation.** The user reports playback is now consistent; the change set was
+     `preload="none"` + posters + explicit `width`/`height` +
+     `Cache-Control: max-age=3600`, and **which part fixed it is unknown**. The
+     story I wrote first — 14 simultaneous preloads queueing behind the browser's
+     six-connection-per-host limit — is **refuted**: `vidqueue.mjs` replays the old
+     `preload="metadata"` page and the deepest clip plays fine even clicked 0.5 s
+     after load, and `vidrange.mjs` shows `Range`+`If-Range` answered `206` under
+     both cache policies. Keep the changes anyway, on their own merits: 0 MB on
+     load is right for a page, `express.static`'s `max-age=0` re-fetched everything
+     every visit, and a `preload="none"` element needs a poster and explicit
+     dimensions or the box collapses. But the causal story was written *after* the
+     fix and survived no test — the user's "35 MB is about a second on a LAN, and
+     clicking play should make it load" was a better argument than all of it. Full
+     correction in `dev/record/FINDINGS.md`.
    - `recordVideo.size` must be **exactly the viewport**, and past 800px the default
      silently rescales: 900x720 unset gives an 800x640 frame (0.889x, softening the
      glyph edges dsf exists to protect). Also measured: `deviceScaleFactor` buys
@@ -1471,14 +1476,13 @@ checks no longer work. Compare a live context to a stored one with
      `loop-band`'s assertions are still VGM-specific (`curLoop`, intro 342 / loop
      800) while MDX is now a viable fixture for the same claim (its checkbox is not
      occluded; its band starts at 69 s, so it would need a seek).
-   - **Playback delivery: fixed and confirmed by the user** (2026-10-05) after the
-     Range + preload fixes. Everything here was verified in headless Chromium first,
-     which is *not* the same thing — see the two delivery bugs in `FINDINGS.md` and
-     the plain-language version of the second one, which is the one that explains
-     the "inconsistent" symptom. Worth keeping in mind for any future page: both bugs
-     were invisible to file-level checks. `ffprobe` called every clip valid, every
-     codec was `probably` playable, and 14/14 played in automation — the failure was
-     in how the page asked for them.
+   - **Playback delivery: the Range bug is established; the stall fix is confirmed
+     only in outcome** (2026-10-05). Both bugs were invisible to file-level checks:
+     `ffprobe` called every clip valid, every codec was `probably` playable, and
+     14/14 played in automation. Keep in mind for any future page that the *page's
+     requests* are a separate artefact from the files, and that "I changed it and it
+     works" is not the same claim as "I know why it works" — see the correction
+     above and in `FINDINGS.md`.
 4. Known unsupported formats (don't add to `FORMATS` without a player/parser):
    plain `.usf` sets (only `.miniusf` is supported), PSF/PSX (`psflib` is reused
    only by the USF loader; no PSX core), and PSM (`libxmp-lite` = it/mod/s3m/xm;

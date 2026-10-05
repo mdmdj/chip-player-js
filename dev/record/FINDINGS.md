@@ -194,76 +194,70 @@ Caveat that survives the fix: the Range half was a **local preview** bug. The
 uploaded page depends on the real host supporting ranges — worth confirming there,
 not assuming.
 
-## `preload="metadata"` on 14 videos is not free, and it fails *intermittently*
+## `preload="metadata"` on 14 videos: real cost, but NOT the cause of the stalls
 
-**Confirmed fixed** (2026-10-05): after `preload="none"` the user reports playback
-is consistent. The file-level checks never showed this one — see "what made it
-invisible" below.
+> **This section was wrong once and is corrected here rather than deleted.** The
+> first version claimed the intermittent stalls were caused by 14 simultaneous
+> preloads queueing behind the browser's six-connection limit. The user pushed back
+> with the obvious objection — on a LAN 35 MB is about a second, and clicking play
+> should make the browser fetch the video rather than sit at 0:00 — and both halves
+> are right. Re-tested with `vidqueue.mjs` against the *old* page: the deepest clip
+> on the page (14th of 14) plays fine when clicked 0.5 s after load, and fine after
+> an 8 s settle, with `readyState=4` and 3.06 s already buffered. The queue story
+> predicted the opposite. It is wrong.
 
-### The plain version, because the technical one does not explain "inconsistent"
+### What is actually established
 
-The page has 14 videos on it. `preload="metadata"` told the browser to fetch each
-one as soon as the page loaded — before you touched anything. Measured: **35 MB,
-all 14 files, on every page load.**
+- The **cost** of `preload="metadata"` here is real and measured: **35 MB across 14
+  files on page load**, because a metadata probe is an open-ended
+  `Range: bytes=0-` and faststart means the browser cancels after the front-placed
+  `moov` while the server has already committed to the whole file.
+- The **stalls** were reported by the user and are now gone. They were fixed by *some*
+  change in the same commit — `preload="none"`, posters, explicit `width`/`height`,
+  and `Cache-Control: max-age=3600` — and **which one is unknown**. The cache header
+  was the better suspect and was also tested: `vidrange.mjs` shows express answering
+  `Range` + `If-Range` with a `206` under *both* policies, so it is not that either.
+- So: the fix is confirmed by the user, the explanation is not. Anyone re-litigating
+  this should know the causal story was never verified, only the outcome.
 
-A browser will only run about **6 downloads at a time** to the same site. That
-limit is not a bug; it is decades-old HTTP/1.1 behaviour, there so one page
-cannot hog the network from every other tab. So of our 14 videos, **8 sat in a
-queue** waiting for a free slot.
+### What the page does now, and why that is still the right call
 
-Now the part that makes it feel random: whether a given clip worked when you
-clicked it depended on whether it happened to have a free slot *at that moment*,
-and that depended on how fast the link was and how big the files were (`songfolder`
-is 17 s and 5.3 MB; `share-link` was 0.2 MB). Slow link or big file → you clicked
-and it sat there. Fast link → it had already finished fetching and started
-instantly. **Same page, same clips, different results — which is exactly the
-"works sometimes" report**, and why clearing the cache and hard-reloading changed
-nothing: the cache was never the problem, the queue was.
+`preload="none"` + a generated poster per clip + explicit `width`/`height`. The
+reason to keep it is not that it fixed a stall — it is that a page should not pull
+35 MB of video before anyone has asked to watch any of it. Measured after the
+change: **0 MB on load**, all 14 still play from `readyState=0`.
 
-The fix is one attribute: **`preload="none"`** — fetch nothing until a click.
-Measured after: **0 MB on load**, and all 14 still play (from `readyState=0`,
-i.e. genuinely nothing preloaded). Two consequences to handle, both done:
+The two consequences of `preload="none"` are real and worth keeping in mind:
 
-- No first frame to show, so `build-site.mjs` generates a **poster** per clip
-  (1.8 MB for all 14, ~120 KB each). A side benefit: the page reads better than
-  black boxes.
-- A `preload="none"` element has **no intrinsic size until it is asked to play**,
-  so `width:100%; height:auto` collapsed every row to nothing and then jumped.
-  Fixed with explicit `width`/`height` attributes from `ffprobe`, which is what
-  those attributes are for.
+- No first frame to show, hence **posters** (1.8 MB for all 14, ~120 KB each). This
+  is also why they were introduced at the same time: an empty black box would have
+  been a regression in its own right.
+- A `preload="none"` element has **no intrinsic size until it is asked to play**, so
+  `width:100%; height:auto` collapsed every row to nothing and then jumped. Fixed
+  with `width`/`height` attributes from `ffprobe`, which is what those are for.
 
-Also changed: `express.static`'s default is `max-age=0`, i.e. "revalidate before
-every use", so every visit re-pulled all 35 MB anyway. Now the HTML revalidates
-(rebuilds show up) and the media is cached for an hour.
+And the cache header stands on its own merits: `express.static` defaults to
+`max-age=0` — "revalidate before every use" — so every visit re-fetched all 14
+clips. Now the HTML revalidates (rebuilds show up) and media is cached for an hour.
 
-### The technical version
+### The lesson, which is the opposite of the one I drew first
 
-A browser's metadata probe is an **open-ended** `Range: bytes=0-`. Because
-faststart puts the `moov` atom first, the browser only *needs* the first few KB —
-and then cancels the request. But the server has already committed to writing the
-whole file, so every one of those probes became a full-file `206`:
+Every check available to me said the page was fine: `ffprobe` called all 14 clips
+valid, `canPlayType` said `probably` for every codec, `vidall.mjs` played 14/14 with
+`readyState=4` and no media errors, and `vidqueue.mjs` plays the old page too. The
+symptom existed only in one browser, on one machine, and could not be reproduced
+here at all.
 
-```
-load finished in 6447 ms, 14 mp4 responses, 35.43 MB transferred
-songfolder.mp4   206   5538612 B   bytes 0-5538611/5538612   <- whole file
-```
+Then I fixed it, and immediately wrote a confident mechanism explaining why — one
+that **survived no test I could construct**. The user's two-sentence objection was
+worth more than all of that, because it was a sanity check against arithmetic: 35 MB
+on a LAN is not a latency problem, and my story quietly required it to be.
 
-14 whole files, competing for 6 connection slots.
-
-### What made it invisible
-
-Everything a file-level check would ask came back clean: `ffprobe` reported every
-clip as valid H.264 High / AAC-LC, `canPlayType` said `probably` for every codec,
-and `vidall.mjs` played 14/14 with `readyState=4` and no media errors. Automation
-passed *because* headless Chromium has no connection pressure and a null audio
-sink. The bug lived in the gap between "the file is fine" and "the page asks for
-14 of them at once" — which is why it had to be reproduced in a real browser
-before it was found, and why the user's confirmation, not the test suite, is what
-closed it.
-
-The general lesson, and the reason the delivery checks are separate tools:
-**assert on the artefact, not on the state you manipulated** — here the artefact
-is "what the page fetches, and when", which `vidleak.mjs` measures.
+So the process failure is the thing to carry: **an explanation written after a fix
+is a hypothesis, not a result, and it deserves the same scepticism as the fix.** The
+honest record is "the symptom is gone and here is what we changed"; the causal story
+is the part that needed the most evidence and got the least. `vidqueue.mjs` and
+`vidrange.mjs` exist so the next person can re-test rather than re-argue.
 
 ## The sync mark must be green, not white
 
@@ -295,7 +289,7 @@ follow a section marked historical.
 | `recordVideo.size`: never the dsf product, unset is not 1:1 either | **current** (framing) |
 | A selector that matches nothing cannot fail an assertion | **current** (read before writing a step that clicks) |
 | A page served without Range support looks like a broken encode | **current** (preview) |
-| `preload="metadata"` on 14 videos is not free, and it fails *intermittently* | **current** (page delivery) — plain-language version first; confirmed fixed by the user |
+| `preload="metadata"` on 14 videos: real cost, but NOT the cause of the stalls | **current** (page delivery) — outcome confirmed, causal story **refuted**; read the correction before repeating it |
 | The sync mark must be green | **current** (sync) |
 | Two clocks, and the audio offset | **current** |
 | Load the song *inside* the recorded window | **current** |

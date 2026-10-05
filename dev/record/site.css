@@ -1,0 +1,101 @@
+/* DEV-ONLY: page styling for the generated site (dev/record/build-site.mjs).
+   Two-column clip rows: video left at a portrait-ish aspect, prose right, so the
+   page reads as a document rather than a video gallery. Relative URLs only. */
+
+:root {
+  --bg: #0b1020;
+  --panel: #141a30;
+  --ink: #e8ecf8;
+  --dim: #98a2c0;
+  --accent: #7cc4ff;
+  --ok: #4ade80;
+  --bad: #f87171;
+  --border: #26304f;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 0 1.25rem 4rem;
+  background: var(--bg);
+  color: var(--ink);
+  font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+header, nav, section, footer { max-width: 68rem; margin: 0 auto; }
+
+header { padding: 3rem 0 1rem; }
+h1 { font-size: 2rem; line-height: 1.2; margin: 0 0 .75rem; letter-spacing: -.01em; }
+.lede { max-width: 46rem; color: var(--ink); }
+.lede strong { color: var(--accent); }
+.meta { color: var(--dim); font-size: .9rem; font-family: var(--mono); }
+
+nav {
+  position: sticky; top: 0; z-index: 5;
+  display: flex; gap: 1.25rem; flex-wrap: wrap;
+  padding: .75rem 0; margin-bottom: 1rem;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  border-bottom: 1px solid var(--border);
+}
+nav a { color: var(--accent); text-decoration: none; font-size: .95rem; }
+nav a:hover { text-decoration: underline; }
+
+section { padding: 2rem 0; border-top: 1px solid var(--border); }
+section h2 { font-size: 1.35rem; margin: 0 0 .5rem; }
+.section-note { color: var(--dim); max-width: 46rem; margin-top: 0; }
+
+/* Clip rows: video in a portrait frame, prose beside it.
+   The column is 480px rather than something smaller on purpose: the recorder
+   captures 1350x1350 and the clip is at source quality (SSIM 0.9956 against the
+   capture), so the only thing between the viewer and a sharp image is how much
+   the browser has to shrink it. At 340px that was a 4x downscale and read as
+   "low quality" even though the file was fine. */
+.clip {
+  display: grid;
+  grid-template-columns: minmax(280px, 480px) 1fr;
+  gap: 1.75rem;
+  padding: 1.5rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.clip-media video {
+  width: 100%; aspect-ratio: 1 / 1;   /* the recorder captures 1:1 at 900x900 */
+  background: #000; border: 1px solid var(--border); border-radius: 6px;
+  display: block;
+}
+.clip-text h3 { margin: 0 0 .35rem; font-size: 1.1rem; }
+.before { margin: 0 0 .6rem; color: var(--dim); font-size: .92rem; }
+.watch { margin: 0 0 .75rem; padding-left: 1.1rem; }
+.watch li { margin: .2rem 0; }
+
+.numbers { display: flex; flex-wrap: wrap; gap: .4rem .9rem; margin-bottom: .6rem; }
+.numbers span { font-family: var(--mono); font-size: .82rem; color: var(--dim); }
+.numbers em { color: var(--accent); font-style: normal; }
+
+details { border-top: 1px dashed var(--border); padding-top: .5rem; }
+summary { cursor: pointer; font-size: .9rem; color: var(--accent); }
+.verdict { border-collapse: collapse; margin: .6rem 0; font-family: var(--mono); font-size: .8rem; width: 100%; }
+.verdict td { padding: .18rem .5rem .18rem 0; border-bottom: 1px solid var(--border); }
+.verdict tr.ok td:last-child { color: var(--ok); }
+.verdict tr.bad td:last-child { color: var(--bad); }
+.marks-title { font-size: .8rem; color: var(--dim); margin: .8rem 0 .2rem; }
+.marks { margin: 0; padding-left: 1.1rem; font-family: var(--mono); font-size: .8rem; color: var(--dim); }
+.src { font-family: var(--mono); font-size: .78rem; color: var(--dim); }
+
+.snippet { padding: 1.25rem 0; border-bottom: 1px solid var(--border); }
+.snippet h3 { margin: 0 0 .3rem; font-size: 1.05rem; }
+.snippet p { margin: 0 0 .5rem; max-width: 46rem; }
+.snippet pre {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+  padding: .85rem 1rem; overflow-x: auto;
+  font-family: var(--mono); font-size: .82rem; line-height: 1.5;
+}
+code { font-family: var(--mono); }
+
+footer { padding-top: 2rem; color: var(--dim); font-size: .9rem; }
+
+@media (max-width: 720px) {
+  .clip { grid-template-columns: 1fr; }
+  .clip-media video { max-width: 480px; }
+}

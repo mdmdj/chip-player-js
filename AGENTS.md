@@ -162,14 +162,15 @@ is listed as overlay-only. At final PR prep these are the "1–2 lines" to
 remove by hand.
 
 Because the file is path-listed, `promote.sh` also skips the feature work that
-lands here. **Done 2026-10-02:** the `?play=` handler's `subtuneCount` injection
-into `__chipConfig` (`server/index.js`, in the `chipConfig` literal's `if (song
-.subtune_count > 1)` arm) is now hand-carried to the feature branch. Its
-counterpart, `m.subtune_count` in `getSongByIdStmt`, lives in
-`server/database.js` and promotes normally. Both are required together — the
-client branch `App.js` (`if (window.__chipConfig?.subtuneCount > 1)`) promotes,
-so without the server half every `?play=…&subtune=N` share link silently falls
-back to the containing directory.
+lands here. **Hand-carried (2026-10-02, re-carried 2026-10-06):** the `?play=`
+handler's `subtuneCount` in `__chipConfig` — now an unconditional
+`subtuneCount: song.subtune_count || 1` in the `chipConfig` literal — plus the
+whole `/shuffle` + `/random` rewrite (see "one field, one predicate" and the
+shuffle notes below). Its counterpart, `m.subtune_count` in `getSongByIdStmt`,
+lives in `server/database.js`, which promotes normally; it is carried by hand
+too, because the new `/shuffle` calls `getShuffleStmt` with a path *and* a
+prefix and the old two-parameter statement cannot answer that. The client half
+(`App.js`) promotes on its own — see the compatibility note below.
 
 **Also hand-carried:** `src/bindings/libsidplayfp-wrapper.cpp`'s
 `sid_set_subtune` fix (call `engine->load(currentTune)` after `selectSong()`).
@@ -932,7 +933,33 @@ Verified on the real catalog: 6758 files, 1140 subtune rows, 87 multi-song files
 - `/playback` accepts `subtune`; `playbacks` gains a `subtune` column
   (idempotent `ALTER TABLE` in `server/database.js`, also in the dev seed).
   `/top` (global, user, and metric=favorites) groups by `(song_id, subtune)`
-  and returns `subtune`, `subtune_count`, and `subtune_title`.
+  and returns `subtune`, `subtuneCount`, and `subtune_title`.
+
+### "Is this file a song folder?" — one field, one predicate
+
+The only thing to know about a file's sub-tunes is *how many songs it holds*.
+Every endpoint that reports a song reports it as **`subtuneCount`**, always
+present and never null: `/metadata`, `/top` rows, each favorite (a
+`COALESCE(…, 1)` in the SQL), and the `__chipConfig` a `?play=` share link
+carries. Nothing reads meaning into an absent field any more.
+
+The client asks it in exactly one place, `isSongFolder(song)` in `src/util.js`
+(next to the `SongRef` model), with `isSongFolderListing(listing)` for the same
+question asked of a Browse listing (whose rows *are* the songs when they carry
+a `subtune`). Callers: `App` (share-link landing, footer link), `Favorites`,
+`TopCharts`, `Browse`. `AppFooter` takes the answer as a prop, so the rule never
+reaches a component that only renders.
+
+Two deliberate exceptions: a `/browse` row answers from the server's own
+`type: 'songfolder'` (the server decides a row's shape, the client does not
+re-derive it), and `isSongFolder` falls back to a sub-tune *title* for
+responses cached before `subtuneCount` existed — `/metadata` is cached for an
+hour, so that hedge belongs to the hour, not to every call site.
+
+Consequence for hand-carrying: the two halves of the share-link change are
+independently compatible — the old client reads an absent `subtuneCount` as
+"not a song folder", and the new client falls back to the title — so the client
+half can arrive by promote while `server/index.js` is carried by hand.
 
 ## Client identity model: `SongRef`
 
@@ -1030,12 +1057,11 @@ because `Sequencer` copies its context).
    `release_date` over mtime. `processFile` clears sub-tune rows before the
    `music` REPLACE (FK ordering fix for incremental reprocessing).
 9. `AppFooter` shows the full song-folder path (and links into it) for
-   multi-song files; `isSongFolder` is derived from `/metadata`'s
-   `subtuneCount` (catalog) with a cached `subtuneTitle` as fallback (the dev
-   stub doesn't report sub-tunes).
+   multi-song files; the answer comes from `isSongFolder()` in `src/util.js`,
+   fed by `/metadata`'s `subtuneCount` (see "one field, one predicate").
 10. `playbacks.subtune` + sub-tune-aware Top Charts: `/playback` carries the
     sub-tune, and the global/user/favorites top queries group by
-    `(song_id, subtune)`, returning `subtune`/`subtune_count`/`subtune_title`
+    `(song_id, subtune)`, returning `subtune`/`subtuneCount`/`subtune_title`
     so `TopCharts.js` labels and plays the exact sub-song.
 11. Downloads: `getUrlFromFilepath` encodes per path segment, so browsers name
     downloads correctly instead of using the whole path.
@@ -1070,16 +1096,20 @@ checks no longer work. Compare a live context to a stored one with
   audio/engine/build/dev work. There is no commit list to maintain — a change
   either belongs to the feature branch or it does not. Run the app from the dev
   branch.
-- **Hand-carried fixes are committed (2026-10-02).** `feature/subtunes-as-first-class`
-  is at `55f2e3d87`, which carries the two hand-carried hunks `promote.sh` can
-  never deliver: P1 `__chipConfig.subtuneCount` injection in `server/index.js`
-  (and S4 `cache1Hour` restored to master), and P2 `engine->load(currentTune)`
-  in `libsidplayfp-wrapper.cpp`'s `sid_set_subtune`. **P1 is why the feature branch
-  used to be broken** — its client half (`App.js` `window.__chipConfig?.subtuneCount
-  > 1`) promotes, so without the server half every `?play=…&subtune=N` share link
-  fell back to the containing directory. Both files are path-listed in
-  `dev/promote-paths.txt`, so this is the *only* way they reach the PR: repeat it
-  by hand for any future feature work in them.
+- **Hand-carried fixes are committed.** `feature/subtunes-as-first-class` carries
+  the hunks `promote.sh` can never deliver: P1 `__chipConfig.subtuneCount` in
+  `server/index.js` (re-carried 2026-10-06 as an unconditional
+  `subtuneCount: song.subtune_count || 1`, together with the whole `/shuffle`
+  rewrite; S4 `cache1Hour` stays restored to master), and P2
+  `engine->load(currentTune)` in `libsidplayfp-wrapper.cpp`'s `sid_set_subtune`.
+  **P1 is why the feature branch used to be broken** — its client half
+  (`App.js`) promotes, so without the server half every `?play=…&subtune=N`
+  share link fell back to the containing directory. Both files are path-listed
+  in `dev/promote-paths.txt`, so this is the *only* way they reach the PR:
+  repeat it by hand for any future feature work in them. Carry the *siblings*
+  too when the two halves of an API are coupled — `server/database.js` promotes,
+  but carrying it by hand alongside keeps the pair coherent (see "one field, one
+  predicate").
 - **Engine-provenance stamping is overlay-only (2026-10-02).** `scripts/build-info.js`
   (the reader), `config/webpack.config.common.js` (the `DefinePlugin`) are listed in
   `dev/promote-paths.txt`; `src/index.js`'s `window.ChipCoreBuildInfo` assignment is

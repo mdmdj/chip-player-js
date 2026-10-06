@@ -425,24 +425,55 @@ because those are notes about the same navigation rather than separate changes.
 Removed, with their claims folded in: `subtune-is-a-song`, `labels`,
 `share-link`, `show-loop-area`. `top-charts-subtunes` was planned and never cut.
 
-### 7b. In-depth section — per-format / per-variant
+### 7b. In-depth section — per-format / per variant
 
-One clip per engine, same script shape (play → settle → toggle at the same
-elapsed time) so they are comparable side by side.
+Grouped by **mechanism**, not by format, cheapest-to-dearest, so the section ends
+on the fallback and the reader finishes knowing what happens when nothing better is
+available. Each clip's proof prints its own `clip id` and the `--clip` command that
+recorded it, so any row here can be matched to a file on disk and re-shot.
+
+**Native loops at load** — the format declares a region, so the band is correct
+from the first frame.
 
 | id | engine / variant | fixture | verdict must show |
 | -- | ---------------- | ------- | ----------------- |
-| `vgm-native` | VGM/VGZ, native loop count | `arcade-capcom/…/16 Hurry Up!.vgz` | `curLoop` increments; band stable across the toggle |
-| `gme-looping-driver` | NSF that loops internally — must not be cut | `catalog/nes-audio-tests/` single-song NSF | `positionMs` keeps climbing past `durationMs`; `_gme_track_ended` never fires |
-| `gme-one-shot` | NSF that ends — restarts in-buffer | an NSF from `catalog/nsf/` | `positionMs` resets to 0 on the cycle (the documented head-reto-zero case) |
-| `mdx-native` | MDX native loop + exact band from mdxmini | `mdx/G2MST6.MDX` | band ≈ `[69206, 103809]`, `curLoop` climbing, no reload |
-| `midi-cc102` | MIDI CC102/103 region (N64), piano roll stays populated | `midi/Nintendo 64 (SoundFont MIDI)_Mario Kart 64_01 - Main Theme.mid` | band `[0, 58348]`; events present past the loop point |
-| `midi-cc111` | Lone CC111 (RPG Maker) expands the same way | a catalog MIDI with a lone CC111 | band present, ends at song end |
-| `xmp-learned-band` | MOD/XM native loop count; band **learned** at the first backward order jump, so it appears mid-song | `mods/TECHTRIS.MOD` | band `[3940, 80700]` appears only after the `11→1` jump — stated plainly as the known limitation |
-| `sid-tail-restart` | SID free-runs past the HVSC length; tail detector restarts | `sid/Monty_on_the_Run.sid` (19 tunes) | position exceeds the listed length, then restarts; `Detect Song End While ↻ One` param shown |
-| `n64-indefinite` | N64 engine flag OR'd from Repeat One, timesliced seek | `n64/Blast Corps/01 Blast Corps.miniusf` | no tab freeze while dragging the slider; loop continues |
-| `v2m-tier3` | The honest tier-3: engine end → stop → reload | `v2m/apollo dvd copy 4.5.4kg.v2m` | position resets, a visible reload — the floor the other clips beat |
+| `vgm-native` | VGM/VGZ, libvgm loop count | `arcade-capcom/…/16 Hurry Up!.vgz` | `curLoop` climbs (measured 1→8), head cycling in band `[1142, 1942]` |
+| `mdx-native` | MDX native loop; band from mdxmini's own loop points | `mdx/G2MST6.MDX` | band `[69206, 103809]`; the head folds back to the band start after the far edge |
+| `midi-cc102` | MIDI CC 102/103 region (N64), opened from a share link | `…/Mario Kart 64/03 - 3 Raceways, Wario Stadium.mid` | band `[72062, 144125]`, the file's own SoundFont mounted, position wraps to the band start |
 
+**Indefinite playback looping** — *now with consistent song-ending silence
+detection, following GME.* No region to draw; the engine free-runs.
+
+| id | engine / variant | fixture | verdict must show |
+| -- | ---------------- | ------- | ----------------- |
+| `gme-looping-driver` | NSF whose driver loops internally — must not be cut | `nsfe/Akumajou Densetsu (VRC6).nsfe` | position keeps climbing past `durationMs`; never rewinds |
+| `sid-tail-restart` | SID has no loop API; free-runs, tail detector restarts | `sid/Bionic_Commando.sid` | passes the listed length, then restarts in place, same song |
+| `n64-indefinite` | N64 engine indefinite flag; seek done **off screen** | `n64/Blast Corps/04 Time to Get Moving!.miniusf` | passes the reported 1:54 with 0 backward jumps |
+
+**Learned loops** — nothing is declared up front; the region is found by listening.
+
+| id | engine / variant | fixture | verdict must show |
+| -- | ---------------- | ------- | ----------------- |
+| `xmp-learned-band` | MOD/XM; band learned at the first backward order jump, so it appears mid-song | `mods/TECHTRIS.MOD` | no band early, band `[3960, 80700]` after the `11→1` jump — stated plainly as the known limitation |
+
+**The default: repeat the whole song** — where no loop region exists or is needed,
+Repeat One falls back to what it always did.
+
+| id | engine / variant | fixture | verdict must show |
+| -- | ---------------- | ------- | ----------------- |
+| `sequencer-default-loop` | MIDI with **no** CC 102/103/110/111 in the byte stream, so no band can exist | `midi/DOOM/…/02 - At Doom's Gate (E1M1).mid` | no band; the song plays, the engine ends it, the Sequencer restarts the same file |
+| `v2m-tier3` | **withdrawn** (`ready: false`) pending the V2M duration bug — see AGENTS.md | `v2m/apollo dvd copy 4.5.4kg.v2m` | — |
+
+Two things the last group is asserting on purpose. **It is a default, not a
+failure:** `Sequencer.advanceSong` never advances `currIdx` under `REPEAT_ONE`, so a
+player with no `setLooping` override replays the whole file — which means a format
+added tomorrow inherits working behaviour with nothing to implement. And **the clip
+must be one whose mechanism is genuinely that**, which is why the V2M entry is
+withheld: its reported duration does not match its engine, so it was showing the
+blind-loop UI instead, and its take was too short to reach the reload it claimed.
+
+Not built, and deliberately: `gme-one-shot` and `midi-cc111` are covered by
+`dev/test-gme-loops.js` and `dev/test-midi-loops.js` rather than given page time.
 ## 8. Snippet appendix (no video)
 
 Each snippet is generated from the working tree at build time (file + line
@@ -500,7 +531,7 @@ before any content work.
 | M2 | Shim additions | `__cpRec` staged by `dev/apply.sh`; `pinDefaults()` provably neutralises the stale `tempo: 2`; generic loop fields in `snap()` | **done** — `dev/shims/recorder.js`; pins both the localStorage and server copies; see FINDINGS.md for the three bugs it took |
 | M3 | Registry + validator | every clip in `scenarios.mjs`; `scenarios.check.mjs` fails on a missing fixture, duplicate id, dead harness, assertion-free scenario or vacuous quantifier; wired into `dev/run-tests.sh` | **done** — 14 clips, validator green |
 | M4 | Main section | one clip per user-visible change, recorded, muxed, verified | **done, 6 clips** — `songfolder`, `favorite-subtune`, `loop-band`, `repeat-toggle-smooth`, `repeat-leave-fade`, `blind-loop`. Curated down from 10: `subtune-is-a-song`, `labels`, `share-link` and `show-loop-area` were merged into the clips they duplicated (see "Curation pass") |
-| M5 | In-depth section | one clip per engine's Repeat One mechanism, same | **done, 8 clips** — `vgm-native`, `gme-looping-driver`, `mdx-native`, `midi-cc102`, `xmp-learned-band`, `sid-tail-restart`, `n64-indefinite`, `v2m-tier3` |
+| M5 | In-depth section | one clip per Repeat One mechanism, grouped by mechanism rather than format (§7b) | **done, 8 published of 9 registered** — `native` 3: `vgm-native`, `mdx-native`, `midi-cc102`; `indefinite` 3: `gme-looping-driver`, `sid-tail-restart`, `n64-indefinite`; `learned` 1: `xmp-learned-band`; `floor` 1: `sequencer-default-loop`. `v2m-tier3` is `ready: false` and withheld pending the V2M duration bug (AGENTS.md). Every clip asserts audibility, and every one was rebuilt where its text claimed more than its footage showed |
 | M6 | Page | `build-site.mjs` emits `site/`; prose per clip; relative URLs only | **done** — `dev/record/build-site.mjs` + `site.mjs` + `site.css`; 7 snippets with build-time line ranges; 0 external requests; `preload="none"` + generated posters; `./dev/record/serve.sh` (now `serve.mjs`, express — a range-less server, or a preload that pulls 35 MB before you click, makes clips unplayable; see FINDINGS.md) |
 | M7 | PR hand-off | decide with the maintainer whether anything of the page belongs in the PR (probably not) | not started |
 | M8 | Page plays reliably | every clip starts on click, first try, in a real browser | **done** — two delivery bugs found and fixed (Range support, `preload`), both invisible to file-level checks; confirmed by the user after headless automation passed 14/14 |

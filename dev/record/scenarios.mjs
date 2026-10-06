@@ -88,6 +88,9 @@ export const scenarios = [
       // Two song files, two sub-tunes, one transport: the identity the whole
       // feature rests on. `path` alone would pass for the first folder alone.
       { name: 'second-sub-tune-is-the-playing-one', test: 's.path === "nsfe/Mega Man 2.nsfe" && s.subtune === 3' },
+      // The audio is half the claim on this page, and none of the assertions above can
+      // tell a playing engine from a silent one: every one of them reads the transport.
+      { name: 'audible', test: '(() => { const r = tr.samples.map((x) => x.rms).filter((n) => n != null); if (!(r.length >= 120)) return false; return Math.max(...r) > 0.02; })()' },
     ],
   },
 
@@ -156,6 +159,9 @@ export const scenarios = [
       // is an anchor in the same column, so counting anchors is off by one and would
       // have "failed" a correct take.
       { name: 'only-this-favorite', test: 'document.querySelectorAll(".BrowseList-row .FavoriteButton").length === 1' },
+      // The audio is half the claim on this page, and none of the assertions above can
+      // tell a playing engine from a silent one: every one of them reads the transport.
+      { name: 'audible', test: '(() => { const r = tr.samples.map((x) => x.rms).filter((n) => n != null); if (!(r.length >= 40)) return false; return Math.max(...r) > 0.02; })()' },
     ],
   },
 
@@ -224,6 +230,9 @@ export const scenarios = [
       // catches an occluded control, which no band assertion can -- a synthetic click
       // dispatches straight to the handler whatever is painted over it.
       { name: 'checkbox-was-really-clickable', test: '(() => { const cb = document.querySelector("#showLoopArea"); if (!cb) return false; const r = cb.getBoundingClientRect(); const t = document.elementFromPoint(Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)); return t === cb || cb.contains(t) || (t && t.contains(cb)); })()' },
+      // The audio is half the claim on this page, and none of the assertions above can
+      // tell a playing engine from a silent one: every one of them reads the transport.
+      { name: 'audible', test: '(() => { const r = tr.samples.map((x) => x.rms).filter((n) => n != null); if (!(r.length >= 70)) return false; return Math.max(...r) > 0.02; })()' },
     ],
   },
 
@@ -250,6 +259,9 @@ export const scenarios = [
       { name: 'no-backward-jump-before-first-loop', test: 'tr.samples.length >= 30 && tr.samples.slice(0, 20).every((x, i, a) => i === 0 || x.d >= a[i - 1].d - 30)' },
       { name: 'position-kept-advancing', test: 'tr.samples[tr.samples.length - 1].p > tr.samples[0].p + 3000' },
       { name: 'looping-after-toggle', test: 's.looping === true' },
+      // The audio is half the claim on this page, and none of the assertions above can
+      // tell a playing engine from a silent one: every one of them reads the transport.
+      { name: 'audible', test: '(() => { const r = tr.samples.map((x) => x.rms).filter((n) => n != null); if (!(r.length >= 35)) return false; return Math.max(...r) > 0.02; })()' },
     ],
   },
 
@@ -306,7 +318,7 @@ export const scenarios = [
       // Read from the trace, NOT from s: durationExtended is cleared when the
       // sequencer restarts the file, so the final snapshot says false even though
       // the flag was correctly set for the whole fade. The evidence is the envelope.
-      { name: 'fade-tail-played', test: '(() => { const t = tr.samples.filter((x) => x.t > 5100); return t.some((x) => x.p > 9000); })()' },
+      { name: 'fade-tail-played', test: '(() => { const t = tr.samples.filter((x) => x.t > 5100); return t.length >= 40 && t.some((x) => x.p > 9000); })()' },
       // "The fade plays out, and only then does the song end" is an *amplitude*
       // claim, and durationExtended is only a flag saying the tail was scheduled.
       // So read the envelope: it has to decline, and be near silence at the end.
@@ -359,6 +371,9 @@ export const scenarios = [
       { name: 'no-band', test: 's.band === null' },
       { name: 'playing-indefinitely', test: 's.indefinite === true' },
       { name: 'label-says-looping', test: 'document.body.textContent.indexOf("Looping") >= 0' },
+      // The audio is half the claim on this page, and none of the assertions above can
+      // tell a playing engine from a silent one: every one of them reads the transport.
+      { name: 'audible', test: '(() => { const r = tr.samples.map((x) => x.rms).filter((n) => n != null); if (!(r.length >= 30)) return false; return Math.max(...r) > 0.02; })()' },
     ],
   },
 
@@ -440,6 +455,9 @@ export const scenarios = [
       // 0 -> 1253 -> 46 every cycle -- and last > first still passed, meaning the
       // assertion could not fail on the exact case it was written for. This one can.
       { name: 'never-restarts', test: 'tr.samples.length > 5 && tr.samples.every((x, i, a) => i === 0 || x.p >= a[i - 1].p - 250)' },
+      // The audio is half the claim on this page, and none of the assertions above can
+      // tell a playing engine from a silent one: every one of them reads the transport.
+      { name: 'audible', test: '(() => { const r = tr.samples.map((x) => x.rms).filter((n) => n != null); if (!(r.length >= 30)) return false; return Math.max(...r) > 0.02; })()' },
     ],
   },
 
@@ -642,6 +660,9 @@ export const scenarios = [
       // "In place" is the claim of the native loop: the song never changed, so
       // nothing stopped and reloaded at the wrap.
       { name: 'no-reload-at-the-wrap', test: 'decodeURIComponent(s.path || "") === "mods/TECHTRIS.MOD"' },
+      // The audio is half the claim on this page, and none of the assertions above can
+      // tell a playing engine from a silent one: every one of them reads the transport.
+      { name: 'audible', test: '(() => { const r = tr.samples.map((x) => x.rms).filter((n) => n != null); if (!(r.length >= 200)) return false; return Math.max(...r) > 0.02; })()' },
     ],
   },
 
@@ -682,6 +703,9 @@ export const scenarios = [
       // continues, i.e. re-run in place rather than the song being reloaded.
       { name: 'restarted-in-place', test: 'tr.samples.length > 20 && tr.samples.some((x, i, a) => i > 2 && x.p < a[i - 1].p - 250)' },
       { name: 'same-song-no-reload', test: 's.playing === true && s.ref.path === "sid/Bionic_Commando.sid" && s.ref.subtune === 2' },
+      // The audio is half the claim on this page, and none of the assertions above can
+      // tell a playing engine from a silent one: every one of them reads the transport.
+      { name: 'audible', test: '(() => { const r = tr.samples.map((x) => x.rms).filter((n) => n != null); if (!(r.length >= 90)) return false; return Math.max(...r) > 0.02; })()' },
     ],
   },
 

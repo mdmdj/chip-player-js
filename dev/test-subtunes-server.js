@@ -215,6 +215,34 @@ async function main() {
     }
   });
 
+  await check('shuffle on a song folder shuffles its sub-tunes', async () => {
+    // A multi-song file browses as a "song folder" of sub-tunes, and a file has
+    // no children to prefix-match, so shuffle play enumerates its sub-tunes
+    // rather than returning nothing.
+    const limit = multiSong.subtune_count;
+    const res = await get(`/api/shuffle?limit=${limit}&path=${enc(multiSong.path)}`);
+    assert.strictEqual(res.items.length, limit, 'every sub-tune of the folder is shuffled');
+    for (const item of res.items) {
+      assert.strictEqual(item.path, multiSong.path);
+      assert.ok(Number.isInteger(item.subtune) && item.subtune >= 0, 'a real sub-tune index');
+      assert.ok(item.subtune < limit, `${item.path} sub-tune ${item.subtune} is within 0..${limit - 1}`);
+    }
+    const orders = new Set();
+    for (let i = 0; i < 5; i++) {
+      const again = await get(`/api/shuffle?limit=${limit}&path=${enc(multiSong.path)}`);
+      orders.add(again.items.map(item => item.subtune).join(','));
+    }
+    assert.ok(orders.size > 1, `the sub-tunes come back in random order (saw ${orders.size} orders)`);
+  });
+
+  await check('shuffle on a file path returns that file', async () => {
+    // Browsing a single-song file shows an empty listing, but shuffle play
+    // should still play the file it names.
+    const single = db.prepare('SELECT path FROM music WHERE subtune_count = 1 LIMIT 1').get();
+    const res = await get(`/api/shuffle?path=${enc(single.path)}`);
+    assert.deepStrictEqual(res.items, [{ path: single.path, subtune: 0 }]);
+  });
+
   await check('playback rejects a sub-tune the file does not have', async () => {
     const res = await fetch(`${API_BASE}/api/playback`, {
       method: 'POST',

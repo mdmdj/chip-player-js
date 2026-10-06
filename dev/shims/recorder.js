@@ -578,9 +578,58 @@ const dev = {
       return { scheduled: true, startsInMs: spec.delayMs, name: spec.name };
     }
 
-    const { name, preload, steps = [], until = null } = spec;
+    const { name, preload, steps = [], until = null, preRoll } = spec;
     let opened = null;
     if (preload) opened = await this.preload(preload);
+
+    // Off-screen pre-roll: seek *before* the trace, the audio recorder and the flash,
+    // so none of it is in the published clip.
+    //
+    // Built for N64/USF, whose seek renders forward to the target and takes a moment
+    // to catch up -- measured on '04 Time to Get Moving!': asking for 60000 reads
+    // 43451 immediately and 60518 once settled, so a seek recorded on camera shows a
+    // lurch and a pause rather than a jump. Seeking first and letting it settle turns
+    // that into a clip that simply starts partway through the song, which is the
+    // honest way to skip an intro nobody wants to watch.
+    //
+    // `settleMs` is measured, not guessed: the take must not start until the position
+    // has stopped catching up, so this waits for it to actually stabilise rather than
+    // sleeping a fixed time that a slower machine would not honour.
+    let preRolled = null;
+    if (preRoll) {
+      const { seek, settleMs = 6000, minMs = 400 } = preRoll;
+      const q = player();
+      if (!q) throw new Error('pre-roll needs a player; is the song loaded?');
+      const before = q.getPositionMs();
+      q.seekMs(seek);
+      const t0 = Date.now();
+      let last = q.getPositionMs();
+      let stableFor = 0;
+      // Stable = the position moved by less than ~1 frame in 250 ms, while the engine
+      // is still playing. A seek that is genuinely stuck therefore never "settles" and
+      // the clip fails loudly at the timeout instead of recording a frozen engine.
+      while (Date.now() - t0 < settleMs) {
+        await sleep(250);
+        const now = player() ? player().getPositionMs() : null;
+        if (now == null) break;
+        if (Math.abs(now - last) < 60) {
+          stableFor += 250;
+          if (stableFor >= minMs) break;
+        } else {
+          stableFor = 0;
+        }
+        last = now;
+      }
+      const q2 = player();
+      preRolled = {
+        askedMs: seek,
+        settledMs: Math.round(q2 ? q2.getPositionMs() : NaN),
+        errorMs: Math.round((q2 ? q2.getPositionMs() : NaN) - seek),
+        tookMs: Date.now() - t0,
+        fromMs: Math.round(before),
+        playing: q2 && typeof q2.isPlaying === 'function' ? q2.isPlaying() : null,
+      };
+    }
 
     const trace = startTrace(spec.intervalMs ?? 100);
     // Tap the app's gain node for the level meter the trace samples. Created here,
@@ -644,10 +693,17 @@ const dev = {
       }, 100);
     }
 
-    dev._run = { name, steps, trace, audioStartedAt, flashMark, t0: Date.now(), opened };
+    dev._run = { name, steps, trace, audioStartedAt, flashMark, t0: Date.now(), opened, preRolled };
     dev._result = null;
     dev._finishing = false;
-    return { name, t0: dev._run.t0, audioStartedAt, opened: opened ? opened.opened.name : null, steps: steps.length, span };
+    // preRolled is returned (and lands in the proof) so the seek's accuracy is on the
+    // record. A pre-roll that silently landed somewhere else would make the clip's
+    // position claims uncheckable, which is the same "green verdict, wrong artefact"
+    // shape this whole pipeline keeps having to guard against.
+    return {
+      name, t0: dev._run.t0, audioStartedAt, opened: opened ? opened.opened.name : null,
+      steps: steps.length, span, preRolled,
+    };
   },
 
   /** Small read of the finished take; safe to call repeatedly. */
@@ -743,6 +799,9 @@ const dev = {
       marks: tr.marks,
       trace: tr.samples,
       final: s,
+      // null for every clip that does not use one; present so a pre-roll's landing
+      // accuracy is auditable from the proof alone.
+      preRoll: run.preRolled || null,
     };
     const proofUp = await audio.uploadJson(proof, `${run.name}.proof.json`);
     // The returned value stays small on purpose: the full trace went to disk,

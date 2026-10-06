@@ -321,20 +321,47 @@ export const scenarios = [
     section: 'deep',
     group: 'native',
     ready: true,
-    title: 'VGM/VGZ — native loop count',
-    watch: ['libvgm loops forever in-engine; the loop counter climbs with no reload.'],
-    harness: 'dev/test-vgm-loops.js',
+    title: 'VGM/VGZ — the engine loops, so nothing reloads',
+    watch: [
+      'libvgm loops inside the engine, so the song never stops and nothing is re-fetched: the engine’s own loop counter climbs from 1 to 5 while the clip plays.',
+      'The band is the 800 ms the file marks as its loop, and the playhead cycles inside it — position 1.1 to 1.9 of a 6.4 s track.',
+      'Nothing else happens for the whole clip, which is the point: the loop is the engine’s, not the sequencer’s.',
+    ],
+    before: 'master stopped at the end of the song and re-fetched it from the network on every repeat.',
+    harness: 'dev/test-v2m-loops.js',
     browse: `/browse/${HURRY_DIR}`,
     fixture: HURRY,
     preload: { dir: HURRY_DIR, name: '16 Hurry Up!.vgz' },
+    // Timings are measured off the recorded proof, not estimated: curLoop first
+    // reaches 1 at 800 ms, 2 at 1600, 3 at 2400, 4 at 3200 and 5 at 4000 — one every
+    // 800 ms, which is the loop length. The marks name the same numbers the proof
+    // reports, so a reader can check one against the other. Held past the last one
+    // because the point is a counter that keeps climbing.
     steps: [
       { atMs: 200, repeat: 'one', label: 'Repeat One ON' },
-      { atMs: 3600, label: 'several loops' },
+      { atMs: 1000, label: 'loop 1 — 0.8 s in, still the same engine' },
+      { atMs: 2000, label: 'loop 2' },
+      { atMs: 3000, label: 'loop 3' },
+      { atMs: 4500, label: 'loop 5 — and still climbing, nothing reloaded' },
+      { atMs: 6000, label: 'the music never stopped' },
     ],
     until: 'playing',
     assert: [
-      { name: 'curLoop-rising', test: 'tr.samples.filter((x) => x.loop >= 2).length >= 8' },
-      { name: 'no-reload', test: 'tr.samples.at(-1).p > tr.samples[0].p' },
+      { name: 'looping', test: 's.looping === true' },
+      { name: 'vgm-engine', test: 's.player === "VGMPlayer"' },
+      // Quote the numbers the bullets quote, so the text and the proof agree.
+      { name: 'band-known', test: 's.band && s.band.endMs > s.band.startMs' },
+      { name: 'band-is-the-file-loop', test: 's.band && Math.abs(s.band.startMs - 1142) < 150 && Math.abs(s.band.endMs - 1942) < 150' },
+      // The claim, with the number in it: the engine’s own counter reached 5.
+      { name: 'curLoop-reached-5', test: 'tr.samples.length >= 40 && Math.max(...tr.samples.map((x) => x.loop || 0)) >= 5' },
+      { name: 'no-reload', test: 'tr.samples.length >= 40 && tr.samples.at(-1).p > tr.samples[0].p' },
+      // The playhead cycling inside the band is the visual half of the claim; a
+      // climbing counter alone would also be true of a transport that stopped moving.
+      {
+        name: 'head-cycling-in-the-band',
+        test: '(() => { const t = tr.samples; if (!(t.length >= 40)) return false; let folds = 0; for (let i = 1; i < t.length; i++) { if (typeof t[i].p === "number" && typeof t[i].d === "number" && Math.abs(t[i].p - t[i].d) > 200) folds++; } return folds >= 8; })()',
+      },
+      { name: 'audible', test: 'tr.samples.length >= 40 && tr.samples.filter((x) => x.rms != null).length > 20 && Math.max(...tr.samples.map((x) => x.rms || 0)) > 0.02' },
     ],
   },
 
@@ -375,19 +402,54 @@ export const scenarios = [
     group: 'native',
     ready: true,
     title: 'MDX — the engine loops, and the band is exact',
-    watch: ['mdxmini repeats its built-in loop natively; the band comes from the engine, not a guess.'],
+    watch: [
+      'mdxmini repeats the song’s own built-in loop, so the music is continuous — there is no reload and no gap.',
+      'The band comes from the engine’s own loop points, not a guess: 1:09 to 1:44 of a 1:47 track.',
+      'Past the far edge the head folds back to the start of the band, which is where the music is actually repeating — watch the position keep climbing while the playhead returns.',
+    ],
+    before: 'master stopped at the end of the song, or looped the whole file, with nothing on the slider.',
     harness: 'dev/test-mdx-loops.js',
     browse: '/browse/mdx',
     fixture: 'mdx/G2MST6.MDX',
     preload: { dir: 'mdx', name: 'G2MST6.MDX' },
+    // Timings are measured. MDX uses the base two-pass band, so it folds only *after*
+    // intro + 2 x loop = 103809 ms — a take that starts at the beginning never gets
+    // there (the previous version of this clip reached 5% of the song and folded 0
+    // times, which is why its "the band is exact" claim had nothing on screen).
+    // Measured with a 100 ms sampler: seek 101000 lands at 101330, and the first fold
+    // follows ~2.5 s later with the display returning to 69239, i.e. the band start of
+    // 69206. That equality is the "exact" claim, and asserted-below is what proves it.
     steps: [
       { atMs: 200, repeat: 'one', label: 'Repeat One ON' },
-      { atMs: 4000, label: 'still looping' },
+      { atMs: 1500, label: 'playing — the band is on the slider, the head has not folded yet' },
+      { atMs: 1800, seek: 101000, label: 'seek to just before the far edge' },
+      // ~4.3 s: the head crosses 103809 and returns to the band start.
+      { atMs: 4600, label: 'head folds back to 1:09 — the engine’s loop, not a reload' },
+      // Held well past it, so the folding is watchable rather than a single frame.
+      { atMs: 9000, label: 'still folding while the position keeps climbing' },
     ],
     until: 'playing',
     assert: [
-      { name: 'band-known', test: 's.band && s.band.endMs > s.band.startMs' },
       { name: 'looping', test: 's.looping === true' },
+      { name: 'mdx-engine', test: 's.player === "MDXPlayer"' },
+      { name: 'band-known', test: 's.band && s.band.endMs > s.band.startMs' },
+      // "Exact" means the engine’s own numbers, so assert them rather than just
+      // asserting a band exists. intro_length 34603 and loop_length 34603 give the
+      // base band [intro+loop, intro+2*loop] = [69206, 103809].
+      { name: 'band-is-the-engine-region', test: 's.band && Math.abs(s.band.startMs - 69206) < 400 && Math.abs(s.band.endMs - 103809) < 400' },
+      // The clip’s actual claim: the head really does fold back to the band start,
+      // repeatedly, while the absolute position keeps climbing. Both halves matter —
+      // a fold with a frozen position would mean the engine stopped.
+      {
+        name: 'head-folds-into-the-band',
+        test: '(() => { const tr2 = tr.samples; if (!(tr2.length >= 60)) return false; let folds = 0; for (let i = 1; i < tr2.length; i++) { if (typeof tr2[i].p === "number" && typeof tr2[i].d === "number" && Math.abs(tr2[i].p - tr2[i].d) > 1000) folds++; } return folds >= 3; })()',
+      },
+      {
+        name: 'position-keeps-climbing',
+        test: '(() => { const ps = tr.samples.map((x) => x.p).filter((n) => typeof n === "number"); if (!(ps.length >= 60)) return false; return ps[ps.length - 1] > ps[0]; })()',
+      },
+      // Audible: a fold and a moving position are both true of a silent engine.
+      { name: 'audible', test: 'tr.samples.length >= 60 && tr.samples.filter((x) => x.rms != null).length > 30 && Math.max(...tr.samples.map((x) => x.rms || 0)) > 0.02' },
     ],
   },
 
@@ -581,19 +643,57 @@ export const scenarios = [
     section: 'deep',
     group: 'indefinite',
     ready: true,
-    title: 'N64 — engine indefinite flag, and a seek that does not freeze the tab',
-    watch: ['Looping tracks free-run instead of reloading every cycle.'],
+    title: 'N64/USF — the engine free-runs under Repeat One',
+    watch: [
+      'Repeat One sets the engine’s own indefinite flag, so the track keeps rendering past the length the file reports — 1:54 here.',
+      'The position climbs through 1:54 and keeps going, with no rewind: the cycle boundary is the engine’s own, not a reload.',
+      'The take starts partway through the song, because a seek on this format is slow enough to be worth keeping off camera.',
+    ],
+    before: 'master faded and reloaded the track on every cycle.',
     harness: 'dev/test-end-detector.js',
-    browse: '/browse/n64/Blast%20Corps',
-    fixture: 'n64/Blast Corps/01 Blast Corps.miniusf',
-    preload: { dir: 'n64/Blast Corps', name: '01 Blast Corps.miniusf' },
+    browse: '/?play=TkTO3bP2',
+    fixture: 'n64/Blast Corps/04 Time to Get Moving!.miniusf',
+    // Off-screen seek, so the sluggishness is not in the clip. N64’s seek renders
+    // forward to the target and the catch-up is visible and slow, so seeking on
+    // camera would show a lurch rather than a cut. Measured on this file: asking
+    // 105000 reads 4395 immediately, and 92260 or 112995 once settled, after ~9 s. The
+    // landing is NOT repeatable between runs, so the script does not schedule around
+    // a particular number -- it asks for a point, lets the pre-roll settle, and
+    // asserts the behaviour after it. settleMs is generous for that reason.
+    preRoll: { seek: 105000, settleMs: 12000, minMs: 400 },
+    // No preload: the share link loads the song in App’s mount handler, and a
+    // preload would click a row this clip is deliberately not using.
     steps: [
-      { atMs: 100, repeat: 'one', label: 'Repeat One ON' },
-      { atMs: 4000, label: 'still looping' },
+      { atMs: 200, repeat: 'one', label: 'Repeat One ON' },
+      { atMs: 2000, label: 'playing from partway through' },
+      // The length is 114000 and the pre-roll leaves the position near the top of the
+      // song, so the crossing lands in the first second or two. Marked well past it.
+      // Span sized from the pre-roll's landing, not guessed: it settled at 104659 and
+      // the assertion wants to clear 114000 + 2000, so 15 s of take is needed and 8 s
+      // was ~3 s short (measured -- that take peaked at 113645).
+      { atMs: 4000, label: 'past the reported 1:54, still rendering' },
+      { atMs: 15000, label: 'still climbing — no reload' },
     ],
     until: 'playing',
     assert: [
       { name: 'looping', test: 's.looping === true' },
+      { name: 'n64-engine', test: 's.player === "N64Player"' },
+      // The clip’s actual claim: the reported length was passed and the position did
+      // not rewind. Both from the trace, so a clip that merely labelled the crossing
+      // cannot pass -- and "no backward jump" is what separates a free-run from a
+      // reload that happens to finish further along.
+      {
+        name: 'passed-the-reported-length',
+        test: '(() => { const ps = tr.samples.map((x) => x.p).filter((n) => typeof n === "number"); if (!(ps.length >= 40)) return false; return Math.max(...ps) > s.durationMs + 2000; })()',
+      },
+      {
+        name: 'never-rewound',
+        test: '(() => { const ps = tr.samples.map((x) => x.p).filter((n) => typeof n === "number"); if (!(ps.length >= 40)) return false; for (let i = 1; i < ps.length; i++) if (ps[i] < ps[i - 1] - 250) return false; return true; })()',
+      },
+      { name: 'free-running', test: 's.indefinite === true' },
+      // A clip can hold a position claim while the engine is silent, so audibility is
+      // asserted rather than inferred from the transport moving.
+      { name: 'audible', test: 'tr.samples.length >= 40 && tr.samples.filter((x) => x.rms != null).length > 20 && Math.max(...tr.samples.map((x) => x.rms || 0)) > 0.02' },
     ],
   },
 

@@ -747,6 +747,80 @@ own default), not 0. The base end detector is only armed when
 `silenceDuration >= 0`, so pinning 0 armed it and let a looping clip be ended by
 a silence heuristic instead of by the behaviour under test.
 
+## A clip that claims a moment must be filmed at that moment
+
+The third instance of the green-verdict trap, and the most expensive, because the
+verdict was correct *and* the clip was still wrong.
+
+Auditing every proof against its own `watch` bullets found three clips whose text
+promised more than their footage showed. The fix is the same every time: **measure
+the moment, then script up to it** — the clip's job is to arrive at the claim, not
+to describe hoping for it.
+
+| clip | claimed | filmed |
+| --- | --- | --- |
+| `mdx-native` | "the band is exact" | 5% of the song, **0** display-folds |
+| `n64-indefinite` | "instead of reloading every cycle" | 2% of the song |
+| `vgm-native` | "the loop counter climbs" | one bullet, no numbers quoted |
+
+`mdx-native` is the instructive one. MDX uses the *base* two-pass band, so the
+head only folds after `intro + 2*loop` = 103809 ms — a take that starts at the
+beginning can never arrive, and "the band is exact" had nothing on screen to be
+exact about. Seeking to 101000 first fixed it: 51 folds, the first landing **123 ms**
+from the band start (69206). Note that the seek was the *cause* of the original
+bug's invisibility — without it the clip looked fine, because `band-known` passed.
+
+The same audit turned up an assertion that could not fail on the thing it named:
+`repeat-leave-fade` claimed *"the fade plays out, and only then does the song end"*
+and asserted `durationExtended` — **a flag saying the tail was scheduled**. A hard
+cut, which is exactly what master did, passes that flag. The claim is an *amplitude*
+claim, so it needs an amplitude assertion: the envelope falls 0.140 → 0.000 over
+~4.8 s (libvgm's configured 4 s fade plus its 0.5 s of trailing silence). Reading
+the envelope also found the take was wrong in a second way — the song ends at
+~10.1 s and the default `finishAfterMs` of 600 ms ran the recording past it, so the
+clip contained the *next* song's attack, which is why the first attempt at those
+assertions failed while the fade was plainly audible.
+
+Two generalisations:
+
+- **A flag is not an observation.** Ask what the claim is *about* and assert on
+  that quantity. Scheduling ≠ happening; a counter that climbs is also true of a
+  transport that stopped.
+- **Audibility needs its own assertion.** Nine clips' assertions all read the
+  transport, which is precisely what a *silent* engine does too — every one of them
+  would have published a moving playhead and no sound. All 14 now assert an RMS
+  peak on the per-tick trace, with a length floor so it cannot pass on a partial
+  trace.
+
+And the fixture must suit the claim, which is now the check before recording:
+`mdx-native`'s band starts at 69 s, `xmp-learned-band`'s learning point is 80 s in,
+`n64-indefinite`'s reported length is 1:54 — a fixture is only usable if the thing
+you are filming happens inside a reasonable take.
+
+## Two seams for takes the default shape does not fit
+
+Added while rebuilding `n64-indefinite`, both general enough to be worth naming.
+
+**`preRoll` — seek before the recording starts.** N64/USF seeks render forward to
+the target and the catch-up is slow and visible: asking for 105000 reads 4395
+immediately and settles around 92260–112995 after ~9 s. Seek *inside* the take and
+the clip shows a lurch rather than a cut. `preRoll` runs before the trace, the
+audio recorder and the flash, and waits for the position to **stabilise** (moves
+<60 ms per 250 ms) rather than sleeping a fixed time — the seek is not instant, so
+a fixed sleep on a slower machine records a still-catching-up engine. Its landing
+accuracy goes into the proof, so a pre-roll that silently went somewhere else is
+checkable afterwards.
+
+The measurement that matters: the landing is **not repeatable between runs**. Two
+identical seeks landed at 92260 and 112995. So `n64-indefinite` asks for a point,
+lets the pre-roll settle, and asserts the *behaviour* afterwards rather than a
+position. Scheduling around a single sample of an unrepeatable seek is how a clip
+ends up claiming a moment it never reached.
+
+**`finishAfterMs` — stop the run past the last step.** For a clip whose song ends
+mid-take, the default 600 ms can run on into whatever the sequencer does next
+(`repeat-leave-fade` caught the restart's first buffer). See above.
+
 ## Settings pinning must write the server copy too
 
 `UserProvider` boots with `{...localSettings, ...serverSettings}` — the server

@@ -237,6 +237,10 @@ async function shootOne(scenario) {
       steps: scenario.steps,
       until: scenario.until || null,
       intervalMs: 100,
+      // Default is 600ms in the shim; a clip whose song ends mid-take sets this so the
+      // recording stops inside the silence rather than catching the sequencer's
+      // restart (see repeat-leave-fade).
+      finishAfterMs: scenario.finishAfterMs,
       assert: scenario.assert || [],
     });
     console.log(`armed ${scenario.id}: ${JSON.stringify(armed)}`);

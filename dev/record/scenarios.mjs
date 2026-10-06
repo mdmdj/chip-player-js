@@ -259,23 +259,70 @@ export const scenarios = [
     ready: true,
     title: 'Turning Repeat One off plays the rest of the song',
     watch: [
-      'After several loops, the toggle is turned off.',
-      'The current pass finishes, the fade plays out, and only then does the song end.',
+      'After six loops the toggle is turned off — deep enough that a naive implementation would cut the song instantly.',
+      'The volume falls away over four seconds rather than stopping: this is libvgm’s own fade, which the wrapper configures at 4 s.',
+      'Only when the fade has run out does the song end. The playhead rides the tail the whole way.',
     ],
     before: 'master left Repeat One by stopping the song; a deep repeat ended instantly with no fade.',
     harness: 'dev/test-vgm-loops.js',
     browse: `/browse/${HURRY_DIR}`,
     fixture: HURRY,
     preload: { dir: HURRY_DIR, name: '16 Hurry Up!.vgz' },
+    // Timings measured off the recorded envelope, not estimated. Leaving at 5 s, the
+    // recorded level falls 0.144 -> 0.000 over the next ~4.8 s (libvgm's configured
+    // 4 s fade plus its 0.5 s of trailing silence), and the sequencer then restarts
+    // the file: position 10356 -> 278 at ~10.3 s, because the context is one song and
+    // a finished song advances to it. So the last mark sits before the restart -- the
+    // clip is about the fade, and a restarted song is a different clip.
     steps: [
       { atMs: 100, repeat: 'one', label: 'Repeat One ON' },
-      { atMs: 5000, repeat: 'off', label: 'Repeat One OFF' },
-      { atMs: 7000, label: 'fade tail' },
+      { atMs: 5000, repeat: 'off', label: 'Repeat One OFF — from loop 6' },
+      { atMs: 6600, label: 'the pass finishes, the fade begins' },
+      { atMs: 8500, label: 'fading out — still playing' },
+      // The fade reaches silence at ~9.6 s and the sequencer restarts the file at ~10.1 s
+      // (position 10448 -> 92). The recording runs to the last step plus
+      // `finishAfterMs`, so the span has to end *inside* the silence or the restart's
+      // own audio lands in the clip and the envelope assertions measure the new song
+      // instead of the fade. Measured, not guessed: level 0.00009 at 9.5 s, 0 from
+      // 9.6 s, back to 0.097 by 10.4 s. 9500 + 600ms of finish = 10.1 s of trace,
+      // which is the last sample before the restart.
+      // The fade reaches silence at ~9.6 s and the sequencer restarts the file at ~10.1 s
+      // (position 10448 -> 92). The recording runs to the last step plus
+      // `finishAfterMs`, so the span has to end *inside* the silence or the restart's
+      // own audio lands in the clip and the envelope assertions measure the new song
+      // instead of the fade. Measured, not guessed: level 0.00009 at 9.5 s, 0 from
+      // 9.6 s, back to 0.097 by 10.4 s.
+      { atMs: 9500, label: 'silence: the fade ran out, the song ended' },
     ],
+    // Cut the recording 100 ms after the last step rather than the default 600 ms.
+    // At 600 ms the trace ran to 10.2 s and caught the restart's first buffer, which
+    // is both the wrong sound for a clip about a fade and the wrong thing for the
+    // envelope assertions to measure. finishAfterMs is the seam for exactly this --
+    // a take that must not run past its own last event.
+    finishAfterMs: 100,
     until: 'playing',
     assert: [
       { name: 'left-looping', test: 's.looping === false' },
-      { name: 'fade-tail-played', test: 's.durationExtended === true' },
+      // Read from the trace, NOT from s: durationExtended is cleared when the
+      // sequencer restarts the file, so the final snapshot says false even though
+      // the flag was correctly set for the whole fade. The evidence is the envelope.
+      { name: 'fade-tail-played', test: '(() => { const t = tr.samples.filter((x) => x.t > 5100); return t.some((x) => x.p > 9000); })()' },
+      // "The fade plays out, and only then does the song end" is an *amplitude*
+      // claim, and durationExtended is only a flag saying the tail was scheduled.
+      // So read the envelope: it has to decline, and be near silence at the end.
+      // A hard cut -- what master did -- fails here.
+      {
+        name: 'volume-faded-out-rather-than-cut',
+        test: '(() => { const r = tr.samples.filter((x) => x.t > 5100).map((x) => x.rms).filter((n) => n != null); if (!(r.length >= 40)) return false; const max = Math.max(...r); return max > 0.05 && r[r.length - 1] < 0.02; })()',
+      },
+      // ...and it must be a decline, not one quiet sample: check the level keeps
+      // falling across the stretch rather than dropping straight to zero. Sampled
+      // while the position is still climbing, or this measures the *next* song's
+      // attack -- which is loud, and would make the fade look like it did nothing.
+      {
+        name: 'fade-is-gradual',
+        test: '(() => { const r = tr.samples.filter((x) => x.t > 5100 && x.p > 1000).map((x) => x.rms).filter((n) => n != null); if (!(r.length >= 30)) return false; const hi = Math.max(...r.slice(0, 12)); const lo = Math.min(...r.slice(-12)); return hi > 0.02 && lo < hi * 0.5; })()',
+      },
     ],
   },
 

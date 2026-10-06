@@ -12,6 +12,20 @@
 // Fields
 //   id       file name stem: site/clips/<id>.mp4, dev/record/.work/<id>.*
 //   section  'main' (one clip per feature) | 'deep' (per format/variant)
+//   group    for section 'deep' only: which mechanism family the clip belongs to,
+//            rendered as a subheading. 'native'  the format declares a loop region
+//                     at load (VGM's loop points, MDX's mdxmini loop points, MIDI's
+//                     CC 102/103), so the band is correct from the first frame
+//            'indefinite' no loop region exists or is needed; the engine free-runs
+//                     and the song ends by silence detection following GME
+//            'learned'  no loop position is exposed up front; the region is found
+//                     by listening, so the band appears mid-song
+//            'floor'    the honest fallback: no loop points and no loop API, so the
+//                     song stops and reloads. Not a success -- the baseline the
+//                     others are measured against
+//            Every 'deep' clip must name one. scenarios.check.mjs rejects a missing
+//            or unknown group, because a clip that silently drops out of its
+//            subheading is the kind of thing that ships looking complete.
 //   ready    false until the clip has been recorded with a passing verdict;
 //            scenarios.check.mjs only enforces the fixture/assert rules on ready
 //            entries, so the registry can grow ahead of the recordings.
@@ -305,6 +319,7 @@ export const scenarios = [
   {
     id: 'vgm-native',
     section: 'deep',
+    group: 'native',
     ready: true,
     title: 'VGM/VGZ — native loop count',
     watch: ['libvgm loops forever in-engine; the loop counter climbs with no reload.'],
@@ -326,6 +341,7 @@ export const scenarios = [
   {
     id: 'gme-looping-driver',
     section: 'deep',
+    group: 'indefinite',
     ready: true,
     title: 'NSF — a driver that loops internally is never cut',
     watch: [
@@ -356,6 +372,7 @@ export const scenarios = [
   {
     id: 'mdx-native',
     section: 'deep',
+    group: 'native',
     ready: true,
     title: 'MDX — the engine loops, and the band is exact',
     watch: ['mdxmini repeats its built-in loop natively; the band comes from the engine, not a guess.'],
@@ -377,51 +394,152 @@ export const scenarios = [
   {
     id: 'midi-cc102',
     section: 'deep',
+    group: 'native',
     ready: true,
     title: 'MIDI — the loop region is read from CC 102/103',
-    watch: ['The band is the region the file itself marks, and the piano roll stays populated past it.'],
-    harness: 'dev/test-midi-loops.js',
-    browse: '/browse/midi',
-    fixture: 'midi/Nintendo 64 (SoundFont MIDI)_Mario Kart 64_01 - Main Theme.mid',
-    preload: { dir: 'midi', name: 'Nintendo 64 (SoundFont MIDI)_Mario Kart 64_01 - Main Theme.mid' },
-    steps: [
-      { atMs: 200, repeat: 'one', label: 'Repeat One ON' },
-      { atMs: 4000, label: 'second pass' },
+    watch: [
+      'Opened straight from a <code>/?play=…</code> link, so the take starts on the share link itself: the song plays, and the file brings its own SoundFont rather than the default GM one.',
+      'The band is the region the file marks itself — CC 102/103 puts it at 1:12–2:24 of a 2:24 track.',
+      'Play into the end of the band and the transport returns to 1:12: the marked region is what repeats, and it repeats in place without a reload.',
+      '1:08 is before the band and plays straight through; 2:15 is inside it and comes back to the top. Same file, two seeks, and only one of them loops.',
     ],
-    until: 'playing',
+    harness: 'dev/test-midi-loops.js',
+    // Opened on the share link rather than by clicking a row, so the clip shows the
+    // link working. `browse` is a whole path here: shoot.mjs assembles the URL with
+    // the URL API, so the `r=` cache-buster does not fold itself into the song id
+    // (which is what concatenating `?play=<id>?r=…` did).
+    browse: '/?play=0yQ5qCD3',
+    fixture: 'Nintendo 64 (SoundFont MIDI)/Mario Kart 64/03 - 3 Raceways, Wario Stadium.mid',
+    // No preload: the `?play=` handler has already loaded the song and mounted its
+    // SoundFont by the time the gate opens, and a preload would click a row this
+    // clip is deliberately not using.
+    steps: [
+      { atMs: 300, repeat: 'one', label: 'Repeat One ON' },
+      { atMs: 7300, seek: 68000, label: 'seek to 1:08 — before the marked region' },
+      { atMs: 15300, seek: 135000, label: 'seek to 2:15 — inside the marked region' },
+      // The wrap lands on the band end (144125 ms) and returns to the band start
+      // (72062 ms), measured 143359 -> 72295: 9.1 s after the seek, so this mark
+      // sits just past the boundary rather than exactly on it.
+      { atMs: 24600, label: 'looped — back to the top of the region' },
+      { atMs: 28600, label: 'still looping in the region' },
+    ],
+    // Gate on the SoundFont, not on `playing`. The MIDI player mounts the file's
+    // own sf2 asynchronously, so the two became true on the same tick here — but
+    // `playing` would also be satisfied by a take that silently fell back to the
+    // default GM font, which is the failure this gate exists to catch.
+    until: 'fileSoundfont',
     assert: [
+      { name: 'share-link-played-this-song', test: 'decodeURIComponent(s.path || "") === "Nintendo 64 (SoundFont MIDI)/Mario Kart 64/03 - 3 Raceways, Wario Stadium.mid"' },
+      { name: 'files-own-soundfont-mounted', test: 's.fileSoundfont === true' },
       { name: 'band-from-markers', test: 's.band && s.band.endMs > s.band.startMs' },
+      { name: 'band-is-the-marked-region', test: 's.band && Math.abs(s.band.startMs - 72062) < 400 && Math.abs(s.band.endMs - 144125) < 400' },
       { name: 'looping', test: 's.looping === true' },
+      // A MIDI clip whose SoundFont failed to mount still advances the transport
+      // and still reports its band, so audibility is asserted on its own rather
+      // than inferred from the position moving.
+      { name: 'audible-throughout', test: 'tr.samples.length > 40 && tr.samples.filter((x) => x.rms != null).length > 40 && Math.max(...tr.samples.map((x) => x.rms || 0)) > 0.02' },
+      { name: 'played-inside-the-band', test: 'tr.samples.length > 40 && tr.samples.some((x) => x.p > 73000 && x.p < 144000)' },
+      // The loop itself, from the trace rather than from a mark, so a clip that
+      // merely *labelled* the loop cannot pass: the position reached deep inside
+      // the band and then came back into it.
+      {
+        name: 'looped-back-to-band-start',
+        test: '(() => { const ps = tr.samples.map((x) => x.p).filter((n) => typeof n === "number"); const i = ps.indexOf(Math.max(...ps)); return ps.length >= 40 && i > 0 && ps.slice(i).some((p) => p < 80000); })()',
+      },
     ],
   },
 
   {
     id: 'xmp-learned-band',
     section: 'deep',
+    group: 'learned',
     ready: true,
-    title: 'MOD/XM — the band is learned from playback, so it appears late',
+    title: 'MOD/XM — the loop is found by listening',
     watch: [
-      'The first pass has no band: libxmp exposes no loop position up front.',
-      'At the first backward order jump the band appears — honest, but late. Say so.',
+      'The first pass has no band: libxmp exposes no loop position up front, so the slider has nothing to highlight.',
+      'The band appears the moment the engine actually jumps orders — 11 → 1 — and not a moment before. That is the honest shape of this feature: it is learned from playback, not declared.',
+      'On this file that jump is 80 s in, which is why the clip plays past the loop start and then seeks into the last stretch to reach it rather than sit through the whole wait.',
+      'The band is the repeating span, 0:04 to 1:20, running to the end of the single pass. The wrap is in place: no stop, no reload, no gap.',
     ],
     harness: 'dev/test-xmp-loops.js',
     browse: '/browse/mods',
     fixture: 'mods/TECHTRIS.MOD',
     preload: { dir: 'mods', name: 'TECHTRIS.MOD' },
+    // This file's numbers, measured for this take (and on record in AGENTS.md):
+    // duration 80700, the 11->1 backward jump, intro_length 3940, band
+    // [3940, 80700]. The clip does not discover the learning point, it is scheduled
+    // around it -- the jump is a property of the file, not something to poll for.
+    //
+    // Learning needs two things, and this script supplies both cheaply:
+    //   1. the loop START visited linearly, so its first-visit time is recorded
+    //      (order 1, at 3940 ms -- hence playing the first 10.5 s rather than seeking);
+    //   2. a backward jump onto that order, which fires the learning.
+    // A seek is fine for (2) because seekMs only forgets the *last* order; first-visit
+    // times are absolute and survive it. A seek is fatal for (1): landing on an order
+    // the linear flow never visited is skipped by design, so seeking straight to ~78 s
+    // would never learn anything. Playing past the loop start first is what makes this
+    // work -- an earlier draft of this comment claimed no seek could help, which was
+    // wrong, and cost a 92 s take to find out.
+    //
+    // The seek target is 68000 rather than "band end minus 4 s" (76700) because
+    // libxmp 4.5's xmp_seek_time snaps to an order boundary: measured, 76700 lands at
+    // 68600 and 80500 at 68880, while 68000 lands at 68040. So the last stretch before
+    // the jump is entered by asking for 68000, which is the accurate end of the seek
+    // range, and the wrap is then 12.7 s of playback away rather than 4 s.
     steps: [
-      { atMs: 100, repeat: 'one', label: 'Repeat One ON' },
-      { atMs: 6000, label: 'band learned (if reached)' },
+      { atMs: 300, repeat: 'one', label: 'Repeat One ON' },
+      // A label on the *absence*: this is the whole point of the clip, and the marks
+      // list is the only place a reader can see that the band was not there.
+      { atMs: 6000, label: 'first pass — nothing highlighted on the slider yet' },
+      // 10.5 s of music before the seek, which is what makes the clip watchable:
+      // the first stretch is there to be heard, not just to prime `seen`. Order 1
+      // (the loop start) is recorded at 3940 ms, so there is 6.5 s of margin.
+      { atMs: 10500, seek: 68000, label: 'seek into the last stretch' },
+      // The seek lands at ~68040, so the wrap at 80700 is 12.66 s later, i.e. take
+      // time ~23.3 s. Marked with room to spare: the landing point moves a few tens
+      // of ms between runs (68000-68080 measured) and a mark is a fixed time, not a
+      // condition.
+      { atMs: 23800, label: 'band learned at the backward order jump (11 → 1)' },
+      // ~7.7 s of the loop afterwards, so the band is on screen long enough to read
+      // and the music is audibly still going when the clip ends.
+      { atMs: 31500, label: 'still looping, now with the band drawn' },
     ],
     until: 'playing',
     assert: [
+      { name: 'xmp-engine', test: 's.player === "XMPPlayer"' },
       { name: 'looping', test: 's.looping === true' },
-      { name: 'native-loop-no-reload', test: 's.player === "XMPPlayer"' },
+      // The clip's actual claim: the band is *absent* at the start and *present*
+      // later. Read from the DOM on every tick, because the player reports a band
+      // internally the whole time -- "there was no band for the first minute" is not
+      // the same as "the player had nothing to draw".
+      {
+        name: 'band-appears-only-after-listening',
+        test: 'tr.samples.length >= 100 && tr.samples.slice(0, 40).every((x) => !x.hasBand) && tr.samples.slice(-40).every((x) => x.hasBand)',
+      },
+      // The precondition for learning, asserted because the whole script depends on
+      // it: the loop start was visited linearly before the seek. If a future edit
+      // seeks early, the band never appears and this fails first with the reason.
+      { name: 'loop-start-played-before-seek', test: 'tr.samples.length >= 100 && tr.samples.some((x) => x.p > 3900 && x.p < 6500)' },
+      { name: 'band-is-the-learned-region', test: 's.band && Math.abs(s.band.startMs - 3940) < 400 && Math.abs(s.band.endMs - 80700) < 400' },
+      // The band ends at the single-pass duration, because that is where the order
+      // jump happened. A band stopping short would be a different claim.
+      { name: 'band-runs-to-the-end-of-the-pass', test: 's.band && Math.abs(s.band.endMs - s.durationMs) < 400' },
+      // The wrap itself, from the trace rather than from a mark, so a clip that merely
+      // labelled the loop cannot pass. One wrap is the learning jump itself.
+      {
+        name: 'wrapped-at-the-band-end',
+        test: '(() => { const ps = tr.samples.map((x) => x.p).filter((n) => typeof n === "number"); if (!(ps.length >= 100)) return false; for (let i = 1; i < ps.length; i++) if (ps[i] < ps[i - 1] - 2000) return true; return false; })()',
+      },
+      // "In place" is the claim of the native loop: the song never changed, so
+      // nothing stopped and reloaded at the wrap.
+      { name: 'no-reload-at-the-wrap', test: 'decodeURIComponent(s.path || "") === "mods/TECHTRIS.MOD"' },
     ],
   },
 
   {
     id: 'sid-tail-restart',
     section: 'deep',
+    group: 'indefinite',
     ready: true,
     title: 'SID — no loop API, so the tune free-runs and a tail detector restarts it',
     watch: [
@@ -461,6 +579,7 @@ export const scenarios = [
   {
     id: 'n64-indefinite',
     section: 'deep',
+    group: 'indefinite',
     ready: true,
     title: 'N64 — engine indefinite flag, and a seek that does not freeze the tab',
     watch: ['Looping tracks free-run instead of reloading every cycle.'],
@@ -479,9 +598,30 @@ export const scenarios = [
   },
 
   {
+    // TODO(unpublish): withdrawn from the page pending the V2M duration bug -- see
+    // the note below and AGENTS.md ("V2M's reported duration does not match the
+    // engine"). `ready: false` is what keeps it off the page: build-site.mjs publishes
+    // on `ready`, so this clip is no longer shot or uploaded until it is fixed. The
+    // entry is kept rather than deleted because the harness and the finding both
+    // still matter, and deleting a clip is how the reason gets lost.
+    //
+    // Two things are wrong with it, and only the first is the bug:
+    //   1. The clip does not show its own claim. The song is 63 s and the take is
+    //      5.7 s, so it ends long before the engine does: the "reload" mark at 5106
+    //      labels an event that never happens on screen. Measured, not inferred --
+    //      the trace climbs monotonically to 6084 ms and stops.
+    //   2. The duration is wrong, which is why the UI gives it the blind-loop look.
+    //      getDurationMs() reports 63000 while the engine plays on past that, so the
+    //      slider reserves a 63 s box and the head parks at the end for a song that
+    //      has not finished. That is the actual defect, and it is why this clip is
+    //      not representative of the default group.
+    //
+    // The default-Sequencer-loop group is now shown by `sequencer-default-loop`
+    // instead, which is a cleaner demonstration of the same thing.
     id: 'v2m-tier3',
     section: 'deep',
-    ready: true,
+    group: 'floor',
+    ready: false,
     title: 'V2M — the honest fallback: stop and reload',
     watch: [
       'V2M has no loop points and no loop API, so the engine ends the song.',
@@ -499,6 +639,84 @@ export const scenarios = [
     until: 'playing',
     assert: [
       { name: 'looping-requested', test: 's.looping === true' },
+    ],
+  },
+
+  {
+    id: 'sequencer-default-loop',
+    section: 'deep',
+    group: 'floor',
+    ready: true,
+    title: 'No loop markers — Repeat One replays the whole file',
+    watch: [
+      'This MIDI file has no loop markers at all, so there is no region to draw: CC 102, 103, 110 and 111 are all absent from the byte stream, and the player reports no band.',
+      'Repeat One still does what it always did. The song plays, the engine ends it, and the Sequencer starts it again — the same file, from the top.',
+      'This is the floor, and it is the default rather than a failure: any format added tomorrow inherits it with nothing to implement.',
+      'Seek to near the end to reach the boundary without waiting out the whole song.',
+    ],
+    before: 'identical to master: where a format offers no loop region, nothing here changes.',
+    harness: 'dev/test-midi-loops.js',
+    browse: '/?play=xLCmKSWf',
+    fixture: 'midi/DOOM/Game MIDI_Doom (PC∕DOS, 1993)_02 - At Doom\'s Gate (E1M1).mid',
+    // No preload: the share link loads the song in App's mount handler, and a
+    // preload would click a row this clip is deliberately not using.
+    //
+    // Timings are the song-time values read off the player, and this file plays at
+    // 1:1 -- measured over a 12 s window: 11981 ms of song in 12000 ms of wall clock,
+    // a rate of 0.9984. So each number below is both the position and the clock,
+    // which is why the same integers appear on both sides of every comment.
+    //
+    // (An earlier draft measured a 1.53x rate and mis-timed the whole clip. It came
+    // from starting a stopwatch after the share link had already autoplayed ~2.4 s, so
+    // "4500 ms later" was really 6920 ms of position. A long window, and a start
+    // position near zero, are what make a rate trustworthy.)
+    //
+    // Measured with a 40 ms sampler on this timeline:
+    //   seek 90000  -> lands at 90139, leaving 4177 ms of song to the engine's end
+    //   +4676 ms    -> position drops to 0: the Sequencer reload, same file
+    //   +4455 ms    -> the display reads 0:04.5 again: the second pass
+    steps: [
+      { atMs: 300, repeat: 'one', label: 'Repeat One ON' },
+      { atMs: 4500, label: 'playing from 0 — no band on the slider' },
+      { atMs: 5000, seek: 90000, label: 'seek to 1:30, near the end' },
+      // The engine ends 4177 ms after the seek and the reload lands at 4676, so the
+      // boundary is ~10.2 s. A fixed time rather than a condition, because the
+      // boundary moves with tempo.
+      { atMs: 10200, label: 'song ended — the Sequencer started it again' },
+      { atMs: 14700, label: 'same file, playing on from the top' },
+    ],
+    // Gate on 'playing', NOT 'fileSoundfont' as midi-cc102 does. This file has no
+    // soundfont of its own -- its catalog row carries none, so MIDIPlayer leaves the
+    // synth on the default gmgsx-plus.sf2 -- and `fileSoundfont` requires a user/*
+    // mount, so gating on it here times out after 10 s and the take publishes nothing.
+    // Measured: soundfont reads gmgsx-plus.sf2 from load and never changes.
+    until: 'playing',
+    assert: [
+      { name: 'share-link-played-this-song', test: 'decodeURIComponent(s.path || "").indexOf("At Doom") >= 0' },
+      { name: 'looping', test: 's.looping === true' },
+      // The group's premise: there is no region to draw, so there is no band. If a
+      // future MIDI parser starts finding markers in files like this, this fails and
+      // the clip has to be re-thought rather than quietly re-shot.
+      { name: 'no-band-because-no-markers', test: 's.band == null' },
+      // The same file came back rather than the sequencer advancing to a different
+      // one. The path is sampled on every tick for exactly this: after a reload the
+      // old take showed `p > 80000` inside the trailing window, because the 6 s tail
+      // after the reload still contained the pre-reload position. Asserting on the
+      // path is also the stronger claim -- currIdx staying put is the mechanism, but
+      // what a viewer sees is the same song again.
+      {
+        name: 'reloaded-the-same-song',
+        test: 'tr.samples.length >= 100 && tr.samples.some((x) => x.p > 80000) && tr.samples.slice(-40).every((x) => decodeURIComponent(x.path || "").indexOf("At Doom") >= 0)',
+      },
+      // The actual claim: the transport went back to the top. Read from the trace, so
+      // a clip that merely labelled the reload cannot pass.
+      {
+        name: 'wrapped-back-to-zero',
+        test: '(() => { const ps = tr.samples.map((x) => x.p).filter((n) => typeof n === "number"); if (!(ps.length >= 100)) return false; for (let i = 1; i < ps.length; i++) if (ps[i] < 200 && ps[i - 1] > 80000) return true; return false; })()',
+      },
+      // A MIDI clip whose SoundFont failed to mount still advances the transport and
+      // still reports "no band", so audibility is asserted on its own.
+      { name: 'audible', test: 'tr.samples.length >= 100 && tr.samples.filter((x) => x.rms != null).length > 40 && Math.max(...tr.samples.map((x) => x.rms || 0)) > 0.02' },
     ],
   },
 ];

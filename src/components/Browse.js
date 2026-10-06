@@ -48,8 +48,8 @@ export default class Browse extends React.PureComponent {
     const urlParams = new URLSearchParams(window.location.search);
     urlParams.delete('q');
     const search = urlParams.toString();
-    // Rows of a song folder carry a sub-tune index; a directory's do not.
-    const isSongFolder = (listing || []).some(item => item.subtune != null);
+    // Rows of a song folder are its songs; a directory's rows are not.
+    const songFolder = isSongFolderListing(listing);
     // Check if previous page url is the parent directory of current page url.
     const prevPath = trimEnd(history.location.state?.prevPathname, '/');
     const currPath = trimEnd(window.location.pathname, '/');
@@ -121,7 +121,7 @@ export default class Browse extends React.PureComponent {
           /{browsePath}{' '}
           <button
             className="box-button"
-            title={isSongFolder
+            title={songFolder
               ? 'Shuffle this song folder'
               : 'Shuffle this directory (and all subdirectories)'}
             onClick={this.handleShufflePlay}>

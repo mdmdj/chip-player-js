@@ -368,19 +368,17 @@ router.get('/total', cache1Hour, (req, res) => {
 /**
  * Returns: { items: [ { path, subtune }, ... ], total }
  *
- * A multi-song file is shuffled as one of its sub-tunes, so shuffle plays
- * individual sub-tunes rather than always landing on sub-tune 0.
+ * One item per playable song: a multi-song file is expanded into its sub-tunes,
+ * so shuffle play treats a sub-tune exactly like a single-song file instead of
+ * landing on one arbitrary sub-tune per file.
  */
-function toShuffledSongRefs(rows) {
-  return rows.map(({ path, subtune_count }) => ({
-    path,
-    subtune: subtune_count > 1 ? Math.floor(Math.random() * subtune_count) : 0,
-  }));
+function toSongRefs(rows) {
+  return rows.map(({ path, subtune }) => ({ path, subtune }));
 }
 
 router.get('/random', (req, res) => {
   const limit = parseInt(req.query.limit, 10) || 1;
-  const items = toShuffledSongRefs(getShuffleStmt.all('%', limit));
+  const items = toSongRefs(getShuffleStmt.all('', '%', limit));
   res.json({
     items: items,
     total: items.length,
@@ -388,13 +386,26 @@ router.get('/random', (req, res) => {
 });
 
 /**
+ * Escapes LIKE metacharacters so a path is matched literally.
+ */
+function escapeLike(value) {
+  return value.replace(/[\\%_]/g, char => `\\${char}`);
+}
+
+/**
  * Returns: { items: [ { path, subtune }, ... ], total }
+ *
+ * `path` may name a directory, which is shuffled recursively, or a file, which
+ * shuffles as itself (all of its sub-tunes, if it has any).
  */
 router.get('/shuffle', (req, res) => {
   const limit = parseInt(req.query.limit, 10) || 100;
-  let reqPath = (req.query.path || '').replace(/^\/+/g, '');
-  if (reqPath !== '') reqPath += '/';
-  const items = toShuffledSongRefs(getShuffleStmt.all(`${reqPath}%`, limit));
+  const reqPath = (req.query.path || '').replace(/^\/+|\/+$/g, '');
+  const items = toSongRefs(getShuffleStmt.all(
+    reqPath,
+    reqPath === '' ? '%' : `${escapeLike(reqPath)}/%`,
+    limit
+  ));
 
   res.json({
     items: items,
@@ -629,7 +640,7 @@ router.get('/metadata', cache1Hour, (req, res, next) => {
       infoTexts: infoTexts,
       soundfont: soundfont,
       md5: meta.md5,
-      subtuneCount: meta.subtune_count,
+      subtuneCount: meta.subtune_count || 1,
       subtuneTitle: subtuneTitle,
     });
   } else {
@@ -930,11 +941,11 @@ function getHtmlInjectionsForRequest(req) {
       const chipConfig = {
         songId: song.song_id,
         songPath: song.path,
-      }
-      // Only multi-song files carry the count: it lets the client land
-      // inside the virtual song folder without probing the path first.
-      if (song.subtune_count > 1) {
-        chipConfig.subtuneCount = song.subtune_count;
+        // How many songs the file holds: > 1 means Browse presents it as a
+        // "song folder", so a share link lands inside it instead of on the
+        // containing directory. Sent for plain files too, so the client never
+        // has to read meaning into an absent field.
+        subtuneCount: song.subtune_count || 1,
       }
       scriptTag = `<script>window.__chipConfig = ${JSON.stringify(chipConfig)};</script>`;
 

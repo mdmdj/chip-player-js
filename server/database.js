@@ -112,7 +112,20 @@ const dbStatements = {
       WHERE m.song_id GLOB ?
   `),
   getTextContentStmt: db.prepare('SELECT content FROM texts WHERE id = ?'),
-  getShuffleStmt: db.prepare('SELECT path, subtune_count FROM music WHERE path LIKE ? ORDER BY RANDOM() LIMIT ?'),
+  // Shuffle play, one row per playable song: a multi-song file contributes a row
+  // per sub-tune (only multi-song files have them), so a sub-tune is shuffled
+  // exactly like a single-song file. The first parameter matches a file at
+  // exactly this path and the second matches everything below it, so a directory
+  // shuffles recursively while a file shuffles as itself. The prefix is escaped
+  // because paths may contain LIKE wildcards (e.g. "Famicompo_mini_vol1"), which
+  // would otherwise drag in songs from a sibling folder.
+  getShuffleStmt: db.prepare(`
+      SELECT m.path, COALESCE(st.subtune, 0) AS subtune
+      FROM music m
+      LEFT JOIN subtune st ON st.music_id = m.id
+      WHERE m.path = ? OR m.path LIKE ? ESCAPE '\\'
+      ORDER BY RANDOM() LIMIT ?
+  `),
   getTotalStmt: db.prepare('SELECT COUNT(*) as total, COUNT(DISTINCT song_id) as `unique` FROM music'),
 
   // Users
@@ -145,7 +158,7 @@ const dbStatements = {
               '$.href', CONCAT('https://gifx.co/music/', m.path),
               '$.path', m.path,
               '$.size', m.file_size,
-              '$.subtuneCount', m.subtune_count,
+              '$.subtuneCount', COALESCE(m.subtune_count, 1),
               '$.subtuneTitle', (
                   SELECT st.title FROM subtune st
                   WHERE st.music_id = m.id
@@ -210,7 +223,7 @@ const dbStatements = {
         m.path,
         m.file_size,
         m.mtime,
-        m.subtune_count,
+        COALESCE(m.subtune_count, 1) AS subtuneCount,
         (SELECT st.title FROM subtune st WHERE st.music_id = m.id AND st.subtune = top.subtune) as subtune_title
       FROM (
         SELECT song_id, COALESCE(subtune, 0) as subtune, COUNT(*) as plays
@@ -234,7 +247,7 @@ const dbStatements = {
         m.path,
         m.file_size,
         m.mtime,
-        m.subtune_count,
+        COALESCE(m.subtune_count, 1) AS subtuneCount,
         (SELECT st.title FROM subtune st WHERE st.music_id = m.id AND st.subtune = top.subtune) as subtune_title
       FROM (
         SELECT song_id, COALESCE(subtune, 0) as subtune, COUNT(*) as plays
@@ -259,7 +272,7 @@ const dbStatements = {
         m.path,
         m.file_size,
         m.mtime,
-        m.subtune_count,
+        COALESCE(m.subtune_count, 1) AS subtuneCount,
         (SELECT st.title FROM subtune st WHERE st.music_id = m.id AND st.subtune = top.subtune) as subtune_title
       FROM (
         SELECT

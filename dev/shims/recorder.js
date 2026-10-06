@@ -99,7 +99,38 @@ const snap = () => {
   // Scoped to the footer: the browse list has a heart per row, so an unscoped query
   // answers for row 1 rather than for what is playing.
   s.fav = !!document.querySelector('.AppFooter button.FavoriteButton.isFavorite');
+  // Which SoundFont the synth is actually on. MIDI mounts the file's *own* sf2
+  // asynchronously (MIDIPlayer.metadataFromFilepath), so for the first few hundred
+  // ms of a take the synth is still on the default GM font while the transport is
+  // already running. Measured on the Mario Kart fixture: position 0 and
+  // isPlaying() false at 313 ms, both true and `user/...sf2` mounted at 585 ms.
+  // A clip that claims "the file's own SoundFont is what you are hearing" cannot
+  // read that off `playing`, so it reads the parameter -- and `fileSoundfont` is
+  // what a scenario gates on, since that is the claim in one boolean.
+  if (typeof p.getParameter === 'function' && p.params && 'soundfont' in p.params) {
+    s.soundfont = p.getParameter('soundfont');
+    s.fileSoundfont = !!(s.soundfont && String(s.soundfont).startsWith('user/'));
+  }
   return s;
+};
+
+// Level meter on the app's own gain node (never a system device -- this host has
+// none). Without it every assertion in a MIDI clip can pass while the synth is
+// silent on a missing or wrong SoundFont: the transport moves, the band is
+// reported, the position advances, and the published clip is 4 s of nothing. This
+// is the same tap probe.mjs uses, and the same reason it is there.
+let levelAnalyser = null;
+const levelRms = () => {
+  if (!levelAnalyser) return null;
+  try {
+    const b = new Float32Array(levelAnalyser.fftSize);
+    levelAnalyser.getFloatTimeDomainData(b);
+    let sum = 0;
+    for (let i = 0; i < b.length; i++) sum += b[i] * b[i];
+    return Number(Math.sqrt(sum / b.length).toFixed(5));
+  } catch {
+    return null;
+  }
 };
 
 // Sampled state, so a clip's claim is backed by numbers rather than by what the
@@ -130,6 +161,14 @@ sub: s.subtune,
       // band off and on cannot be checked from `s.band` -- it needs the DOM, on every
       // tick, to show the band was actually absent for a stretch.
       hasBand: !!document.querySelector('.Slider-loop'),
+      // Which song, per tick. The Sequencer can reload a different context entry
+      // mid-take (that is what `nextSong` does when a song ends), and an assertion
+      // that only looks at the final state cannot tell "reloaded the same song" from
+      // "reloaded something else and it happens to be the last one".
+      path: s.path,
+      // Audibility, per tick. See levelRms: a MIDI clip whose SoundFont failed to
+      // mount still advances the transport and still reports its band.
+      rms: levelRms(),
     });
   };
   trace.mark('start');
@@ -544,6 +583,18 @@ const dev = {
     if (preload) opened = await this.preload(preload);
 
     const trace = startTrace(spec.intervalMs ?? 100);
+    // Tap the app's gain node for the level meter the trace samples. Created here,
+    // not at module load, because the audio graph does not exist until the app has
+    // booted; a null analyser makes levelRms() return null, so an assertion that
+    // needs audio fails loudly instead of reading a fabricated 0.
+    try {
+      const g = app().gainNode;
+      levelAnalyser = g.context.createAnalyser();
+      levelAnalyser.fftSize = 2048;
+      g.connect(levelAnalyser);
+    } catch {
+      levelAnalyser = null;
+    }
     heartbeat.start();
     const audioStartedAt = audio.start();
     const flashMark = flash(spec.flashMs ?? 150);

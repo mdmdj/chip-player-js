@@ -112,18 +112,23 @@ const dbStatements = {
       WHERE m.song_id GLOB ?
   `),
   getTextContentStmt: db.prepare('SELECT content FROM texts WHERE id = ?'),
-  // Shuffle play, one row per playable song: a multi-song file contributes a row
-  // per sub-tune (only multi-song files have them), so a sub-tune is shuffled
-  // exactly like a single-song file. The first parameter matches a file at
-  // exactly this path and the second matches everything below it, so a directory
-  // shuffles recursively while a file shuffles as itself. The prefix is escaped
-  // because paths may contain LIKE wildcards (e.g. "Famicompo_mini_vol1"), which
-  // would otherwise drag in songs from a sibling folder.
+  // Shuffle play. The first parameter matches a file at exactly this path and
+  // the second matches everything below it, so a directory shuffles recursively
+  // while a file shuffles as itself. The prefix is escaped because paths may
+  // contain LIKE wildcards (e.g. "Famicompo_mini_vol1"), which would otherwise
+  // drag in songs from a sibling folder.
   getShuffleStmt: db.prepare(`
-      SELECT m.path, COALESCE(st.subtune, 0) AS subtune
-      FROM music m
-      LEFT JOIN subtune st ON st.music_id = m.id
-      WHERE m.path = ? OR m.path LIKE ? ESCAPE '\\'
+      SELECT path, subtune_count FROM music
+      WHERE path = ? OR path LIKE ? ESCAPE '\\'
+      ORDER BY RANDOM() LIMIT ?
+  `),
+  // The sub-tunes of a single multi-song file, randomized. A song folder has
+  // no children to prefix-match, so shuffle play on one shuffles its sub-tunes.
+  getShuffledSubtunesStmt: db.prepare(`
+      SELECT st.subtune
+      FROM subtune st
+      JOIN music m ON m.id = st.music_id
+      WHERE m.path = ?
       ORDER BY RANDOM() LIMIT ?
   `),
   getTotalStmt: db.prepare('SELECT COUNT(*) as total, COUNT(DISTINCT song_id) as `unique` FROM music'),

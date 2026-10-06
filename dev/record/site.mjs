@@ -49,19 +49,26 @@ export const prose = {
   },
   'midi-cc102': {
     title: "MIDI — loop markers become a real loop",
-    before: "master had no notion of a loop region in a MIDI file at all.",
+    before: "master had no notion of a loop region in a MIDI file at all, and nothing kept a synth playing past the end of one.",
   },
   'xmp-learned-band': {
     title: "MOD/XM/IT — the loop is found by listening",
-    before: "master stopped and reloaded at the order jump.",
+    before: "master stopped and reloaded at the order jump, with nothing on the slider to say the music repeats.",
   },
   'n64-indefinite': {
     title: "N64/USF — the engine free-runs under Repeat One",
     before: "master faded and reloaded the track on every cycle.",
   },
+  // v2m-tier3's prose is kept but the scenario is ready:false while its duration bug
+  // is open (AGENTS.md, "V2M's reported duration does not match the engine"). Deleting
+  // the entry would also unpublish it, but leaves nothing pointing at why.
   'v2m-tier3': {
     title: "V2M — the honest fallback",
     before: "master behaved the same way here: this format has no loop points, so the song stops and reloads and the page says so rather than pretending.",
+  },
+  'sequencer-default-loop': {
+    title: "No loop markers — the song replays from the top",
+    before: "master behaved the same way here. Where a format offers no loop region, nothing changes: the Sequencer's own Repeat One stands.",
   },
   'blind-loop': {
     title: "No loop region? The head parks instead of lying",

@@ -1424,8 +1424,10 @@ checks no longer work. Compare a live context to a stored one with
 3. **Changelog page with video examples.** *Tooling built 2026-10-05; **14/14 clips
    recorded, passing and published** (6 main, 8 per-format), after a curation pass
    merged four clips away.* `dev/record/` holds the whole pipeline: a clip registry
-   (`scenarios.mjs`, 14 scenarios, validated by `scenarios.check.mjs` and wired
-   into `dev/run-tests.sh`), the page-side recorder shim
+   (`scenarios.mjs`, **15 scenarios of which 14 publish** — `v2m-tier3` is
+   `ready: false` and withheld pending the V2M duration bug above; validated by
+   `scenarios.check.mjs` and wired into `dev/run-tests.sh`), the page-side
+   recorder shim
    (`dev/shims/recorder.js` → `src/chip-player-record.js`, `window.__cpRec`),
    the flash/mux scripts, and a generator that emits a self-contained `site/`
    (relative URLs only, no framework) to upload to a web server and link from the
@@ -1466,6 +1468,43 @@ checks no longer work. Compare a live context to a stored one with
      `share-link` and `show-loop-area`. Their claims were folded into those two
      clips' `watch` bullets and `before` lines, so nothing was lost — the page is
      shorter and every clip earns its place.
+   - **A clip has to show the event its own text names.** The curation pass found
+     three clips whose `watch` bullets claimed more than their footage showed, and
+     the fix is always the same: measure the moment, then script up to it.
+     `mdx-native` claimed "the band is exact" while reaching 5% of its song with
+     **zero** display-folds — MDX uses the base two-pass band, so the head only
+     folds after `intro + 2*loop`, and a take from the beginning never arrives;
+     it now seeks to 101000 first and records 51 folds, the first landing 123 ms
+     from the band start. `n64-indefinite` claimed "instead of reloading every
+     cycle" at 2% of its song. `vgm-native` had one bullet and quoted no numbers.
+     Related: `repeat-leave-fade` asserted only `durationExtended` — *a flag
+     saying the tail was scheduled* — when its claim is an amplitude one, so a
+     hard cut (what master did) would have passed; it now reads the envelope
+     (0.140 → 0.000 over ~4.8 s, libvgm's 4 s fade plus its 0.5 s of silence).
+   - **Every clip asserts audibility.** Nine predate the RMS tap on the app's gain
+     node, and every one of their assertions read the transport — which is exactly
+     what a *silent* engine does too, so each would have published a moving
+     playhead and no sound. Each now has an `audible` assertion on the trace's
+     per-tick `rms`, with a length floor per clip so it cannot pass on a partial
+     trace. `repeat-leave-fade` has none by that name and does not need one: its
+     two envelope assertions are strictly stronger.
+   - **Two seams exist for a clip whose seek or song-end does not suit a take.**
+     `preRoll` seeks *before* the trace, audio recorder and flash — for N64/USF,
+     whose seek renders forward and takes ~9 s (measured landing within 0.5–2 s
+     of the ask, but **not repeatable between runs**, so those scenarios assert
+     behaviour rather than a fixed position). `finishAfterMs` shortens the run
+     past the last step, for a clip whose song ends mid-take: the default 600 ms
+     was catching the sequencer's *restart*, which is both the wrong sound and the
+     wrong thing for an envelope assertion to measure.
+   - **The page's per-format section is grouped by mechanism, not format**: native
+     loops at load / indefinite playback looping / learned loops / the default
+     (repeat the whole song). Runs cheapest-to-dearest so the section ends on the
+     fallback, and the last group is framed as *the default a new format inherits
+     for free* — `Sequencer.advanceSong` never advances `currIdx` under
+     `REPEAT_ONE`, so whole-file replay is what every player inherits with no
+     engine override. Each clip names a `group`; `scenarios.check.mjs` rejects an
+     unknown one, because a typo'd group silently drops a recorded, passing clip
+     out of the page.
    - **The green-verdict trap, three times over.** The single most valuable lesson
      from the curation pass, and all three instances shipped a *passing* clip that
      did not do the thing it claimed:
@@ -1560,15 +1599,28 @@ checks no longer work. Compare a live context to a stored one with
      2026-10-06 from 9 s → 20 → 30 → 35 → 120 s across this session, because the
      clips are `preload="none"` with posters: a reader fetches nothing until they
      click, so a heavy page costs them nothing they did not ask for. Current weight
-     **49 MB of 200 MB** across 28 media files, reported on every check. Note the
+     **59 MB of 200 MB** across 30 media files, reported on every check. Note the
      per-clip *duration* cap is now a guard against a scenario that silently waits on
      something that never happens, not a size proxy — it used to be the latter, which
      is why it was raised five times. Longest clips are now `xmp-learned-band`
-     (32.5 s, 11.6 MB) and `midi-cc102` (29.6 s, 4.9 MB), both for watchability.
-     `loop-band` is no longer the longest: it is 10.3 s / 4.6 MB, and its assertions
-     are still VGM-specific (`curLoop`, intro 342 / loop 800) while MDX is now a
-     viable fixture for the same claim (its checkbox is not occluded; its band starts
-     at 69 s, so it would need a seek).
+     (32.5 s) and `midi-cc102` (29.6 s), and both are long *for watchability* rather
+     than because the behaviour needs the time: `xmp-learned-band` holds 10.5 s of
+     music before its seek and ~7.7 s of loop after the wrap, and the same behaviour
+     proved in 22 s was hard to follow. `loop-band` is no longer the longest
+     (10.3 s); its assertions are still VGM-specific (`curLoop`, intro 342 / loop
+     800) while MDX is now a viable fixture for the same claim (its checkbox is not
+     occluded; its band starts at 69 s, so it would need a seek).
+   - **Build and re-record are both selective, which is what makes the polish phase
+     workable** (2026-10-06). A prose or CSS edit costs ~90 ms:
+     `build-site.mjs` caches the only two video-derived facts (dimensions, poster
+     frame) on the clip's size+mtime+seek time, verified to reproduce `index.html`
+     and all 14 jpgs byte-for-byte against a cold build with the cache and posters
+     deleted — so the cache skips work rather than degrading it. `shoot.mjs` takes
+     named repeatable `--clip <id>` args, resolves every id *before* recording (a
+     typo in the last position must not cost a 15 s take), and does not stop at the
+     first failure: `shoot: 13/14 passed`, then the failed ids. A bare
+     `shoot.mjs` is an error rather than an implicit full re-shoot; `--all` is the
+     explicit way to ask for that.
    - **Playback delivery: the Range bug is established; the stall fix is confirmed
      only in outcome** (2026-10-05). Both bugs were invisible to file-level checks:
      `ffprobe` called every clip valid, every codec was `probably` playable, and

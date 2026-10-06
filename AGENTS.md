@@ -1261,7 +1261,26 @@ checks no longer work. Compare a live context to a stored one with
      (native loop + exact band; see "MDX (mdxmini)"), and **MIDI is now seamless
      too** (JS event-loop wrap + shared band; see the per-format table),
      **XMP is now seamless too** (native loop count + learned band), leaving
-     V2M alone on stop + reload. GME/MDX/`durationExtended`/
+     V2M alone on stop + reload.
+     - **OPEN (2026-10-06): V2M's reported duration does not match the engine.**
+       `V2MPlayer.getDurationMs()` reports 63000 for
+       `v2m/apollo dvd copy 4.5.4kg.v2m` while the engine keeps rendering past that,
+       so the slider reserves a 63 s box and the head parks at the end for a song that
+       has not finished — i.e. the format gets the *blind-loop* look it should not
+       have. Found while recording the changelog page: the clip was 5.7 s and the
+       reported song 63 s, so it could not show its own claim either (the "reload"
+       mark labelled an event that never happened on screen). Root cause not yet
+       established — `V2MPlayer` has no loop API at all (no `setLooping` override), so
+       this looks like a length/frame-count conversion rather than loop bookkeeping,
+       but that is a guess and needs measuring first: does the engine's own frame
+       count disagree with `getDurationMs`, or does the position simply not stop
+       advancing? Until then the V2M clip is `ready: false` and off the page
+       (`dev/record/scenarios.mjs`, TODO(unpublish)), and the page's "default loop"
+       group shows `sequencer-default-loop` instead — a MIDI file with no CC
+       102/103/110/111 in its byte stream, so no band can exist and the reload is
+       purely Sequencer-level. **Do not treat V2M as the worked example for
+       stop+reload while this is open.**
+     GME/MDX/`durationExtended`/
      `getLoopBandMs` all feed the shared `Player` hooks; keep engine policy in
      the engine's own player class.
   - **Overlay/promote system** is in place but **WIP**: `dev/promote.sh` +
@@ -1470,12 +1489,20 @@ checks no longer work. Compare a live context to a stored one with
    what master did instead, and every clip publishing the numbers that verify its
    claim. The page is hosted **separately** from the site (decision 1 in
    `dev/record/README.md`), not added to `public/`.
-   - **Open for tomorrow (polish, not blockers):** `loop-band` is now 10.3 s and
-     4.6 MB — the longest clip, because four states need unhurried pauses; the
-     honest lever is trimming the pre-toggle hold, not the pauses around the clicks.
-     `loop-band`'s assertions are still VGM-specific (`curLoop`, intro 342 / loop
-     800) while MDX is now a viable fixture for the same claim (its checkbox is not
-     occluded; its band starts at 69 s, so it would need a seek).
+   - **Page weight is no longer the constraint; per-clip duration is governed by a
+     120 s cap and a 200 MB upload-dir budget** (`scenarios.check.mjs`). Raised
+     2026-10-06 from 9 s → 20 → 30 → 35 → 120 s across this session, because the
+     clips are `preload="none"` with posters: a reader fetches nothing until they
+     click, so a heavy page costs them nothing they did not ask for. Current weight
+     **49 MB of 200 MB** across 28 media files, reported on every check. Note the
+     per-clip *duration* cap is now a guard against a scenario that silently waits on
+     something that never happens, not a size proxy — it used to be the latter, which
+     is why it was raised five times. Longest clips are now `xmp-learned-band`
+     (32.5 s, 11.6 MB) and `midi-cc102` (29.6 s, 4.9 MB), both for watchability.
+     `loop-band` is no longer the longest: it is 10.3 s / 4.6 MB, and its assertions
+     are still VGM-specific (`curLoop`, intro 342 / loop 800) while MDX is now a
+     viable fixture for the same claim (its checkbox is not occluded; its band starts
+     at 69 s, so it would need a seek).
    - **Playback delivery: the Range bug is established; the stall fix is confirmed
      only in outcome** (2026-10-05). Both bugs were invisible to file-level checks:
      `ffprobe` called every clip valid, every codec was `probably` playable, and

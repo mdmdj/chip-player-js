@@ -231,6 +231,9 @@ async function shootOne(scenario) {
     const armed = await page.evaluate((spec) => window.__cpRec.run(spec), {
       name: scenario.id,
       preload: scenario.preload || null,
+      // Seeked before the recording starts; see preRoll in the shim. Kept out of the
+      // steps array so it can never be scheduled inside the recorded window.
+      preRoll: scenario.preRoll || null,
       steps: scenario.steps,
       until: scenario.until || null,
       intervalMs: 100,

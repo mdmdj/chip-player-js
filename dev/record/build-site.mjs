@@ -197,6 +197,19 @@ for (const { s, mp4 } of clipRows) {
 // clips never start" report. preload="none" plus a poster fetches nothing until a
 // click, and gives the page a first frame to show instead of a black box.
 // ------------------------------------------------------------------- pages --
+// What the clip is playing. Most scenarios pin one fixture; the navigation clips
+// (songfolder, favorite-subtune) open several rows by name instead, so for those
+// fall back to the rows the script actually clicks rather than printing "—", which
+// reads as "we lost track" rather than "this clip is about more than one file".
+function fixtureLabel(s) {
+  if (s.fixture) return s.fixture;
+  if (s.preload) return `${s.preload.dir}/${s.preload.name}`;
+  const opens = (s.steps || []).map((st) => st.open).filter(Boolean);
+  if (opens.length === 1) return `${opens[0].dir}/${opens[0].name}`;
+  if (opens.length > 1) return `${opens.length} rows, opened by name`;
+  return '—';
+}
+
 function clipHtml({ s, proof, failed, mp4 }) {
   const bullets = s.watch.map((w) => `<li>${esc(w)}</li>`).join('\n            ');
   const before = prose[s.id].before
@@ -240,7 +253,8 @@ function clipHtml({ s, proof, failed, mp4 }) {
             <ul class="marks">
                 ${marks}
             </ul>
-            <p class="src">fixture: <code>${esc(s.fixture || (s.preload && `${s.preload.dir}/${s.preload.name}`) || '—')}</code>${s.harness ? ` · harness: <code>${esc(s.harness)}</code>` : ''}</p>
+            <p class="src"><span class="clip-id">clip id: <code>${esc(s.id)}</code></span> · fixture: <code>${esc(fixtureLabel(s))}</code>${s.harness ? ` · harness: <code>${esc(s.harness)}</code>` : ''}</p>
+            <p class="src">recorded with <code>node dev/record/shoot.mjs --clip ${esc(s.id)}</code></p>
           </details>
         </div>
       </article>`;

@@ -99,6 +99,26 @@ summary { cursor: pointer; font-size: .9rem; color: var(--accent); }
 }
 code { font-family: var(--mono); }
 
+/* Mechanism subheadings inside "Per format and per variant". The count sits on the
+   title because the useful thing about a group is how much of it there is, and a
+   reader scanning the section is comparing sizes as much as reading titles. */
+.group-title {
+  display: flex; align-items: baseline; gap: .6rem;
+  margin: 2.6rem 0 .2rem; padding-bottom: .35rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 1.05rem; letter-spacing: .02em;
+}
+.group-count {
+  font-family: var(--mono); font-size: .8rem; font-weight: 400;
+  color: var(--dim);
+}
+.group-note {
+  margin: .45rem 0 1.1rem; max-width: 46rem;
+  color: var(--dim); font-size: .88rem;
+}
+/* The first group's heading would otherwise carry the section's own top margin. */
+section#deep > .group-title:first-of-type { margin-top: .6rem; }
+
 footer { padding-top: 2rem; color: var(--dim); font-size: .9rem; }
 
 @media (max-width: 720px) {

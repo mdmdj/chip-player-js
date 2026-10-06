@@ -40,7 +40,9 @@ It needs two things the normal setup does not:
   Full list of the ways this bites: AGENTS.md §Dev environment.
 - **Chromium**, already fetched into `~/.cache/ms-playwright`.
 
-Recording is one command per clip: `node dev/record/shoot.mjs <clip-id>`.
+Recording is one command per clip: `node dev/record/shoot.mjs --clip <clip-id>`.
+Repeat `--clip` for a few, or `--all` for the whole registry (no clip id at all is
+an error, not an implicit full re-shoot). See `dev/record/README.md`.
 
 ## Promoting feature work to the reviewable branch
 

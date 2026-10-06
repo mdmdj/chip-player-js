@@ -24,10 +24,87 @@ Two documents:
 Quick start:
 
 ```sh
-node dev/record/shoot.mjs <clip-id>   # record one clip (starts the receiver itself)
+node dev/record/shoot.mjs --clip loop-band              # record one clip
+node dev/record/shoot.mjs --clip a --clip b            # record a few, one invocation
+node dev/record/shoot.mjs --all                         # re-record everything (~3.5 min)
 ./dev/record/plan.sh <clip-id>        # the scenario as data: steps + assertions
 ./dev/record/build-site.mjs           # registry + proofs -> site/
 ./dev/record/serve.sh                 # look at site/ in a browser (express; needs Range)
+```
+
+`shoot.mjs` takes **named** args, so which clips you are re-recording is visible on
+the command line — which is the whole point of a selective re-shoot:
+
+| invocation | does |
+| --- | --- |
+| `--clip <id>` | that one clip. Repeatable; order is honoured |
+| `--all` | every clip in the registry |
+| `--keep` | keep the raw webm + the take directory (for diagnosing a capture) |
+| `--headed` | show the browser |
+
+There is **no default to all**: no clip ids at all is an error, because a bare
+`shoot.mjs` that quietly recorded 14 clips would be a 3.5-minute surprise. A bad id
+is refused *before* any take runs, and every error lists the valid ids — a typo in
+the last position should not cost the 15 s take that preceded it. `--all` combined
+with `--clip` is rejected rather than silently resolved, and duplicate ids are
+collapsed.
+
+A failed clip does not stop the batch. Each take gets a fresh browser context, so
+one red verdict leaves nothing behind for the next clip to trip over, and the run
+ends with `shoot: 13/14 passed` plus the failed ids and exit 1.
+
+Both halves are **selective**, because in the polish phase nearly every change
+touches one clip or one sentence rather than all of them:
+
+| you changed | command | cost |
+| --- | --- | --- |
+| prose in `site.mjs`, a `watch` bullet, `site.css` | `node dev/record/build-site.mjs` | ~0.1 s |
+| one clip's scenario, or re-recorded one clip | `node dev/record/shoot.mjs --clip <id>` then `build-site.mjs` | ~15 s + ~0.1 s |
+| two or three clips | `node dev/record/shoot.mjs --clip a --clip b` then `build-site.mjs` | ~15 s each |
+| the app, so any verdict could have moved | `node dev/record/shoot.mjs --all` then `build-site.mjs` | ~3.5 min |
+| nothing (checking the page is current) | `node dev/record/build-site.mjs` | ~0.1 s, says so |
+
+The re-record loop's cost is dominated by the take itself (~15 s), so the lever is
+recording fewer clips rather than recording them faster — hence naming them.
+
+Recording was always per-clip (each take starts its own browser, so takes are
+independent). The page build was **not**: it re-derived both
+video-derived facts for all 14 clips on every run — an `ffprobe` per clip and a
+poster frame per clip, 1.6 s and 4.2 s — so a one-word prose fix cost 5.5 s, 95 %
+of it spent re-deriving posters that could not have changed. Both are now cached
+on the clip's identity, which makes a prose-only rebuild a 59× no-op.
+
+Cache rules, since a stale poster is the failure mode worth being careful about:
+
+- Keyed on **size + mtime + the poster's seek time**. mtime matters on its own:
+  re-recording can produce a byte-identical mp4 (the encoder is deterministic), and
+  a size-only key would keep serving the previous take's poster. Editing a
+  scenario's marks re-frames its poster rather than leaving the old frame.
+- **Byte-identical output.** A cached poster is exactly the one a re-encode would
+  produce, and dimensions come from the same cached `ffprobe`. Verified: warm build
+  over unchanged inputs reproduces `index.html` and all 14 jpgs byte-for-byte
+  against a cold build with the cache and posters deleted.
+- A **deleted** poster is re-framed even under `--text-only`. The flags suppress
+  avoidable work; a missing poster is damage, not a cost decision, and
+  `--text-only` must not bless a page of broken images.
+- A **re-recorded** clip's dimensions are not inherited from the old file, so a
+  deferred clip renders without a reserved box rather than with the previous
+  take's. A scenario can change `viewport` (`loop-band` is 900x840), so the old
+  number can be wrong. The clip is named in the report either way.
+
+The build reports what it actually did, so "nothing to do" is visible rather than
+assumed:
+
+```
+site: site/index.html — 14 clip(s) published (6 main, 8 per-format), 7 snippet(s)
+media: 0 clip(s) re-probed + re-framed, 14 reused from cache
+```
+
+Flags, for when you would rather force the behaviour than trust the cache:
+
+```sh
+node dev/record/build-site.mjs --text-only        # never run ffmpeg/ffprobe
+node dev/record/build-site.mjs --clips loop-band  # derive media facts for these only
 ```
 
 Requires `playwright` installed without touching `package.json` (see the npm trap
@@ -43,26 +120,33 @@ npm i --no-save --no-package-lock playwright@1.63.0 webpack@5.106.0
 For a handoff, the state is:
 
 - **Pipeline proven and batch-proven.** `shoot.mjs` records, muxes, verifies and
-  publishes one clip with audio, in sync, verdict-gated. Fifteen clips are
-  recorded and on the page (9 main, 6 per-format); the whole registry can be
-  re-shot with one loop.
-- **Three clips are recorded but fail on their own claim**, and one is not yet
-  recorded — see "Open: the last three clips" below. They need a decision about
-  what the clip should assert, not a pipeline fix.
+  publishes one clip with audio, in sync, verdict-gated. All 14 registered clips
+  are recorded, green and on the page (6 main, 8 per-format); `--all` re-records
+  the registry in one invocation, and a failed clip does not stop the rest.
 - **Not recorded, deliberately:** any A/B or master comparison. The page is
   feature-only and each clip's "Before:" line describes master instead.
 
-Batch re-shoot (each clip is independent — `shoot.mjs` starts its own receiver and
-browser, so a failure leaves no state for the next one to trip over):
+Batch re-shoot, for when a change to the *app* may have moved any clip's verdict.
+The ids come from the registry rather than a hand-copied list, which goes stale
+silently and then re-records clips that were fine while missing new ones:
 
 ```sh
-for id in songfolder favorite-subtune loop-band repeat-toggle-smooth \
-          repeat-leave-fade blind-loop vgm-native gme-looping-driver mdx-native \
-          midi-cc102 xmp-learned-band sid-tail-restart n64-indefinite v2m-tier3; do
-  node dev/record/shoot.mjs "$id" 2>&1 | tail -3
-done
+node dev/record/shoot.mjs --all
+node dev/record/build-site.mjs   # re-frames only the clips whose mp4 changed
+```
+
+For a change you know is confined, name the clips — the common case in the polish
+phase, and ~15 s per clip rather than ~3.5 min:
+
+```sh
+node dev/record/shoot.mjs --clip loop-band --clip repeat-toggle-smooth
 node dev/record/build-site.mjs
 ```
+
+`--clip` keeps the registry list and the command line in sync, and it means the
+run shows which takes it did. A red verdict leaves the remaining takes alone
+(fresh browser context per clip), so the summary is the only thing to read:
+`shoot: 13/14 passed`.
 
 ### Curation pass (2026-10-05): 18 clips → 14, all green
 
@@ -227,7 +311,7 @@ aborting it silently.
 
 ## 5. How a clip is recorded
 
-**One command per clip: `node dev/record/shoot.mjs <clip-id>`.** It is
+**One command per clip: `node dev/record/shoot.mjs --clip <clip-id>`.** It is
 deterministic and needs no agent in the loop, which is why it is the only step
 that must not be improvised. It:
 

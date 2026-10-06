@@ -89,6 +89,14 @@ summary { cursor: pointer; font-size: .9rem; color: var(--accent); }
 .marks { margin: 0; padding-left: 1.1rem; font-family: var(--mono); font-size: .8rem; color: var(--dim); }
 .src { font-family: var(--mono); font-size: .78rem; color: var(--dim); }
 
+/* The clip id is what every reference to this clip in the repo uses -- the registry
+   entry, the mp4/poster filenames, the proof JSON, and `--clip` on shoot.mjs -- so it
+   is shown verbatim rather than prettied. Brighter than the rest of the .src line
+   because it is the one token here you would copy. */
+.src .clip-id { color: var(--ink); }
+.src .clip-id code { font-weight: 600; }
+.src + .src { margin-top: .2rem; }
+
 .snippet { padding: 1.25rem 0; border-bottom: 1px solid var(--border); }
 .snippet h3 { margin: 0 0 .3rem; font-size: 1.05rem; }
 .snippet p { margin: 0 0 .5rem; max-width: 46rem; }

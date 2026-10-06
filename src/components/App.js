@@ -23,6 +23,7 @@ import {
   ensureEmscFileWithData,
   getMetadataUrlForFilepath,
   getUrlFromFilepath,
+  isSongFolder,
   pathJoin,
   postWithOptionalAuth,
   songRef,
@@ -244,9 +245,7 @@ class App extends React.Component {
       };
       // A multi-song file is a virtual folder: land inside it with the
       // requested sub-tune selected, rather than on the parent directory.
-      // The server omits subtuneCount for plain files, so its absence
-      // means the containing-folder flow below.
-      if (window.__chipConfig?.subtuneCount > 1) {
+      if (isSongFolder(window.__chipConfig)) {
         this.fetchDirectory(playPath).then(() => {
           this.props.history.replace(`${pathJoin('/browse', playPath)}${search}`);
           const folderContext = this.playContexts[playPath] || [];
@@ -925,11 +924,8 @@ class App extends React.Component {
     ) ? (this.state.currentSongBuffer || this.sequencer?.getCurrSongBuffer()) : null;
     const isMidi = Boolean(midiData);
     const activeTheaterMode = Boolean(isMidi && this.state.theaterMode && showVisualizer);
-    // A multi-song file reads as a song folder in Browse. Any of these means
-    // "has sub-tunes": the catalog count (fresh /metadata) or a catalog
-    // sub-tune title (also present in older cached metadata).
-    const isSongFolder = this.state.subtuneCount > 1
-      || this.state.subtuneTitle != null;
+    // A multi-song file browses as a song folder, so the footer links into it.
+    const songFolder = isSongFolder(this.state);
 
     return (
       <Dropzone
@@ -1082,7 +1078,7 @@ class App extends React.Component {
             handleVolumeChange={this.handleVolumeChange}
             imageUrl={imageUrl}
             infoTexts={this.state.infoTexts}
-            isSongFolder={isSongFolder}
+            isSongFolder={songFolder}
             md5={this.state.md5}
             nextSong={this.nextSong}
             paused={this.state.paused}

@@ -53,6 +53,32 @@ export function songRefListsEqual(a, b) {
   return a.every((ref, i) => songRefsEqual(ref, b[i]));
 }
 
+/**
+ * Whether a song's file holds more than one song, i.e. Browse presents it as a
+ * "song folder" whose songs are listed individually.
+ *
+ * This is the only thing to know about a file's sub-tunes. Everything else --
+ * playing, shuffling, favoriting, sharing -- treats a sub-tune exactly like a
+ * single-song file, so the distinction only decides how the songs are *shown*
+ * and linked. Accepts anything the API reports a song in: a metadata response,
+ * a favorite, a chart row, or the `__chipConfig` a share link carries.
+ */
+export function isSongFolder(song) {
+  if (song?.subtuneCount != null) return song.subtuneCount > 1;
+  // /metadata is cached for an hour, so a response from before subtuneCount
+  // existed can still be in flight; those carry a sub-tune title instead.
+  return song?.subtuneTitle != null;
+}
+
+/**
+ * The same question asked of a Browse listing instead of a song: a song
+ * folder's rows are the songs themselves (each with a sub-tune index), while a
+ * directory's rows are files and directories.
+ */
+export function isSongFolderListing(listing) {
+  return (listing || []).some(item => item.subtune != null);
+}
+
 export function updateQueryString(newParams) {
   const searchParams = new URLSearchParams(window.location.search);
   Object.entries(newParams).forEach(([key, value]) => {

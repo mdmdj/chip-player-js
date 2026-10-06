@@ -3,7 +3,7 @@ import axios from 'redaxios';
 import FavoriteButton from './FavoriteButton';
 import { UserContext } from './UserProvider';
 import { API_BASE, CATALOG_PREFIX } from '../config';
-import { getWithAuth, pathJoin, songRef, songRefKey } from '../util';
+import { getWithAuth, isSongFolder, pathJoin, songRef, songRefKey } from '../util';
 
 const NUM_MY_TOP_MONTH = 10;
 const NUM_MY_TOP_ALL_TIME = 50;
@@ -221,8 +221,8 @@ function TopCharts(props) {
         const trackIdx = currentIdx++;
         const rank = localIndex + 1;
         const filename = path.split('/').pop();
-        // Multi-song files show the sub-tune label (or "Tune N").
-        const name = item.subtune_count > 1
+        // A song folder's chart row shows the song's own label (or "Tune N").
+        const name = isSongFolder(item)
           ? `${filename} (${item.subtune_title || `Tune ${subtune + 1}`})`
           : filename;
         const href = item.path ? pathJoin(CATALOG_PREFIX, encodeURIComponent(item.path)) : null;

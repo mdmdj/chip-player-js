@@ -179,6 +179,25 @@ async function main() {
       'the title for the requested sub-tune, NULL when unlabeled');
   });
 
+  await check('every song states its song count, plain files included', async () => {
+    // isSongFolder() in the client is the only thing that reads this, so the
+    // field must never be absent: an omitted count used to mean "one song".
+    const plain = await get(`/api/metadata?path=${enc(singleSong.path)}`);
+    assert.strictEqual(plain.subtuneCount, singleSong.subtune_count || 1,
+      '/metadata counts a plain file as one song');
+
+    for (const song of [multiSong, singleSong]) {
+      const res = await fetch(`${API_BASE}/?play=${encodeURIComponent(song.song_id)}`);
+      assert.strictEqual(res.status, 200, `GET /?play=${song.song_id}`);
+      const html = await res.text();
+      const match = html.match(/__chipConfig = (\{.*?\});/);
+      assert.ok(match, 'the page states its song in __chipConfig');
+      const config = JSON.parse(match[1]);
+      assert.strictEqual(config.subtuneCount, song.subtune_count || 1,
+        `a share link into ${song.path} counts its songs`);
+    }
+  });
+
   await check('shuffle and random hand out playable sub-tunes', async () => {
     for (const route of ['/api/shuffle?limit=50', '/api/random?limit=10']) {
       const res = await get(route);
@@ -261,8 +280,10 @@ async function main() {
     assert.ok(Array.isArray(res.items));
     for (const item of res.items) {
       assert.ok(Number.isInteger(item.subtune) && item.subtune >= 0);
-      if (item.subtune_count > 1) {
-        assert.ok(item.subtune < item.subtune_count, 'the index is within the song');
+      assert.ok(Number.isInteger(item.subtuneCount) && item.subtuneCount >= 1,
+        'every chart row reports how many songs the file holds');
+      if (item.subtuneCount > 1) {
+        assert.ok(item.subtune < item.subtuneCount, 'the index is within the song');
         assert.ok('subtune_title' in item, 'a multi-song chart row carries its sub-tune title');
       }
     }

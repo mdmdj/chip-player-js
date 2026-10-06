@@ -1110,6 +1110,42 @@ checks no longer work. Compare a live context to a stored one with
   too when the two halves of an API are coupled — `server/database.js` promotes,
   but carrying it by hand alongside keeps the pair coherent (see "one field, one
   predicate").
+- **Shuffle play and "is this a song folder?" (2026-10-06).** Three commits on
+  `dev/overlay` — `af4e8aeb7` (shuffle play on a song-folder page returned
+  nothing: `/shuffle` prefix-matched `path/`, which a *file* path never
+  matches), `e9daed24c` (shuffle every sub-tune instead of one random sub-tune
+  per file — one statement, `LEFT JOIN subtune`, one row per playable song, so
+  `/shuffle` and `/random` now have *no* sub-tune branching at all), and
+  `4c75be7e3` (one field, one predicate: see "Is this file a song folder?").
+  `0c957ad5e` hand-carries the `server/index.js` half to the feature branch.
+  **`promote.sh` now plans exactly 5 files** — `src/util.js` and
+  `App.js`/`Browse.js`/`Favorites.js`/`TopCharts.js` — and nothing else:
+  `server/database.js` is already identical there, and the only `server/` delta
+  left between the branches is the four documented overlay-only seams. The
+  client half is safe to promote on its own (old client reads an absent
+  `subtuneCount` as "not a folder"); **the promote itself is still the user's
+  to trigger.**
+  Verified in-app: a song folder shuffles all its sub-tunes (28 for
+  `Akumajou Densetsu (VRC6).nsfe`, 96 for `gbs/DMG-ZLJ.gbs`); `/browse/nsfe`
+  draws 100 songs from all 13 files (was 13); `/browse` draws 100 songs from
+  98 files with ~17 of them sub-tunes (was ~1); **natural advance between two
+  entries of the same file** (index 7 sub-tune 15 → index 8 sub-tune 1 of
+  `nsfe/Contra (SFX Tagged).nsfe`) works, which is the case the expansion makes
+  common; `?play=` links land inside a song folder or on the containing
+  directory as appropriate, including stale-cache and old-client shapes; Top
+  Charts and Favorites labels/grouping unchanged. `dev/run-tests.sh` green
+  (2 known VGM xfails), 20/20 in `dev/test-subtunes-server.js`.
+- **Out of scope, recorded (2026-10-06):** shuffle play is dead for local
+  files. Two mechanisms, neither with a catalog: browser local files are IDBFS
+  (`src/LocalFilesManager.js`) listed by `fs.readdir('/local')` and addressed by
+  a `local/` path prefix that `Sequencer.playSong` special-cases; and
+  `BROWSE_LOCAL_FILESYSTEM=true` browses `LOCAL_CATALOG_ROOT` with
+  `fs.readdir` and serves bytes from `/catalog`. Both report rows with no
+  `song_id`, so `/metadata` 404s and every file plays sub-tune 0. (The server's
+  filesystem mode also never populated `music`, which is why `/shuffle` and
+  `/random` cannot work there at all — pre-existing, not a regression.) The
+  count *is* knowable after load — `Player.getNumSubtunes()` rides the player
+  state — but not before, which is what a listing and a shuffle need.
 - **Engine-provenance stamping is overlay-only (2026-10-02).** `scripts/build-info.js`
   (the reader), `config/webpack.config.common.js` (the `DefinePlugin`) are listed in
   `dev/promote-paths.txt`; `src/index.js`'s `window.ChipCoreBuildInfo` assignment is

@@ -60,6 +60,91 @@ each one cheap and each one about the *output*, not the state:
 
 Read it as: assert on the artefact, not just on the state you manipulated.
 
+## A cache is a post-condition too: the artifact must come out byte-identical
+
+The page build re-derived two facts from every encoded clip on every run — an
+`ffprobe` for the dimensions, an `ffmpeg` pass for the poster. Measured across the
+14 clips: 1.6 s and 4.2 s, so a one-word prose fix cost 5.5 s, ~95 % of it spent
+re-deriving posters that could not have changed. Caching them on the clip's
+identity made that 104 ms.
+
+The temptation is to trust "the cache hit" as the proof the output is right. It is
+not — that is the same error as above one layer up, where the green verdict was
+trusted for a wrong file. The verification that actually settles it is deleting
+the cache *and* the posters, building cold, then building warm and comparing:
+
+```
+index.html            IDENTICAL
+all 14 jpgs           byte-for-byte identical
+```
+
+Byte-identical, not "looks the same": poster encoding is deterministic (same input
+bytes give the same jpg, confirmed by hashing two independent encodes), so a cached
+poster is exactly the one a re-encode would produce. That is what licenses the
+cache — if the encoder were not deterministic, the cache would be silently
+degrading quality and only this check would have caught it.
+
+Two things the cache got wrong on the first attempt, both found by testing the
+edge rather than the happy path:
+
+- **A deleted poster was reported as "reused".** `--text-only` after
+  `rm site/posters/*` deferred all fourteen and shipped a page of broken images.
+  The hit has to require the poster to *exist*, and a missing one must be re-framed
+  even under `--text-only`: the flags suppress avoidable work, and a missing poster
+  is damage, not a cost decision.
+- **Size alone is not an identity.** Re-recording a clip can produce a byte-identical
+  mp4 — the encoder is deterministic — so a size-keyed cache would serve the
+  previous take's poster forever. Key on mtime as well.
+
+And the one case where the cache must *not* help: a re-recorded clip's dimensions
+are not inherited from the old file, so a deferred clip renders without a reserved
+box instead of with a stale one. A scenario can change `viewport` (`loop-band` is
+900x840), so the old number can be wrong. That showed up as a real diff — one
+`<video>` losing `width`/`height` — which is the shape a correct cache failure
+takes.
+
+Generalises: any optimisation that skips work needs a post-condition on the
+*artifact*, checked by forcing the slow path and diffing. "The cache hit" is a
+statement about the build, not about the page.
+
+## Parse flags by name; a positional id is a footgun waiting for `--keep`
+
+`shoot.mjs` read its clip id as `argv[2]`, verbatim. So `shoot.mjs --keep` failed
+with `no scenario: --keep` — the flag was consumed as the id. Harmless, because it
+exits rather than recording the wrong thing, but it means every invocation has to
+remember the id comes *first*, and the error named an internal detail
+(`undefined`) rather than the mistake.
+
+Named args (`--clip <id>`, repeatable, plus `--all`) fix it and buy two things the
+positional form could not:
+
+- **The batch is one command.** A `for` loop over ids from the registry re-derives
+  the registry's contents in shell, where a typo silently skips a clip and a stale
+  copy silently re-records one. `--clip` is parsed in one place and the run prints
+  what it did.
+- **The command line records the intent.** "Which clips am I re-recording?" is
+  answerable from the invocation, which is the entire point of a selective re-shoot.
+
+Two validation rules that only matter once a batch exists, both found by testing the
+failure path rather than the happy one:
+
+- **Resolve every id before recording anything.** With a loop, a typo in the last
+  position cost a 15 s take that had already been recorded before the error
+  appeared. All ids are now checked up front, and every error lists the valid ones.
+- **A failed clip must not end the batch.** Re-recording 14 clips to find one is
+  red means the other 13 takes were wasted. Each take gets a fresh browser context,
+  a failure is caught per clip, and the run ends with `shoot: 13/14 passed` plus
+  the failed ids and exit 1 — which is also the only summary a caller needs.
+
+Verified by breaking it on purpose: a deliberately-false assertion on the first of
+two clips gave `verdict: FAIL` then `PASS`, `shoot: 1/2 passed`, `failed:
+songfolder`, exit 1 — and the mp4 that was still on disk from the failed take was
+correctly withheld from the page until it was re-shot green.
+
+Generalises: an argument parser that reads positionally will eventually be given a
+flag in that position. Parse by name, validate the whole batch before doing work,
+and never let one failure discard the rest.
+
 ## recordVideo.size: never the dsf product, and unset is not "1:1" either
 
 Two separate mistakes live in this one setting, and the first round of notes

@@ -44,16 +44,6 @@ farbrausch-v2m/**
 fluidlite/**
 libADLMIDI/**
 
-# The one "seam" file. Its overlay-vs-feature delta is only the dev seam,
-# which cannot be an additive region (prod must still load the real module):
-#   server/index.js -> DEV_AUTH_MODULE require fallback + skia try/catch
-# Promote leaves this at the feature branch's version. If feature work must
-# change it, do it directly on the feature branch (or convert the seam to a
-# DEV-BEGIN/DEV-END region first). NOTE: its ?play= handler's subtuneCount
-# injection is feature work in a path-listed file and must be hand-carried
-# to the feature branch alongside promotion.
-server/index.js
-
 # Engine feature-detection + remote-dev tweaks on shared files. Only
 # src/config/index.js remains: dev-only throughout (LAN hostname over
 # localhost), correctly listed. MIDIPlayer (2 ADLMIDI guards) and XMPPlayer

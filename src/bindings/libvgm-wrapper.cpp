@@ -409,15 +409,6 @@ UINT32 lvgm_get_cur_loop(lvgm_player *player) {
   return real(player)->GetCurLoop();
 }
 
-// Position as if the track were played once, with completed loops subtracted
-// (libvgm's GetCurTime(false)). This is the "playlist" position: it steps back
-// at each loop boundary and is what the UI head/time should follow, while
-// lvgm_get_position_ms() stays the absolute "time playing".
-UINT32 lvgm_get_playlist_position_ms(lvgm_player *player) {
-  double secs = real(player)->GetCurTime(0);
-  return UINT32(secs * 1000.);
-}
-
 // Absolute position where the fade begins (end of the last loop) for the
 // currently configured loop count. Used to place the loop band's last instance.
 UINT32 lvgm_get_fade_start_ms(lvgm_player *player) {

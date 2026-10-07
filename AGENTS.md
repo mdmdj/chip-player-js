@@ -125,11 +125,23 @@ that the tool's job:
   the work now, so only its dev-only remainder is left, and the commit and its
   message stay on `dev/overlay`. A commit that is gone *and* whose content is
   not on the feature branch is a lost change;
-- `git diff <tip> HEAD` **must be empty**: rebasing onto a branch that already
-  holds this branch's content must not move a byte. If the tree moved only where
-  the feature branch is ahead, it says so and exits 0 (you rebased from a tip
-  older than the promoted work); anything else exits non-zero and prints the
-  files to restore from the recorded tip (`dev/.pre-rebase`).
+- `git diff <tip> HEAD` **must be empty**, *unless the base supplied the
+  movement*. That exception is not academic: on 2026-10-07, catching up to
+  upstream, 23 files moved and 3 of them (`scripts/build-chip-core.js`,
+  `server/index.js`, `src/index.js`) also hold overlay-only deltas, so the whole
+  set was not identical to the feature branch and the byte-identical rule called
+  it a lost change. The check is now **per file**: did the base change this file
+  between the merge base and itself? If yes, its content moving is explained; if
+  no, the rebase changed something nothing supplied and the script exits
+  non-zero naming exactly those files, to restore from the recorded tip
+  (`dev/.pre-rebase`). Both directions are covered by synthetic repos: a
+  DEV region in an upstream-touched file exits 0, a dropped delta in a file the
+  base never touched exits 1.
+
+  **When it does fire, check before restoring.** The 2026-10-07 case was a false
+  positive: `range-diff` reported 0 commits dropped, all 206 overlay-only lines
+  across the three files were still present, and the whole `origin/dev/overlay →
+  HEAD` delta was exactly upstream's 23 files. Nothing was lost.
 
 Measured, for the record: a clean, uninterrupted rebase of these branches drops
 nothing and reproduces the pre-rebase tree exactly. The damage came from the
@@ -868,7 +880,37 @@ gzipped VGM must use the `.vgz` extension (`.gz` is not recognized).
 
 ### Parsers (`scripts/metadata-parsers.js`)
 
-- `parseNSF`: songs at header `0x06` (count), `0x07` (1-based start).
+**Upstream split this file on 2026-09-26** (commit `94dcb360b`). The sub-tune
+parsers below still live here; the shared helpers and all MIDI parsing moved out:
+
+- `scripts/metadata-utils.js` — `cleanString`, `decodeBuffer`, `isShiftJIS`,
+  `readStr`. Imported at the top of `metadata-parsers.js` and re-exported from
+  it, so older importers keep working.
+- `scripts/metadata-midi.js` — every MIDI heuristic plus strategy routing.
+  `parseMetadata(buffer, ext, relPath = null, strategy = null)` sends
+  `mid`/`midi` to `parseMidiWithStrategy` and everything else through `PARSERS`.
+  **Only `build-music.js` passes `relPath`**; a caller that omits it still gets
+  correct metadata, just without MIDI strategy routing.
+- `scripts/metadata-vgmusic.js`, `scripts/build-vgmusic.js`,
+  `scripts/spot-check-midi.js` — VGMusic/rolandSmf sidecars, no sub-tune role.
+
+Two of our hunks deliberately survive the merge rather than taking upstream's:
+
+- **`parseNSFe` walks with `cursor`, not `offset`.** Upstream's version declares
+  `let offset = 4` and then walks `offset`; ours renamed it `cursor` when it grew
+  the `plst`/`INFO` handling. Taking upstream's declaration with our loop is a
+  `ReferenceError`, which is why the merge resolved this hunk to ours.
+- **`parseSPC` warns on a bad magic** instead of returning `{}` silently. Upstream's
+  length+magic guard is strictly stronger and was kept; only the `console.warn`
+  is ours.
+
+Note that upstream also corrected `parseGBS`'s `system` string from `'Gameboy'`
+to `'Game Boy'`. A catalog built before that correction keeps the old spelling
+until you re-run with `-n`; the label is stored per row, not derived.
+
+- `parseNSF`: songs at header `0x06` (count), `0x07` (1-based start). The guard
+  requires the real `NESM\x1A` magic — upstream tightened it, and `dev/fixtures.js`
+  was updated to write it.
 - `parseNSFe`: chunked format, tags are **forward ASCII** (`INFO`, `auth`,
   `tlbl`, `plst`, `time`, `fade`, `NEND`), stream starts at offset 4 (no
   embedded NSF header). `INFO.track_count` (data offset +8) is the number of
@@ -1409,9 +1451,26 @@ checks no longer work. Compare a live context to a stored one with
   - **The libvgm pin move was attempted and reverted** (runtime drift +
     `wasm-opt`). Working VGM again; see "libvgm pin" above. Do not leave a stray
     `../libvgm` clone around — it hijacks the link.
-  - **Branches pushed to `origin`**: `dev/overlay`, `feature/subtunes-as-first-class`;
-    `origin/master` is untouched. Worktrees: main = `dev/overlay`, sibling
-    `chip-player-js-feature/` = feature.
+  - **Branches pushed to `origin`**: `master`, `dev/overlay`,
+    `feature/subtunes-as-first-class`. Worktrees: main = `dev/overlay`, sibling
+    `chip-player-js-feature/` = feature. `backup/master-pre-upstream-catchup`
+    holds `49ee4cde8`, our master before the 2026-10-07 upstream catch-up.
+  - **All three branches caught up to upstream (2026-10-07).** `master` is a
+    fast-forward to `dba9e5f8e` (23 commits, 2026-09-26 → 10-04); the feature
+    branch carries it as a **merge** commit, not a rebase, so the 25 sub-tune
+    commits keep their identity; `dev/overlay` was rebased on top via
+    `dev/rebase.sh`. `git diff master..feature/subtunes-as-first-class` is
+    41 files and contains no dev tooling or vendored engine. Two follow-ups
+    from that merge are recorded above: the parser-file split, and the
+    `'Game Boy'` label correction.
+  - **A catalog rebuild is a prerequisite for booting the server after a merge
+    that adds a column to a query.** `server/index.js` selects `m.contributor`
+    (upstream's 2026-10-04 `ce552d2f9`), but that column is created by
+    `scripts/build-music.js`, not by the server. On a catalog built before the
+    merge the server dies at require time with a bare
+    `SqliteError: no such column: m.contributor`, which reads like a code bug
+    rather than a missing migration. Run `node scripts/build-music.js -n` after
+    any merge that changes the schema.
   - **Dev shims are untracked-stage, not tracked patches** (no more
     `*.dev-backup` / `--revert` for auth/UserProvider). `dev/apply.sh` /
     `dev/remove.sh` manage them; `git status` stays clean after apply.
@@ -1464,7 +1523,7 @@ checks no longer work. Compare a live context to a stored one with
    build-music round-trips (`dev/test-build.js`), sequencer navigation, the
    SongRef identity model, the loop model of every engine (VGM/GME/MDX/MIDI/XMP
    plus V2M's tier-3 contract), the SID/N64 end detector, and the sub-tune server
-   API -- 164 checks via `./dev/run-tests.sh` (2 reported known failures: the VGM
+   API -- 175 checks via `./dev/run-tests.sh` (2 reported known failures: the VGM
    indefinite-playback fade, a known limit, and the unguarded
    `lvgm_get_cur_loop` sentinel). Every engine now has a harness, including the
    GME in-buffer `restartTrack` path. Not yet harnessed: the client component

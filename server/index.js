@@ -16,21 +16,17 @@ const { createProxyMiddleware } = require('http-proxy-middleware');
 const { LRUCache } = require('lru-cache');
 const path = require('path');
 const { performance } = require('perf_hooks');
-// DEV-ONLY (overlay): make skia-canvas optional for local dev.
-let Canvas, loadImage;
-try {
-  ({ Canvas, loadImage } = require('skia-canvas'));
-} catch (e) {
-  console.warn('[dev] skia-canvas unavailable; /preview disabled.');
-}
+const { Canvas, loadImage } = require('skia-canvas');
 const axios = require('axios');
 const axiosRetry = require('axios-retry').default;
 const { XMLParser } = require('fast-xml-parser');
 
 const { dbStatements } = require('./database.js');
-// DEV-ONLY (overlay): DEV_AUTH_MODULE lets the dev bypass live in an untracked
-// file; unset in prod, so this is exactly require('./middleware/auth.js').
-const { requireAuth, optionalAuth } = require(process.env.DEV_AUTH_MODULE || './middleware/auth.js');
+let authModule = './middleware/auth.js';
+// DEV-BEGIN (stripped for promotion; the dev auth bypass lives in an untracked module)
+authModule = process.env.DEV_AUTH_MODULE || authModule;
+// DEV-END
+const { requireAuth, optionalAuth } = require(authModule);
 const { validate } = require('./middleware/validate');
 const { SettingsSchema, FavoriteSchema, PlaybackSchema } = require('./schemas');
 
@@ -164,8 +160,10 @@ app.use((req, res, next) => {
 });
 
 const cache1Hour = (req, res, next) => {
-  // Skip caching in dev so code/catalog changes aren't masked by stale responses.
-  if (!isDev) res.header('Cache-Control', 'public, max-age=3600');
+  res.header('Cache-Control', 'public, max-age=3600');
+  // DEV-BEGIN (stripped for promotion; dev must not cache, or code and catalog changes are masked)
+  if (isDev) res.removeHeader('Cache-Control');
+  // DEV-END
   next();
 };
 

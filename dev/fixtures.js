@@ -6,7 +6,10 @@
 
 function buildNSF({ numSongs, startingSong = 1, title = '', artist = '', copyright = '' }) {
   const buf = Buffer.alloc(0x80);
-  buf.write('NESM', 0, 'ascii');
+  // The magic is "NESM" + 0x1A at offset 4, with the version byte at 5.
+  // parseNSF rejects anything else, so a fixture that writes a plain 0x01 at
+  // offset 5 looks like a valid NSF to the length check but fails the magic.
+  buf.write('NESM\x1A', 0, 'latin1');
   buf[0x05] = 0x01;
   buf[0x06] = numSongs;
   buf[0x07] = startingSong;

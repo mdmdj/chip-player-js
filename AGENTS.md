@@ -48,12 +48,14 @@ a list of commits to remember:
   nothing here is part of the PR.
 
 Workflow: commit feature changes on the feature branch; commit dev/overlay changes
-only on `dev/overlay`; then `git rebase feature/subtunes-as-first-class` on the
-overlay branch to pick up feature moves — use `-X theirs`, and expect
-*duplicated* content in path-listed files, so check the tree against the
-pre-rebase tip (see the handoff notes). Note that "promote" is its own step and
-is **the user's to trigger** — see "Dev overlay & promotion" below before going
-near `dev/promote-apply.sh` or `dev/.promote-armed`. Never commit overlay changes to the
+only on `dev/overlay`; then, after a promote, pick up the feature moves with
+`./dev/rebase.sh` — which rebases (`-X theirs`, so DEV regions survive) **and
+verifies the tree did not move**, which a hand-run rebase cannot tell you. Never
+rebase by hand; expect *duplicated* content in path-listed files, which is what
+the script's check is for (see the handoff notes). Note that "promote" is its own
+step and is **the user's to trigger** — see "Dev overlay & promotion" below
+before going near `dev/promote-apply.sh` or `dev/.promote-armed`. Never commit
+overlay changes to the
 feature branch, and never push either branch to `upstream` — everything stays in
 our fork (`origin`). The main worktree (`chip-player-js/`) runs `dev/overlay`; the
 feature branch is checked out in the sibling `chip-player-js-feature/` worktree.
@@ -1094,7 +1096,16 @@ because `Sequencer` copies its context).
    `music` REPLACE (FK ordering fix for incremental reprocessing).
 9. `AppFooter` shows the full song-folder path (and links into it) for
    multi-song files; the answer comes from `isSongFolder()` in `src/util.js`,
-   fed by `/metadata`'s `subtuneCount` (see "one field, one predicate").
+   fed by `/metadata`'s `subtuneCount` (see "one field, one predicate"). A
+   sub-tune the format gives **no label** for is identified by index alone —
+   `(Tune 8)` after the title, dimmed — because the fallback was the file title,
+   so a shuffle over a folder of unlabeled sub-tunes (gbs, sid) showed the same
+   title for every tune. `util.subtuneLabel(subtune, title)` owns the wording
+   (label if there is one, else `Tune N`), shared with Browse/Favorites/Top
+   Charts, and `App` decides while `AppFooter` only renders. Scoped so it is
+   invisible elsewhere: a single-song file's count never exceeds 1, and a
+   labeled sub-tune is already named by its own title. Local files still get
+   no marker (no `/metadata`, so no count).
 10. `playbacks.subtune` + sub-tune-aware Top Charts: `/playback` carries the
     sub-tune, and the global/user/favorites top queries group by
     `(song_id, subtune)`, returning `subtune`/`subtuneCount`/`subtune_title`

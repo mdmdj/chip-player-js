@@ -302,10 +302,6 @@ UINT8 lvgm_load_data(lvgm_player *player, const UINT8 *data, const UINT32 size) 
     }
   }
 
-  // NOTE: no per-device core override here. (A Gens YM2612 force lived here
-  // briefly while a GME/libvgm ym2612_write symbol collision made GPGX look
-  // broken; pruning GME's OPN objects fixed the real cause. See AGENTS.md.)
-
   voices.clear();
   chips.clear();
   size_t curDev;

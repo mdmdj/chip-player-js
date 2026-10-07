@@ -570,12 +570,9 @@ if (stale.length) {
   ));
 }
 checkDuplicateSymbols(args.filter(a => a.endsWith('.a')));
-// Duplicate-symbol tripwire: every linked archive must own its strong C/C++
-// globals uniquely. GME and libvgm once both exported MAME OPN symbols and
-// --allow-multiple-definition silently kept GME's copy, hanging YM2612
-// playback with no error anywhere (see AGENTS.md "libvgm YM2612 core").
-// Fail loudly here instead of shipping luck. (Weak symbols resolve
-// deterministically, so only strong `T` definitions are checked.)
+// Two archives defining the same strong symbol makes the linker silently pick
+// one, so the clash only surfaces at runtime. Weak symbols resolve
+// deterministically, so only `T` definitions are checked.
 function checkDuplicateSymbols(archives) {
   let listings;
   try {

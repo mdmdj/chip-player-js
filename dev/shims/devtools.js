@@ -56,7 +56,6 @@ const snapshot = () => {
   if (ctx && core && typeof core._lvgm_get_cur_loop === 'function') {
     s.curLoop = core._lvgm_get_cur_loop(ctx);
     s.fadeStartMs = core._lvgm_get_fade_start_ms(ctx);
-    s.playlistPositionMs = core._lvgm_get_playlist_position_ms(ctx);
   }
   return s;
 };

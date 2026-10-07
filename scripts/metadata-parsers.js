@@ -304,7 +304,7 @@ function parseGBS(buf) {
     artist: readStr(buf, 0x30, 0x50),
     copyright,
     date: extractDate(copyright),
-    system: 'Gameboy',
+    system: 'Game Boy',
     numSongs: buf[0x04] || 1,
     startingSong: buf[0x05] || 1,
   };

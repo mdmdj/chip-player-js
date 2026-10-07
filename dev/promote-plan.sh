@@ -92,7 +92,7 @@ check_syntax() {
 plan=()
 unbalanced=()
 unsound=()
-TMPFILE="$(mktemp)"
+TMPFILE="$(mktemp --suffix=.js)"
 trap 'rm -f "$TMPFILE"' EXIT
 for f in "${CANDIDATES[@]}"; do
   [ -e "$f" ] || continue

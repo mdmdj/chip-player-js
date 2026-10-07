@@ -94,11 +94,22 @@ touch dev/.promote-armed   # the user arms the writer
 `promote.sh` requires a clean overlay tree, then, for every file that differs
 from the feature branch, it:
 - skips anything listed in `dev/promote-paths.txt` (overlay-only **areas**:
-  `dev/**`, the engine build scripts, `src/bindings/libsidplayfp-wrapper.cpp`,
-  vendored trees, and the few "seam" files),
+  `dev/**`, the engine build scripts, vendored trees, and the one "seam" file),
 - strips `DEV-BEGIN … DEV-END` regions from the rest,
 - promotes only files whose stripped content still differs from the feature
-  branch (i.e. real feature work).
+  branch (i.e. real feature work),
+- and refuses to plan a file whose stripped output does not parse.
+
+Two rules the stripping obeys, both learned the hard way:
+
+- **A sentinel must be the first word on its line.** Matching the bare
+  substring meant a comment merely *mentioning* `DEV-BEGIN` switched skipping
+  on and swallowed every line after it. "First word behind non-alphanumeric
+  characters" is the rule — it covers `//`, `#`, `--` and JSX's `{/* … */}`
+  without enumerating comment styles.
+- **Stripping must leave a valid file.** JS goes through `node --check`;
+  everything else through brace balance. A region that unbalances a brace used
+  to produce a file that was wrong but still committed.
 
 It writes the result into the feature-branch worktree and commits it there as one
 commit ("Promote feature work from dev/overlay"), leaves `dev/overlay`
@@ -201,9 +212,32 @@ out.
 
 One seam genuinely cannot be an additive region, because prod must still load
 the real module while dev loads an alternative *instead of* it:
-`server/index.js` (`DEV_AUTH_MODULE` require fallback; skia-canvas try/catch)
-is listed as overlay-only. At final PR prep these are the "1–2 lines" to
-remove by hand.
+`server/index.js`'s `DEV_AUTH_MODULE` require fallback. At final PR prep this is
+the "1 line" to inline by hand.
+
+A region can express *"dev adds behaviour"*; it cannot express *"dev loads A,
+prod loads B"*, because stripping only removes lines — the stripped form either
+loses the assignment or duplicates the binding. Upstream's `auth.js` requires a
+service-account JSON we do not have, so the bypass is real, not hypothetical.
+
+**De-listing was prototyped and rejected (2026-10-07).** The other two seams
+were removable or deletable — the skia-canvas fallback was deleted outright (it
+is a declared dependency in `server/package.json`, so the plain require is the
+honest version), and `cache1Hour` became a region. That made `promote.sh` offer
+the file. But the promotion delta then carried a bare
+`let authModule = './middleware/auth.js';` plus `require(authModule)` — dev
+plumbing in a sub-tunes PR, with no answer to "why is this a variable?". One
+line of unexplained indirection is worse than hand-carrying the file, so the
+file stays listed. The seam is now one line rather than two, and the blockers
+are down to one.
+
+The other remaining hand-carry is `scripts/build-chip-core.js`, 7 lines of
+`EXPORTED_FUNCTIONS` entries against 186 lines of our engine build tooling.
+That one is **policy, not mechanics**: the file is technically promotable (the
+dev hunks could be regioned), but de-listing it would ship our duplicate-symbol
+tripwire, `../`-path normalisation and GME-pruning notes into Matt's PR, and
+Matt builds his own way. Hand-carrying 7 stable export entries is the right
+trade.
 
 Because the file is path-listed, `promote.sh` also skips the feature work that
 lands here. **Hand-carried (2026-10-02, re-carried 2026-10-06):** the `?play=`
@@ -216,13 +250,18 @@ too, because the new `/shuffle` calls `getShuffleStmt` with a path *and* a
 prefix and the old two-parameter statement cannot answer that. The client half
 (`App.js`) promotes on its own — see the compatibility note below.
 
-**Also hand-carried:** `src/bindings/libsidplayfp-wrapper.cpp`'s
-`sid_set_subtune` fix (call `engine->load(currentTune)` after `selectSong()`).
-That file is path-listed because its `SIDPLAYFP_HAVE_SEEK` guards need our fork,
-but *this hunk does not* — master's own wrapper already calls `engine->load()`
-in `sid_load_data`, so it is upstream libsidplayfp API. Without it the PR's
-`SIDPlayer.playSubtune` selects a sub-tune that never loads, so every sub-tune of
-a multi-song SID plays song 0 and the tail-detector restart is a no-op.
+**No longer hand-carried (2026-10-07):** the `sid_set_subtune` fix (call
+`engine->load(currentTune)` after `selectSong()`) used to be hand-carried because
+`src/bindings/libsidplayfp-wrapper.cpp` was path-listed for its
+`SIDPLAYFP_HAVE_SEEK` guards. Those guards are gone: they defaulted to 0 and so
+only guarded a build we never make — upstream's own wrapper calls `setTempo()`/
+`seek()` unguarded and never defines the macro, so upstream is already
+fork-only, and `build-libsidplayfp.sh` always builds mmontag's fork. The file
+now matches upstream apart from the sub-tune fix and promotes with everything
+else. Without that fix the PR's `SIDPlayer.playSubtune` selects a sub-tune that
+never loads, so every sub-tune of a multi-song SID plays song 0 and the
+tail-detector restart is a no-op. Building against the official core now fails
+at compile time rather than silently ignoring seek and tempo, which is better.
 
 ### Known gaps (handoff state)
 
@@ -736,9 +775,8 @@ from git assembles the 6502 driver `.bin` files from source, so **`xa65` is
 required** (Arch: `pacman -S xa`); the script skips the check when the `.bin`
 files already exist (the old v2.9.0 tarball shipped them prebuilt). A
 `multilib`/XTREE clone needs `autoreconf -i`, which the script runs.
-`build-chip-core.js` probes the header and defines `SIDPLAYFP_HAVE_SEEK=1`, so
-`sid_set_position_ms` / `sid_set_speed` are compiled in and call the real fork
-APIs (they used to compile out). `setTempo` is verified working and
+`sid_set_position_ms` / `sid_set_speed` call the fork APIs unconditionally now
+that the guards are gone. `setTempo` is verified working and
 pitch-invariant. **But `seek()` is WIP in the fork and tune-dependent.** Measured
 on the catalog set (seek to 20s mid-playback, then 1s energy per second):
 
@@ -1760,8 +1798,7 @@ checks no longer work. Compare a live context to a stored one with
      `scripts/build-libsidplayfp.sh`; verified rendering, sub-tunes, sub-tune
      switching, voice mask, voice groups, and tempo. Matt pushed `mmontag/resid`
      and pointed the submodule at it, so the clone and build are reproducible
-     (`SIDPLAYFP_HAVE_SEEK` probes to 1; requires `xa65` for the 6502 driver
-      `.bin` files). **`seek()` is WIP and tune-dependent**: Cybernoid II and
+     (requires `xa65` for the 6502 driver `.bin` files). **`seek()` is WIP and tune-dependent**: Cybernoid II and
       Monty-on-the-Run resume (with a brief dip), Cybernoid and Bionic Commando
       stay silent, and a seek-before-play hangs for every tune tested (see "SID"
       above). Seek-to-0 is reliable. Prod uses the same fork and behaves the

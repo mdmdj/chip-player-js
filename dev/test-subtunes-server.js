@@ -215,22 +215,27 @@ async function main() {
     }
   });
 
-  await check('shuffle hands out a sub-tune other than 0 for a multi-song file', async () => {
-    // Scope the shuffle to the file's own directory so the file is always in
-    // the sample: the point is that toShuffledSongRefs() picks a random
-    // sub-tune per call, not that a global sample happens to catch one.
+  await check('a directory shuffle hands out every sub-tune, not one per file', async () => {
+    // A sub-tune is a song in its own right, so shuffling a directory hands out
+    // all of a multi-song file's sub-tunes instead of one arbitrary sub-tune.
     const dir = dirOf(multiSong.path);
-    const seen = new Set();
-    for (let i = 0; i < 20; i++) {
-      const res = await get(`/api/shuffle?limit=200&path=${enc(dir)}`);
-      for (const item of res.items) {
-        if (item.path === multiSong.path) seen.add(item.subtune);
-      }
-    }
-    assert.ok(seen.size > 1,
-      `a multi-song file must shuffle as more than just sub-tune 0 (saw ${[...seen]})`);
-    for (const subtune of seen) {
-      assert.ok(subtune < multiSong.subtune_count, 'every shuffled sub-tune is playable');
+    const res = await get(`/api/shuffle?limit=100000&path=${enc(dir)}`);
+    const keys = res.items.map(item => `${item.path}\u0000${item.subtune}`);
+    assert.strictEqual(new Set(keys).size, keys.length, 'no song is shuffled twice');
+
+    const subs = res.items.filter(item => item.path === multiSong.path).map(item => item.subtune);
+    assert.deepStrictEqual([...subs].sort((a, b) => a - b), [...Array(multiSong.subtune_count).keys()],
+      `all ${multiSong.subtune_count} sub-tunes of ${multiSong.path} are in the shuffle`);
+
+    const rows = db.prepare(`
+      SELECT path, subtune_count FROM music
+      WHERE directory_id = (SELECT id FROM directories WHERE path = ?)
+    `).all(dir);
+    assert.ok(rows.length > 1, 'the directory has more than one file to check');
+    for (const row of rows) {
+      const songs = row.subtune_count > 1 ? row.subtune_count : 1;
+      assert.strictEqual(res.items.filter(item => item.path === row.path).length, songs,
+        `${row.path} contributes ${songs} song(s)`);
     }
   });
 

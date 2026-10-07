@@ -56,4 +56,5 @@ else
   echo "promote-apply: committed on $FEATURE: $(git -C "$FEATURE_WT" rev-parse --short HEAD)"
 fi
 rm -f "$ARMED"
-echo "promote-apply: dev/overlay unchanged. Push $FEATURE when ready, then rebase dev/overlay onto it."
+echo "promote-apply: dev/overlay unchanged. Now put it back on top:"
+echo "             ./dev/rebase.sh    # rebase + verify the tree did not move"

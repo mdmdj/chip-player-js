@@ -51,8 +51,8 @@ const {
   replaceUserSettingsStmt,
   insertPlaybackStmt,
 
-  getCsdbSidStmt,
-  insertCsdbSidStmt,
+  getCsdbXmlStmt,
+  insertCsdbXmlStmt,
 
   getGlobalTopStmt,
   getUserTopStmt,
@@ -548,7 +548,7 @@ axiosRetry(axiosCsdb, {
 });
 
 async function getCsdbSidXml(csdbid) {
-  let xml = getCsdbSidStmt.pluck().get(csdbid);
+  let xml = getCsdbXmlStmt.pluck().get(csdbid);
   if (xml) {
     console.log(`Found cached CSdb entry for ${csdbid}.`);
   } else {
@@ -557,7 +557,7 @@ async function getCsdbSidXml(csdbid) {
     const response = await axiosCsdb.get(csdbUrl);
     xml = response.data;
     const now = Math.floor(Date.now() / 1000);
-    insertCsdbSidStmt.run({ csdbid, xml, now });
+    insertCsdbXmlStmt.run({ csdbid, xml, now });
     console.log(`Wrote CSdb entry for ${csdbid}.`);
   }
   return xml;
@@ -639,6 +639,7 @@ router.get('/metadata', cache1Hour, (req, res, next) => {
       imageUrl: imageUrl,
       infoTexts: infoTexts,
       soundfont: soundfont,
+      contributor: meta.contributor,
       md5: meta.md5,
       subtuneCount: meta.subtune_count || 1,
       subtuneTitle: subtuneTitle,

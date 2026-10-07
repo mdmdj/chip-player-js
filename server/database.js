@@ -64,7 +64,7 @@ const dbStatements = {
       ORDER BY st.sort_order, st.subtune
   `),
   getMetadataStmt: db.prepare(`
-      SELECT m.song_id, m.image_id, m.text_ids, m.soundfont, m.md5, m.subtune_count, i.path as image_path
+      SELECT m.song_id, m.image_id, m.text_ids, m.soundfont, m.md5, m.contributor, m.subtune_count, i.path as image_path
       FROM music m
                LEFT JOIN images i ON m.image_id = i.id
       WHERE m.path = ?
@@ -85,7 +85,7 @@ const dbStatements = {
       SELECT * FROM hvsc_files WHERE fullname = ? LIMIT 1
   `),
   getSongByPathStmt: db.prepare(`
-      SELECT m.song_id, m.path, m.title, m.artist, m.game, m.system, m.copyright,
+      SELECT m.song_id, m.path, m.title, m.artist, m.contributor, m.game, m.system, m.copyright,
              m.file_size, m.mtime, m.release_date, m.subtune_count, i.path as image_path
       FROM music m
                LEFT JOIN images i ON m.image_id = i.id
@@ -98,7 +98,7 @@ const dbStatements = {
   `),
   // Used to populate meta tags. Favor entries with images
   getSongByIdStmt: db.prepare(`
-      SELECT m.song_id, m.path, m.title, m.artist, m.game, m.system, m.copyright, m.subtune_count, i.path as image_path
+      SELECT m.song_id, m.path, m.title, m.artist, m.contributor, m.game, m.system, m.copyright, m.subtune_count, i.path as image_path
       FROM music m
                LEFT JOIN images i ON m.image_id = i.id
       WHERE m.song_id LIKE ?
@@ -206,8 +206,8 @@ const dbStatements = {
       WHERE user_id = @userId AND type = 'favorites'
   `),
 
-  getCsdbSidStmt: db.prepare('SELECT xml FROM csdb_db.sids WHERE csdbid = ? LIMIT 1'),
-  insertCsdbSidStmt: db.prepare(`
+  getCsdbXmlStmt: db.prepare('SELECT xml FROM csdb_db.sids WHERE csdbid = ? LIMIT 1'),
+  insertCsdbXmlStmt: db.prepare(`
       INSERT INTO csdb_db.sids (csdbid, xml, fetched_at)
       VALUES (@csdbid, @xml, @now)
   `),

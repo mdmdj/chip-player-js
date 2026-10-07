@@ -22,6 +22,8 @@ program
   .option('--filter <path>', 'Scan only a specific subdirectory (relative to catalog root)', '')
   .option('-r, --reset-db', 'Delete and recreate the database table', false)
   .option('-n, --no-skip-unmodified', 'Force reprocessing of unmodified files (checks mtime)')
+  .option('--import-hvsc', 'Import HVSC catalog tables (hvsc_files, sid_release_map)', false)
+  .option('--hvsc-only', 'Only import HVSC tables and exit without scanning music files', false)
   .parse(process.argv);
 
 const options = program.opts();
@@ -42,11 +44,21 @@ const SF2_REGEX = /SF2=(.+?)\.sf2/;
 
 const NUMERIC_COLLATOR = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 
+function tableExists(database, tableName) {
+  try {
+    const row = database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(tableName);
+    return Boolean(row);
+  } catch (e) {
+    return false;
+  }
+}
+
 // Initialize DB.
 // A dry run must leave the catalog untouched, but it still has to run the
 // additive migrations (the INSERTs reference the new columns) and exercise the
 // same code as a real build. So take a snapshot and work on that; the real
 // catalog file is never opened for writing.
+const dbExists = fs.existsSync(DB_PATH);
 let db = new Database(DB_PATH);
 let dryRunDbPath = null;
 if (options.dryrun) {
@@ -95,6 +107,8 @@ if (options.resetDb) {
     DROP TABLE IF EXISTS images;
     DROP TABLE IF EXISTS texts;
     DROP TABLE IF EXISTS music_fts;
+    DROP TABLE IF EXISTS hvsc_files;
+    DROP TABLE IF EXISTS sid_release_map;
   `);
 }
 
@@ -135,6 +149,7 @@ db.exec(`
     song_id TEXT,                -- Truncated hash
     title TEXT,
     artist TEXT,
+    contributor TEXT,            -- Sequencer / Ripper / Transcriber
     game TEXT,
     system TEXT,
     copyright TEXT,
@@ -233,9 +248,10 @@ function ensureColumn(table, column, type) {
 }
 const addedSubtuneCount = ensureColumn('music', 'subtune_count', 'INTEGER DEFAULT 1');
 ensureColumn('music', 'release_date', 'TEXT');
+ensureColumn('music', 'contributor', 'TEXT');
 ensureColumn('subtune', 'date', 'TEXT');
 
-// A catalog created before subtunes existed has no sub-tune rows, so unchanged
+// A catalog created before sub-tunes existed has no sub-tune rows, so unchanged
 // multi-song files get skipped and never gain them. "Does this catalog still
 // need the backfill?" cannot be read off the data: the ALTER gives every
 // existing row subtune_count = 1, which is indistinguishable from a genuinely
@@ -254,13 +270,71 @@ if (needsBackfill) {
   }
 }
 
+function importHvscCatalog(targetDb, opts = {}) {
+  const hvscSqlPath = path.resolve(__dirname, 'hvsc_files_sqlite.sql');
+  const sidMapSqlPath = path.resolve(__dirname, 'sid_release_map_sqlite.sql');
+
+  if (!fs.existsSync(hvscSqlPath) || !fs.existsSync(sidMapSqlPath)) {
+    console.warn(chalk.yellow('HVSC SQL dump files not found in scripts directory; skipping HVSC import.'));
+    return;
+  }
+
+  console.log(chalk.cyan('Importing HVSC catalog tables (hvsc_files, sid_release_map)...'));
+
+  // Drop existing tables before re-importing
+  targetDb.exec(`
+    DROP TABLE IF EXISTS hvsc_files;
+    DROP TABLE IF EXISTS sid_release_map;
+  `);
+
+  // 1. Import hvsc_files
+  let hvscSql = fs.readFileSync(hvscSqlPath, 'utf8');
+  hvscSql = hvscSql.replace(/^PRAGMA\s+[^;]+;\s*/gmi, '');
+  hvscSql = hvscSql.replace(/,[\s\t]*ADD\s+PRIMARY\s+KEY[\s\S]*?END TRANSACTION;/i, 'END TRANSACTION;');
+  targetDb.exec(hvscSql);
+
+  // 2. Ensure hvsc_files indexes exist
+  targetDb.exec(`
+    CREATE INDEX IF NOT EXISTS hvsc_files_fullname_index ON hvsc_files (fullname);
+    CREATE INDEX IF NOT EXISTS hvsc_files_hash_index ON hvsc_files (hash);
+  `);
+
+  // 3. Import sid_release_map
+  let sidMapSql = fs.readFileSync(sidMapSqlPath, 'utf8');
+  sidMapSql = sidMapSql.replace(/^PRAGMA\s+[^;]+;\s*/gmi, '');
+  targetDb.exec(sidMapSql);
+
+  // Restore WAL mode in case imported pragmas altered journal mode
+  targetDb.pragma('journal_mode = WAL');
+
+  const hvscCount = targetDb.prepare('SELECT COUNT(*) as count FROM hvsc_files').get()?.count || 0;
+  const sidMapCount = targetDb.prepare('SELECT COUNT(*) as count FROM sid_release_map').get()?.count || 0;
+  console.log(chalk.green(`✔ HVSC catalog imported (${hvscCount.toLocaleString()} files, ${sidMapCount.toLocaleString()} release mappings).`));
+}
+
+const shouldImportHvsc = options.importHvsc || options.hvscOnly || options.resetDb || !dbExists || !tableExists(db, 'hvsc_files');
+if (shouldImportHvsc) {
+  if (options.dryrun) {
+    console.log(chalk.cyan('Dry run mode: Skipping HVSC catalog import.'));
+  } else {
+    importHvscCatalog(db, options);
+  }
+}
+
+if (options.hvscOnly) {
+  console.log(chalk.green('Done. Checkpointing WAL...'));
+  db.pragma('wal_checkpoint(TRUNCATE)');
+  db.close();
+  process.exit(0);
+}
+
 // Statements
 const insertMusicStmt = db.prepare(`
     INSERT OR REPLACE INTO music (
-      directory_id, filename, path, extension, song_id, title, artist, game, system, 
+      directory_id, filename, path, extension, song_id, title, artist, contributor, game, system,
       copyright, release_date, file_size, mtime, raw_meta, image_id, text_ids, soundfont, md5, subtune_count, sort_order
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 
 const insertSubtuneStmt = db.prepare(`
@@ -296,16 +370,71 @@ const insertTextStmt = db.prepare('INSERT INTO texts (hash, content) VALUES (?, 
 
 const updateSortOrderStmt = db.prepare('UPDATE music SET sort_order = ? WHERE path = ?');
 
-// Calculate scan root
-const scanTarget = options.filter ? path.join(CATALOG_DIR, options.filter) : CATALOG_DIR;
-const scanRelativeBase = options.filter || '';
+function findMatchingPrefix(rootDir, relativeFilter) {
+  const exactPath = path.join(rootDir, relativeFilter);
+  if (fs.existsSync(exactPath)) {
+    return [relativeFilter];
+  }
 
-if (!fs.existsSync(scanTarget)) {
-  console.error(chalk.red(`Error: Scan path does not exist: ${scanTarget}`));
-  process.exit(1);
+  const parts = relativeFilter.split(/[/\\]+/).filter(Boolean);
+  let currentDirs = [''];
+
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
+    const isLast = (i === parts.length - 1);
+    const nextDirs = [];
+
+    for (const cur of currentDirs) {
+      const dirPath = path.join(rootDir, cur);
+      try {
+        const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+        for (const entry of entries) {
+          if (entry.name.startsWith('.')) continue;
+          if (entry.name === 'node_modules') continue;
+
+          if (isLast) {
+            if (entry.name.startsWith(part)) {
+              nextDirs.push(path.join(cur, entry.name));
+            }
+          } else {
+            if (entry.isDirectory() && (entry.name === part || entry.name.startsWith(part))) {
+              nextDirs.push(path.join(cur, entry.name));
+            }
+          }
+        }
+      } catch (e) {
+        // Ignore unreadable directories
+      }
+    }
+    currentDirs = nextDirs;
+    if (currentDirs.length === 0) break;
+  }
+
+  return currentDirs;
 }
 
-console.log(chalk.green(`Scanning ${scanTarget}...`));
+// Calculate scan root
+const scanRelativeBase = options.filter ? options.filter.replace(/^[/\\]+/, '').replace(/[/\\]+$/, '').split(/[/\\]+/).join(path.sep) : '';
+const scanTarget = scanRelativeBase ? path.join(CATALOG_DIR, scanRelativeBase) : CATALOG_DIR;
+
+let matchingPrefixes = [];
+if (scanRelativeBase) {
+  if (fs.existsSync(scanTarget)) {
+    matchingPrefixes = [scanRelativeBase];
+  } else {
+    matchingPrefixes = findMatchingPrefix(CATALOG_DIR, scanRelativeBase);
+    if (matchingPrefixes.length === 0) {
+      console.error(chalk.red(`Error: Scan path does not exist: ${scanTarget}`));
+      process.exit(1);
+    }
+  }
+}
+
+if (scanRelativeBase && matchingPrefixes.length > 0 && !fs.existsSync(scanTarget)) {
+  console.log(chalk.green(`Scanning catalog matching prefix "${scanRelativeBase}" (${matchingPrefixes.length} match${matchingPrefixes.length === 1 ? '' : 'es'})...`));
+} else {
+  console.log(chalk.green(`Scanning ${scanTarget}...`));
+}
 if (options.dryrun) console.log(chalk.cyan('Dry run mode: Database will not be modified.'));
 
 // Pre-fetch existing files for incremental update and stats
@@ -509,8 +638,7 @@ async function processDirectory(fullPath, relativePath, parentId = null, parentS
     if (!scanRelativeBase) return true;
     const rel = item.relativePath;
     const filter = scanRelativeBase;
-    if (rel === filter) return true;
-    if (rel.startsWith(filter + path.sep)) return true;
+    if (rel.startsWith(filter)) return true;
     if (item.type === 'dir' && filter.startsWith(rel + path.sep)) return true;
     return false;
   });
@@ -603,7 +731,7 @@ function processFile(child, directoryId, dirEntries, dirImagePath, dirTextIds) {
   const stat = fs.statSync(fullPath);
 
   // Check for incremental skip
-  if (options.skipUnmodified && existingFiles.has(relativePath)) {
+  if (!options.force && options.skipUnmodified && existingFiles.has(relativePath)) {
     const cached = existingFiles.get(relativePath);
     if (cached.mtime === stat.mtime.toISOString()) {
       // File hasn't changed.
@@ -630,9 +758,9 @@ function processFile(child, directoryId, dirEntries, dirImagePath, dirTextIds) {
   const extension = ext.substring(1);
 
   // Metadata
-  const meta = parseMetadata(buffer, extension);
+  const meta = parseMetadata(buffer, extension, relativePath);
   const title = meta.title || path.basename(name, ext);
-  const system = meta.system || detectSystemFromPath(relativePath);
+  const system = meta.system !== undefined ? meta.system : detectSystemFromPath(relativePath);
   const subtunes = describeSubtunes(extension, meta);
 
   // --- Sidecar Resolution for File ---
@@ -715,6 +843,7 @@ function processFile(child, directoryId, dirEntries, dirImagePath, dirTextIds) {
       songId,
       title,
       meta.artist || null,
+      meta.contributor || null,
       meta.game || null,
       system,
       meta.copyright || null,
@@ -725,7 +854,7 @@ function processFile(child, directoryId, dirEntries, dirImagePath, dirTextIds) {
       finalImageId,
       JSON.stringify(finalTextIds),
       soundfont,
-      md5,
+      md5 || meta.md5 || null,
       subtunes.length || 1,
       sortOrder
     );
@@ -778,7 +907,7 @@ processDirectory(CATALOG_DIR, '')
           // Only delete if it falls within the current scan filter
           let inScope = true;
           if (scanRelativeBase) {
-             inScope = p === scanRelativeBase || p.startsWith(scanRelativeBase + path.sep);
+             inScope = p.startsWith(scanRelativeBase);
           }
           
           if (inScope) {
@@ -871,3 +1000,7 @@ processDirectory(CATALOG_DIR, '')
       }
     }
   });
+
+module.exports = {
+  importHvscCatalog,
+};

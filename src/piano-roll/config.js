@@ -107,6 +107,8 @@ export const PIANO_ROLL_CONFIG = {
   MUTED_OPACITY: 0.15,    // Opacity for notes on muted channels
   SUSTAIN_OPACITY: 0.5,   // Opacity for the portion of a note held by the sustain pedal (CC 64)
   ENABLE_PITCH_BEND: true, // Visualize MIDI pitch bends as continuous ribbons
+  PITCH_BEND_CONNECTOR_RATIO: 0.25, // Line width ratio of transition connectors between pitch bend steps (0.5 = half thickness)
+  PITCH_BEND_LINEAR_THRESHOLD_MS: 0, // Time delta threshold in ms below which successive pitch bends are rendered as a continuous linear glide instead of stairsteps
   // Piano Keyboard settings:
   SHOW_KEYBOARD: true, // Display interactive piano keyboard under the playhead
   KEYBOARD_ASPECT_RATIO: 0.11, // Height-to-width ratio of the 88-key keyboard (0.125 * 440px = 55px)

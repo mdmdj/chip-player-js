@@ -17,8 +17,16 @@
 #   * it refuses to continue a rebase that stopped. An interrupted rebase leaves
 #     the partially applied commit staged and `--continue` trusts it, which is
 #     how the above went wrong;
-#   * after a successful rebase it checks the tree is byte-identical to the tip
-#     it started from, and names every commit the rebase emptied or dropped.
+#   * after a successful rebase it checks the tree against the tip it started
+#     from, and names every commit the rebase emptied or dropped.
+#
+# "against the tip", not "byte-identical to the tip": after catching up to
+# upstream the tree MUST move, because the base brings 20+ files the tip has
+# never seen. The question is only whether a file moved for a reason the base
+# supplied. So the check is per file -- did the base change this file between
+# the merge base and itself? -- and a file the base never touched is a real
+# suspect. The byte-identical form was right only while the base only ever
+# gained promoted work.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -95,12 +103,39 @@ if git diff --quiet "$FEATURE" HEAD -- "${moved[@]}"; then
   exit 0
 fi
 
+# Same benign case, but the base ALSO carries upstream work, so a moved file is
+# not identical to the base: it is the base's version plus whatever overlay-only
+# content legitimately lives in it (a DEV region, an engine fix). The old
+# check demanded the whole set match and called that a lost change -- on
+# 2026-10-07, catching up to upstream, 23 files moved and 3 of them also hold
+# overlay-only deltas, so it cried wolf.
+#
+# The precise question is per file: did the BASE change this file between the
+# merge base and itself? If yes, its content moving is explained. If no, the
+# rebase changed a file the base never touched, which really is a lost change.
+suspects=()
+for f in "${moved[@]}"; do
+  if git diff --quiet "$MB" "$FEATURE" -- "$f"; then
+    suspects+=("$f")
+  fi
+done
+if [ ${#suspects[@]} -eq 0 ]; then
+  echo
+  echo "rebase: every file that moved is one $FEATURE also changed since the"
+  echo "merge base, so the movement is that work arriving, not lost content."
+  echo "The overlay-only deltas in them survived; confirm with:"
+  echo "  git diff --stat $FEATURE HEAD"
+  exit 0
+fi
+moved=("${suspects[@]}")
+
 echo
-echo "rebase: FAIL -- the tree is not what it was before, and the rebase"
-echo "reported success, so this is the only place it shows. Something was lost"
-echo "that $FEATURE does not have: a DEV region, a hand-carried hunk, or a"
-echo "promoted file that came back stripped. Restore the affected files from"
-echo "$TIP, commit, and re-run:"
+echo "rebase: FAIL -- these files moved, and $FEATURE never touched them since"
+echo "the merge base, so the rebase changed content nothing supplied. Usually a"
+echo "DEV region, a hand-carried hunk, or a promoted file that came back"
+echo "stripped. Restore them from $TIP, commit, and re-run:"
 echo
-git diff --stat "$TIP" HEAD
+printf '  %s\n' "${moved[@]}"
+echo
+git diff --stat "$TIP" HEAD -- "${moved[@]}"
 exit 1

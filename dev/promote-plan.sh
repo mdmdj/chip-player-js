@@ -37,22 +37,71 @@ pathspec_exclusions=()
 for p in "${OVERLAY[@]}"; do pathspec_exclusions+=(":(exclude)$p"); done
 mapfile -t CANDIDATES < <(git diff --name-only "$FEATURE"...HEAD -- . "${pathspec_exclusions[@]}" 2>/dev/null | sort -u)
 
+# A sentinel only counts when it is the first WORD on the line, behind nothing
+# but whitespace and comment punctuation. Matching the bare substring meant a
+# line that merely mentioned "DEV-BEGIN" in prose turned on skipping and
+# silently swallowed every line after it. The balance check caught the usual
+# case (an odd number of mentions), but a stray mention that happened to
+# balance stripped the wrong span and committed truncated code.
+#
+# "first word" rather than an enumeration of comment styles, because the styles
+# are not enumerable in practice: Settings.js wraps a region in a JSX comment
+# (`{/* DEV-BEGIN ... */}`), which no list of // # -- * would have matched.
+# Anything non-alphanumeric before the sentinel is comment punctuation; a
+# letter means prose, and prose is not a marker.
+SENTINEL_RE='^[^A-Za-z0-9_]*(DEV-BEGIN|DEV-END)([[:space:]]|$)'
+
 # Strip DEV-BEGIN..DEV-END regions (inclusive) from stdin.
 strip_regions() {
-  awk -v b="$BEGIN" -v e="$END" '
-    $0 ~ b { skip=1 }
+  awk -v b="$BEGIN" -v e="$END" -v re="$SENTINEL_RE" '
+    $0 ~ re {
+      if (match($0, b)) { skip=1; next }
+      if (match($0, e)) { skip=0; next }
+    }
     skip==0 { print }
-    $0 ~ e { skip=0 }
   '
+}
+
+# After stripping, the result must still parse. A region that unbalances a
+# brace or a paren produces a file that is wrong but still commits; the only
+# cheap guard is to ask the language. Anything we cannot check is reported
+# rather than assumed fine.
+check_syntax() {
+  local file="$1" stripped="$2"
+  case "$file" in
+    *.js|*.cjs|*.mjs)
+      node --check "$stripped" >/dev/null 2>&1 || {
+        echo "promote: $file does not parse after stripping DEV regions" >&2
+        node --check "$stripped" 2>&1 | head -5 >&2
+        return 1
+      }
+      ;;
+    *)
+      : # no cheap syntax check for this language; brace balance is all we get
+      local before after
+      before="$(git show "HEAD:$file" | tr -cd '{' | wc -c)"
+      after="$(tr -cd '{' < "$stripped" | wc -c)"
+      if [ "$before" != "$after" ]; then
+        echo "promote: $file loses {braces} when DEV regions are stripped" >&2
+        return 1
+      fi
+      ;;
+  esac
 }
 
 plan=()
 unbalanced=()
+unsound=()
+TMPFILE="$(mktemp)"
+trap 'rm -f "$TMPFILE"' EXIT
 for f in "${CANDIDATES[@]}"; do
   [ -e "$f" ] || continue
-  # Balanced sentinel check.
-  nb="$(git show "HEAD:$f" | grep -c "$BEGIN" || true)"
-  ne="$(git show "HEAD:$f" | grep -c "$END" || true)"
+  # Balanced sentinel check, using the same anchoring as the strip itself --
+  # counting raw substring hits here flagged prose as an unbalanced region.
+  nb="$(git show "HEAD:$f" | awk -v re="$SENTINEL_RE" -v s="$BEGIN" \
+        '$0 ~ re && $0 ~ s { c++ } END { print c+0 }')"
+  ne="$(git show "HEAD:$f" | awk -v re="$SENTINEL_RE" -v s="$END" \
+        '$0 ~ re && $0 ~ s { c++ } END { print c+0 }')"
   if [ "$nb" != "$ne" ]; then
     unbalanced+=("$f")
     continue
@@ -60,6 +109,11 @@ for f in "${CANDIDATES[@]}"; do
   # Promote if stripping regions leaves a difference from the feature branch.
   if git show "HEAD:$f" | strip_regions | diff -q - <(git show "$FEATURE:$f" 2>/dev/null) >/dev/null 2>&1; then
     continue  # nothing but dev regions differ
+  fi
+  git show "HEAD:$f" | strip_regions > "$TMPFILE"
+  if ! check_syntax "$f" "$TMPFILE"; then
+    unsound+=("$f")
+    continue
   fi
   plan+=("$f")
 done
@@ -77,4 +131,10 @@ if [ ${#unbalanced[@]} -gt 0 ]; then
   echo "ERROR (unbalanced $BEGIN/$END sentinels):"
   printf '  %s\n' "${unbalanced[@]}"
   die "fix the sentinel regions before promoting"
+fi
+if [ ${#unsound[@]} -gt 0 ]; then
+  echo
+  echo "ERROR (stripping DEV regions does not produce a valid file):"
+  printf '  %s\n' "${unsound[@]}"
+  die "a dev region is unbalancing the file; promoting it would commit broken code"
 fi

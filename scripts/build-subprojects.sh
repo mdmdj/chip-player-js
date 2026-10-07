@@ -157,14 +157,20 @@ build_libvgm() {
   sysroot=$(emcc -sUSE_ZLIB=1 --show-ports >/dev/null 2>&1; emcc -E -x c /dev/null -v 2>&1 | sed -n 's/.*--sysroot=\([^ ]*\).*/\1/p' | head -1)
   local zlibLib="$sysroot/lib/wasm32-emscripten/libz.a"
   local zlibInc="$sysroot/include"
-  # Add the dedicated Gens YM2612 core ahead of the GPGX default. GPGX must stay
-  # ON: libvgm only registers the YM2612 device when one of the YM2612 cores is
-  # enabled, and the GPGX core (fmopn.c) is what leaves YM2612 VGMs (e.g. the
-  # gym set) stuck at position 0 under Emscripten. With both built, libvgm picks
-  # the first matching core, which is Gens.
-  # SNDEMU_YM2612_NUKED must ALSO stay ON: 2612intf.h unconditionally enables
-  # EC_YM2612_NUKED, so its object references nukedopn2_* and nothing links
-  # without the ym3438 core archive member.
+  # All three YM2612 cores stay ON, and the reason is a link constraint, not a
+  # quality ranking. 2612intf.h enables EC_YM2612_{GPGX,GENS,NUKED} itself, so
+  # devDefList_YM2612 always names all three; these flags decide which source
+  # files are COMPILED. Turning one off leaves its devDef referencing symbols
+  # with no object behind it, so the link fails rather than degrading.
+  #
+  # Core selection: devDefList_YM2612 lists MAME/GPGX FIRST (2612intf.c:109),
+  # so GPGX is what actually runs. An earlier version of this comment claimed
+  # Gens was picked first and that GPGX was the cause of YM2612 VGMs freezing at
+  # position 0. Both were wrong. GPGX was never broken: the freeze came from
+  # GME and libvgm both exporting MAME ym*_write, and --allow-multiple-definition
+  # keeping GME's copy for a libvgm FM_OPN. That is fixed by pruning GME's OPN
+  # objects (USE_GME_VGM/GYM/HES/KSS=OFF above); no per-device core override
+  # exists in the wrapper and none is needed. See AGENTS.md.
   # Iconv_LIBRARY=c: CMake's FindIconv detects iconv built into libc but then
   # fails its find_library(c) check; satisfy it so libvgm uses real charset
   # conversion (musl iconv supports UTF-16LE/CP1252/CP932).

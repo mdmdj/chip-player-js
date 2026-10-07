@@ -16,14 +16,11 @@ config/webpack.config.dev.js
 scripts/start.js
 
 # Audio-engine build/tooling (real, but engine plumbing, not the feature).
-# The SID wrapper is listed because its SIDPLAYFP_HAVE_SEEK guards need our fork
-# (official libsidplayfp 2.9 has neither seek() nor setTempo()). One hunk is the
-# exception and is hand-carried to the feature branch instead: sid_set_subtune's
-# `engine->load(currentTune)` after selectSong(), which master's own wrapper
-# already calls in sid_load_data -- upstream API, not fork API. Keep that
-# hand-carry; promote.sh will never deliver it.
-# libvgm-wrapper.cpp promotes (loop functions + build fixes; its YM2612-Gens
-# force is a DEV region and strips out).
+# The SID wrapper is NOT listed: its SIDPLAYFP_HAVE_SEEK guards defended a build
+# we never make (upstream's own wrapper calls setTempo()/seek() unguarded, so
+# upstream is already fork-only), and paying a permanent hand-carry for them cost
+# us the sub-tune reload fix in sid_set_subtune. Guards removed 2026-10-07; the
+# wrapper now promotes with the rest.
 scripts/build-subprojects.sh
 scripts/build-chip-core.js
 scripts/build-libsidplayfp.sh
@@ -34,7 +31,6 @@ scripts/build-libsidplayfp.sh
 # this config does not DefinePlugin it).
 scripts/build-info.js
 config/webpack.config.common.js
-src/bindings/libsidplayfp-wrapper.cpp
 src/tinyplayer.c
 game-music-emu/**
 libvgm/**

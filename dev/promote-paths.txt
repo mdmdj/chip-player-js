@@ -44,6 +44,23 @@ farbrausch-v2m/**
 fluidlite/**
 libADLMIDI/**
 
+# The one "seam" file, and it stays. server/index.js is ~all feature work
+# (the /shuffle + /random rewrite, contributor passthrough, subtuneCount, the
+# sub-tune-count lookup), but two of its dev seams substitute a MODULE at a
+# require site -- skia-canvas and DEV_AUTH_MODULE -- and a strip-only region
+# cannot express "dev loads A, prod loads B": the stripped form either loses
+# the assignment or duplicates the binding. Upstream's auth.js requires a
+# service-account JSON we do not have, so the bypass is real.
+#
+# Converting it was prototyped and measured (2026-10-07). Deleting the skia
+# seam and regioning the other two would promote the file, but the promotion
+# delta would then carry a bare `let authModule = './middleware/auth.js';`
+# plus `require(authModule)` -- dev plumbing in a sub-tunes PR, with no answer
+# to "why is this a variable?". One line of unexplained indirection is worse
+# than hand-carrying the file, so the seams stay and the file stays listed.
+# Feature work here must still be hand-carried: repeat that step every time.
+server/index.js
+
 # Engine feature-detection + remote-dev tweaks on shared files. Only
 # src/config/index.js remains: dev-only throughout (LAN hostname over
 # localhost), correctly listed. MIDIPlayer (2 ADLMIDI guards) and XMPPlayer

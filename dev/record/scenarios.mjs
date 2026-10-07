@@ -53,7 +53,7 @@ export const scenarios = [
       'The row is marked <TUNES> with a count, not <DIR> — same list, different meaning.',
       'Clicking it navigates *into the file*, exactly like a directory.',
       'Two different song files, entered and left the same way, each playing a named sub-song.',
-      'Each row is a real song from there on: the footer tracks the file path, there is no "Tune 8 of 28" label and no prev/next sub-tune widget, and the share link is the same <code>/?play=…&amp;subtune=N</code> it has always been.',
+      'Each row is a real song from there on: the footer tracks the file path and names the sub-song it is playing, with no "Tune 8 of 28" nav label and no prev/next sub-tune widget; the share link is the same <code>/?play=…&amp;subtune=N</code> it has always been.',
     ],
     before: 'master listed a multi-song NSF as one opaque file row, and the only way to reach tune 3 was a separate footer widget — a "Tune N of M" label and prev/next buttons that existed nowhere else in the app.',
     harness: 'dev/test-parsers.js',

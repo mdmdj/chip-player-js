@@ -694,10 +694,13 @@ and `build-chip-core.js` enables the module and passes `-DTP_ENABLE_ADLMIDI` to
 C++ object model). Bank selection and OPL3 playback work; `tinyplayer.c` keeps
 `adl_setNumChips` at the default 1 chip.
 
-**libvgm YM2612 core:** libvgm registers the YM2612 device (`SNDDEV_YM2612`) only
-when at least one YM2612 core is compiled, and `devDefList_YM2612` picks GPGX
-first. Do **not** disable GPGX alone: with no YM2612 core the device is
-unregistered and every VGM using it fails with `RuntimeError: null function`.
+**libvgm YM2612 core:** all three cores (MAME/GPGX, Gens, Nuked) must be
+compiled. That is a **link** requirement, not a ranking — `2612intf.h` enables
+`EC_YM2612_{GPGX,GENS,NUKED}` itself, so `devDefList_YM2612` always names all
+three, while the `SNDEMU_YM2612_*` CMake flags decide only which source files
+are compiled. Disable one and its `devDef` still references symbols with no
+object behind it, so the link fails. `devDefList_YM2612` lists **MAME/GPGX
+first** (`2612intf.c:109`), so GPGX is the core that actually runs.
 
 Root-caused 2026-10 (was misdiagnosed as a broken GPGX core): GME and libvgm
 both export the MAME OPN C globals (`ym2612_write`, `ym2203_write`, …) and our
@@ -1502,7 +1505,7 @@ checks no longer work. Compare a live context to a stored one with
   opens, and a clicked song plays. The `/preview` route needs skia-canvas;
   everything else is fine over Tailscale.
 - **Verified playing:** NSF/NSFE/SPC/GBS/AY (GME), VGM/VGZ/GYM/S98/DRO (libvgm,
-  including the YM2612 Gens fix), TG16/Game Boy/Neo Geo/Capcom/Konami VGZs,
+  including YM2612 on the default GPGX core), TG16/Game Boy/Neo Geo/Capcom/Konami VGZs,
   MOD/S3M/XM/IT (libxmp-lite), N64 `.miniusf`, V2M, MDX, MIDI (fluidlite + a
   SoundFont), SID (mmontag fork; sub-tune switching verified). Repeat-one over
   loop regions and the slider loop band are verified, including MDX's native
@@ -1748,8 +1751,10 @@ checks no longer work. Compare a live context to a stored one with
 4. **Audio engine roadmap** (separate from the feature; see "Building the real
    chip-core"). Ordered by impact × risk:
    - **Done:** emscripten build of GME/libvgm/libxmp/N64/V2M/MDX/fluidlite; YM2612
-     fixed (force the Gens core); GME↔libvgm symbol clash masked with
-     `-Wl,--allow-multiple-definition`.
+     fixed by pruning GME's OPN objects so the GME↔libvgm `ym*_write` clash
+     cannot happen (a duplicate-symbol tripwire now fails the build on any
+     strong-symbol collision; `--allow-multiple-definition` stays only as
+     belt-and-braces). No core override is involved -- GPGX was never broken.
    - **(1) SID — fork builds; `setTempo` done, `seek` still WIP.** Built from
      `mmontag/libsidplayfp` (`montag-dev-2.14`, recursive) by
      `scripts/build-libsidplayfp.sh`; verified rendering, sub-tunes, sub-tune
@@ -1794,10 +1799,17 @@ checks no longer work. Compare a live context to a stored one with
       (vendored tree + `build-chip-core.js`); see "MDX (mdxmini)".
 
    **Traps / learnings:**
-   - `SNDDEV_YM2612` is registered only when a YM2612 core is compiled. Disabling
-     GPGX alone drops the device and every YM2612 VGM throws
-     `RuntimeError: null function`. Keep GPGX compiled and force `FCC_GENS`
-     per-device in the wrapper (see "libvgm YM2612 core" above).
+   - All three YM2612 cores must stay compiled, and the reason is the **link**,
+     not the quality ranking. `2612intf.h` enables
+     `EC_YM2612_{GPGX,GENS,NUKED}` itself, so `devDefList_YM2612` always names
+     all three; the `SNDEMU_YM2612_*` flags only decide which source files are
+     compiled. Turning one off leaves its `devDef` referencing symbols with no
+     object behind it, and the link fails. `SNDDEV_YM2612` is defined
+     unconditionally, so the *device* registers regardless -- it is the core
+     list that goes empty. Earlier notes here said "disabling GPGX alone drops
+     the device" and to "force `FCC_GENS` per-device"; both were wrong, and
+     **the force was deleted.** Do not reintroduce it (see
+     "libvgm YM2612 core" above).
    - `--allow-multiple-definition` is luck, not safety: it once silently kept
      GME's MAME `ym2612_write` over libvgm's and hung YM2612 playback (see
      "libvgm YM2612 core"). Fixed by pruning GME's OPN objects (below), and

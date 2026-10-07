@@ -131,7 +131,7 @@ check('multi-song counts + strings + date', () => {
   assert.strictEqual(m.startingSong, 1);
   assert.strictEqual(m.title, 'Metal Gear Solid');
   assert.strictEqual(m.artist, 'Konami');
-  assert.strictEqual(m.system, 'Gameboy');
+  assert.strictEqual(m.system, 'Game Boy');
   assert.strictEqual(m.date, '2000-01-01');
 });
 check('missing count defaults to 1', () => {

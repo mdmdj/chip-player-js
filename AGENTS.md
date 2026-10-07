@@ -431,8 +431,8 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
 >   string literals even though the wasm is stripped). Prod's libvgm surface is
 >   19 names, every one byte-identical to ours (`lvgm_init`, `_load_data`,
 >   `_render`, `_seek_ms`, `_set_indefinite_playback`, voice APIs, …), and it has
->   **none** of our 8 loop APIs (`lvgm_get_cur_loop`, `lvgm_set_loop_count`,
->   `lvgm_get_{loop_start,loop_end,fade_start,playlist_position}_ms`,
+>   **none** of our loop APIs (`lvgm_get_cur_loop`, `lvgm_set_loop_count`,
+>   `lvgm_get_{loop_start,loop_end,fade_start}_ms`,
 >   `lvgm_get_indefinite_playback`, `lvgm_reset`) — so **prod ships no VGM
 >   loop-region feature at all**, and our Repeat One baseline is new capability,
 >   not a port. `lvgm_get_voice_chip_name` exists in **no** upstream libvgm — it
@@ -1984,11 +1984,18 @@ only armed when `silenceDuration >= 0`, and both arms must end the song):
   meaningless), and rides the tail until the song ends/seek/loadData clears
   it.
 - New wrapper exports (`libvgm-wrapper.cpp` + `build-chip-core.js`):
-  `_lvgm_get_cur_loop`, `_lvgm_get_playlist_position_ms` (`GetCurTime(0)`),
-  `_lvgm_get_fade_start_ms` (`GetTotalPlayTicks(loopCount)`). Note
-  `GetCurTime(0)` folds loops but reports the phase **from A**, i.e. within the
-  first body; it must be re-anchored at the band (that mismatch caused a bug
-  where the head looped inside I0, not the highlighted band).
+  `_lvgm_get_cur_loop` (`GetCurLoop`) and `_lvgm_get_fade_start_ms`
+  (`GetTotalPlayTicks(loopCount)`).
+  **A third export, `_lvgm_get_playlist_position_ms` (`GetCurTime(0)`), was
+  tried and removed 2026-10-07.** The idea was to let the engine report the
+  folded position and have the head follow it. It lost twice: `GetCurTime(0)`
+  reports the phase **from A**, so within the first body it sits at I0 rather
+  than the highlighted band (that mismatch made the head loop in the wrong
+  place), and re-anchoring it in JS is exactly what `getDisplayPositionMs`
+  already does from `getPositionMs`. So the wrapper function was dead --
+  defined, kept alive, called by nothing but one devtools snapshot field --
+  and shipping it unreferenced in the PR was worse than deleting it. Keep this
+  in mind before re-adding an engine-side position getter: the band math won.
 - Verified via the t3 preview + `window.__cpDev`: the full test matrix above is
   green on the current build (Hurry Up!.vgz), the song ends/advances normally
   in every case, and the next context entry starts with fresh state. Caveats:
@@ -2186,8 +2193,8 @@ control), `setParam(id, value)` (through `App.handleParamChange`),
 `waitUntil(fn, timeoutMs)` (poll the snapshot until a condition holds),
 `startRecord()`/`stopRecord()` (non-blocking), and `runTimeline(events, opts)`
 for timed/conditional scripts. The snapshot exposes player state plus VGM
-looping fields (`curLoop`, `fadeStartMs`, `fadeTailStartMs`,
-`playlistPositionMs`). Use it from the t3 preview to script enable/disable
+looping fields (`curLoop`, `fadeStartMs`, `fadeTailStartMs`). Use it from the
+t3 preview to script enable/disable
 timing and spy on player state instead of listening.
 
 The Settings tab has a dev-only **End Detector (dev)** section at the bottom

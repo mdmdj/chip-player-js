@@ -100,9 +100,39 @@ from the feature branch, it:
 
 It writes the result into the feature-branch worktree and commits it there as one
 commit ("Promote feature work from dev/overlay"), leaves `dev/overlay`
-untouched, and refuses if `DEV-BEGIN`/`DEV-END` sentinels are unbalanced. After
-promoting, `git rebase feature/subtunes-as-first-class` on `dev/overlay` so both
-share the feature state.
+untouched, and refuses if `DEV-BEGIN`/`DEV-END` sentinels are unbalanced. Then
+put `dev/overlay` back on top — **via the script, not by hand**:
+
+```sh
+./dev/rebase.sh             # rebases onto the feature branch, then verifies
+```
+
+The rebase is the only step of the cycle that can change the tree without saying
+so: `-X theirs` resolves an overlapping hunk toward the replayed commit, and work
+the feature branch already carries is dropped or emptied. On 2026-10-07 a rebase
+printed "Successfully rebased", exited 0, dropped the shuffle rewrite and put
+`server/database.js` back to a superseded design — the only reason it was caught
+is that the tree was diffed against a pre-rebase snapshot. `dev/rebase.sh` makes
+that the tool's job:
+
+- it **refuses to resume** a rebase that stopped (`git rebase --abort`, then
+  re-run). An interrupted rebase leaves the partially applied commit staged and
+  `--continue` trusts it, which is how that one went wrong;
+- `git range-diff` over the two ranges **names every commit the rebase emptied
+  or dropped**. A promoted commit is expected here — the feature branch carries
+  the work now, so only its dev-only remainder is left, and the commit and its
+  message stay on `dev/overlay`. A commit that is gone *and* whose content is
+  not on the feature branch is a lost change;
+- `git diff <tip> HEAD` **must be empty**: rebasing onto a branch that already
+  holds this branch's content must not move a byte. If the tree moved only where
+  the feature branch is ahead, it says so and exits 0 (you rebased from a tip
+  older than the promoted work); anything else exits non-zero and prints the
+  files to restore from the recorded tip (`dev/.pre-rebase`).
+
+Measured, for the record: a clean, uninterrupted rebase of these branches drops
+nothing and reproduces the pre-rebase tree exactly. The damage came from the
+interrupted-then-resumed rebase, **not** from the hand-carry convention, and
+`--reapply-cherry-picks` changes nothing here.
 
 ### Two mechanisms — how to choose
 
@@ -296,7 +326,8 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
     shuffle/random/playback/top, and per-sub-tune favorites including a legacy
     row with no sub-tune). It mutates the dev user's favorites and undoes them.
     Skips cleanly if the server or the catalog is absent.
-  - `node dev/test-songrefs.js` — the `SongRef` identity model in `src/util.js`.
+  - `node dev/test-songrefs.js` — the `SongRef` identity model in `src/util.js`,
+    and how a sub-tune names itself (`subtuneLabel`).
   - `node dev/test-devtools.js` — the `__cpDev` stall-watch latch.
   - `dev/record/probe.mjs` — measure a fixture in the live app
     (`node dev/record/probe.mjs "/?play=<id>&subtune=N" [seek|watch|calls|restart]`).
@@ -1123,13 +1154,15 @@ checks no longer work. Compare a live context to a stored one with
   `/shuffle` and `/random` now have *no* sub-tune branching at all), and
   `4c75be7e3` (one field, one predicate: see "Is this file a song folder?").
   `0c957ad5e` hand-carries the `server/index.js` half to the feature branch.
-  **`promote.sh` now plans exactly 5 files** — `src/util.js` and
-  `App.js`/`Browse.js`/`Favorites.js`/`TopCharts.js` — and nothing else:
-  `server/database.js` is already identical there, and the only `server/` delta
-  left between the branches is the four documented overlay-only seams. The
-  client half is safe to promote on its own (old client reads an absent
-  `subtuneCount` as "not a folder"); **the promote itself is still the user's
-  to trigger.**
+  **Both halves were promoted and the trees are back in sync (2026-10-07)**: the
+  last cycle was the footer's sub-tune label — `src/util.js`, `App.js`,
+  `AppFooter.js`, `Favorites.js`, `TopCharts.js`, `index.css` — plus a
+  `dev/test-songrefs.js` check that stayed behind. `promote.sh` now reports
+  "Nothing to promote", and `server/database.js` is identical across the
+  branches; the only `server/` delta left is the four documented overlay-only
+  seams. The client half is safe to promote on its own (old client reads an
+  absent `subtuneCount` as "not a folder"); **the promote itself is still the
+  user's to trigger.**
   Verified in-app: a song folder shuffles all its sub-tunes (28 for
   `Akumajou Densetsu (VRC6).nsfe`, 96 for `gbs/DMG-ZLJ.gbs`); `/browse/nsfe`
   draws 100 songs from all 13 files (was 13); `/browse` draws 100 songs from
@@ -1190,7 +1223,11 @@ checks no longer work. Compare a live context to a stored one with
   - **Verify a rebase by tree, not by "it completed":** snapshot the old tip on a
     scratch branch first, then require `git diff <old-tip> HEAD` to be empty
     (mine was, after the fixup). That diff is the whole proof that no DEV region
-    or vendored fix was lost — it is what caught the `-X ours` damage.
+    or vendored fix was lost — it is what caught the `-X ours` damage. **It is
+    `dev/rebase.sh`'s job now** (see "Dev overlay & promotion"), so the habit is
+    a script; on 2026-10-07 that same diff caught a *successful* rebase that had
+    dropped a commit and reverted `server/database.js`, which is what prompted
+    writing it.
   - **Expect *duplicated* content after promote-then-rebase, not just lost
     content (2026-10-03).** The promote writes *stripped* content onto the feature
     branch and skips path-listed files entirely, so those files keep whatever an
@@ -1367,11 +1404,12 @@ checks no longer work. Compare a live context to a stored one with
   - **Dev shims are untracked-stage, not tracked patches** (no more
     `*.dev-backup` / `--revert` for auth/UserProvider). `dev/apply.sh` /
     `dev/remove.sh` manage them; `git status` stays clean after apply.
-  - The feature branch is at `a99ae9ef8` and the trees are in sync: both branches
-    are pushed to `origin`, and `dev/overlay` differs from the feature branch by
-    DEV regions only. `dev/promote.sh` reports "Nothing to promote" — the
-    healthy state after a promote. Do not run it as a per-change ritual (see
-    "Dev overlay & promotion").
+  - Both branches are pushed to `origin` and the trees are in sync: `dev/overlay`
+    differs from `feature/subtunes-as-first-class` by DEV regions only, and
+    `dev/promote.sh` reports "Nothing to promote" — the healthy state after a
+    promote. Do not run it as a per-change ritual (see "Dev overlay &
+    promotion"). The rebase half of the cycle is `dev/rebase.sh`, which verifies
+    the tree; do not rebase by hand.
 - **Remote dev access (LAN/WSL/Tailscale):** fixed, dev tooling only (not the
   feature). Two root causes:
   - `scripts/start.js` built its own minimal `WebpackDevServer` options and

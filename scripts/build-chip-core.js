@@ -383,20 +383,12 @@ const wantSid = process.env.CHIP_NO_SID !== '1' && (haveSidLib || process.env.CH
 if (!wantSid) {
   console.warn('Skipping libsidplayfp module (not vendored). Set CHIP_SID=1 once built.');
   for (const m of chipModules) if (m.name === 'libsidplayfp') m.enabled = false;
-} else {
-  // seek()/setTempo() are mmontag/libsidplayfp additions; the official core has
-  // neither. Probe the header so the wrapper's guarded calls are compiled in
-  // only when they exist.
-  const sidHeader = ['../libsidplayfp', 'libsidplayfp']
-    .map(dir => path.resolve(path.resolve(__dirname, '..'), dir, 'src/sidplayfp/sidplayfp.h'))
-    .find(h => { try { return fs.existsSync(h); } catch { return false; } });
-  let hasSeek = false;
-  if (sidHeader) {
-    try { hasSeek = /void\s+seek\s*\(/.test(fs.readFileSync(sidHeader, 'utf8')); } catch { /* ignore */ }
-  }
-  chipModules.find(m => m.name === 'libsidplayfp')
-    .flags.push(`-DSIDPLAYFP_HAVE_SEEK=${hasSeek ? 1 : 0}`);
 }
+// No SIDPLAYFP_HAVE_SEEK probe here: seek()/setTempo() are mmontag/libsidplayfp
+// additions, and the wrapper calls them unguarded because upstream does too. We
+// always build against that fork (scripts/build-libsidplayfp.sh), so a probe
+// could only ever disable calls that already work. Building against the official
+// core now fails at compile time instead of silently ignoring seek and tempo.
 
 const runtimeMethods = [
   'FS',

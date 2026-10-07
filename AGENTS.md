@@ -928,8 +928,12 @@ Verified on the real catalog: 6758 files, 1140 subtune rows, 87 multi-song files
   (sub-song titles); sub-song hits carry `subtune` + `title`, and files already
   matched at file level are de-duplicated.
 - `/metadata?path=...&subtune=N` returns `subtuneTitle`.
-- `/shuffle` and `/random` return `{path, subtune}`; a multi-song file shuffles
-  as a random sub-song.
+- `/shuffle` and `/random` return `{path, subtune}`, **one item per playable
+  song**: a multi-song file is expanded into *all* of its sub-tunes (a
+  `LEFT JOIN` on `subtune`), so a sub-tune shuffles exactly like a single-song
+  file. `?path=` may name a directory — prefix-matched recursively, with the
+  prefix `LIKE`-escaped so a folder named `Famicompo_mini_vol1` cannot pull in a
+  sibling — or a file, which shuffles as itself.
 - `/playback` accepts `subtune`; `playbacks` gains a `subtune` column
   (idempotent `ALTER TABLE` in `server/database.js`, also in the dev seed).
   `/top` (global, user, and metric=favorites) groups by `(song_id, subtune)`
@@ -1041,9 +1045,10 @@ because `Sequencer` copies its context).
    grouped under directory/song-folder headings), `Search` (sub-tune hits),
    `AppFooter` (favorite + share link carry subtune), `LocalFiles`/`TopCharts`
    (SongRef contexts). The footer's sub-tune-specific nav/label is gone.
-6. Server `/shuffle` and `/random` return `{path, subtune}`; a multi-song file
-   shuffles as a random sub-song. (`/random` had a latent leading-slash bug;
-   fixed.)
+6. Server `/shuffle` and `/random` return `{path, subtune}`, one item per
+   playable song: a multi-song file is expanded into every one of its sub-tunes
+   rather than one random sub-song, so a directory shuffle is a random walk over
+   every song beneath it. (`/random` had a latent leading-slash bug; fixed.)
 7. Favorites server: `FavoriteSchema.subtune`, add/remove statements keyed by
    `(path, subtune)` — verified via curl (add two sub-tunes + a plain file,
    then remove one sub-tune and confirm the others remain). `getFavoritesStmt`

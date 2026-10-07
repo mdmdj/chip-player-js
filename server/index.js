@@ -46,7 +46,6 @@ const {
   getSidMetadataByPathStmt,
   getTextContentStmt,
   getShuffleStmt,
-  getShuffledSubtunesStmt,
   getTotalStmt,
   getSongByPathStmt,
   getSubtuneCountBySongIdStmt,
@@ -388,7 +387,7 @@ function toSongRefs(rows) {
 
 router.get('/random', (req, res) => {
   const limit = parseInt(req.query.limit, 10) || 1;
-  const items = toShuffledSongRefs(getShuffleStmt.all('', '%', limit));
+  const items = toSongRefs(getShuffleStmt.all('', '%', limit));
   res.json({
     items: items,
     total: items.length,
@@ -405,22 +404,17 @@ function escapeLike(value) {
 /**
  * Returns: { items: [ { path, subtune }, ... ], total }
  *
- * `path` may name a directory, which is shuffled recursively, or a file. A
- * multi-song file browses as a "song folder" of sub-tunes, and a file has no
- * children to prefix-match, so its sub-tunes are shuffled directly.
+ * `path` may name a directory, which is shuffled recursively, or a file, which
+ * shuffles as itself (all of its sub-tunes, if it has any).
  */
 router.get('/shuffle', (req, res) => {
   const limit = parseInt(req.query.limit, 10) || 100;
   const reqPath = (req.query.path || '').replace(/^\/+|\/+$/g, '');
-
-  const subtunes = getShuffledSubtunesStmt.all(reqPath, limit);
-  const items = subtunes.length > 0
-    ? subtunes.map(({ subtune }) => ({ path: reqPath, subtune }))
-    : toShuffledSongRefs(getShuffleStmt.all(
-      reqPath,
-      reqPath === '' ? '%' : `${escapeLike(reqPath)}/%`,
-      limit
-    ));
+  const items = toSongRefs(getShuffleStmt.all(
+    reqPath,
+    reqPath === '' ? '%' : `${escapeLike(reqPath)}/%`,
+    limit
+  ));
 
   res.json({
     items: items,

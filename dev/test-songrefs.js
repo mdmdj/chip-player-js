@@ -28,7 +28,7 @@ Module.prototype._compile = function (content, filename) {
 };
 
 const {
-  songRef, songRefKey, songRefsEqual, songRefListsEqual, getMetadataUrlForFilepath,
+  songRef, songRefKey, songRefsEqual, songRefListsEqual, getMetadataUrlForFilepath, subtuneLabel,
 } = require('../src/util');
 
 const NSFE = 'famicompo/Castlevania III - The Dracula X Chronicles/09 Big Bat Man.nsf';
@@ -125,6 +125,16 @@ check('the metadata URL carries the sub-tune only when asked', () => {
   // A path with a space/#/% must still round-trip through the encoder.
   const tricky = getMetadataUrlForFilepath('midi/100% Pure Love.mid', 0);
   assert.ok(tricky.includes('path=midi%2F100%25%20Pure%20Love.mid'), tricky);
+});
+
+check('a sub-tune names itself by index, or by the format label when it has one', () => {
+  // The footer shows this for the sub-tunes the catalog has no label for, so
+  // "same file title" doesn't stand in for "same tune".
+  assert.strictEqual(subtuneLabel(0), 'Tune 1');
+  assert.strictEqual(subtuneLabel(5), 'Tune 6');
+  assert.strictEqual(subtuneLabel(null), 'Tune 1', 'a missing index is the first tune');
+  assert.strictEqual(subtuneLabel(3, 'Stage 3'), 'Stage 3', 'a label wins over the index');
+  assert.strictEqual(subtuneLabel(3, null), 'Tune 4');
 });
 
 console.log(`\n${passed} checks passed${process.exitCode ? ' (WITH FAILURES)' : ''}.`);

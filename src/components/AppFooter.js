@@ -38,6 +38,7 @@ function AppFooter(props) {
     songRef,
     songPath,
     subtitle,
+    subtuneLabel,
     title,
     volume,
 
@@ -188,6 +189,8 @@ function AppFooter(props) {
                      title="Copy song link to clipboard"
                      onClick={handleCopySongLink}>
                     {title}{' '}
+                    {subtuneLabel &&
+                      <span className="SongDetails-subtune">({subtuneLabel}){' '}</span>}
                     <span className="inline-icon icon-copy"/>
                   </a>
                   <a href={songUrl}

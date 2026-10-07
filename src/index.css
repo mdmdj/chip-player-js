@@ -515,6 +515,8 @@ body,#root {
 }
 .SongDetails-title { grid-area: title; color: var(--neutral4); display: flex; gap: var(--charW1); }
 .SongDetails-title a { color: var(--neutral4); }
+/* Which tune of a song folder is playing, for the ones with no label of their own. */
+.SongDetails-subtune { color: var(--neutral2); }
 .SongDetails-subtitle { grid-area: subtitle; }
 .SongDetails-filepath { grid-area: path; }
 .SongDetails-subtitle, .SongDetails-subtitle, .SongDetails-filepath {

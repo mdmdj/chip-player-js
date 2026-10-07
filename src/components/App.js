@@ -29,6 +29,7 @@ import {
   songRef,
   songRefKey,
   songRefListsEqual,
+  subtuneLabel,
   titlesFromMetadata,
   unlockAudioContext
 } from '../util';
@@ -1090,6 +1091,13 @@ class App extends React.Component {
             songRef={this.state.songRef}
             songPath={this.state.songPath}
             subtitle={subtitle}
+            // A sub-tune with no label of its own falls back to the file title,
+            // so every tune in a song folder looks alike while it plays. Name it
+            // the way Browse lists it. Labeled sub-tunes already say which tune
+            // they are, so they get nothing extra here.
+            subtuneLabel={songFolder && !this.state.subtuneTitle
+              ? subtuneLabel(this.state.songRef?.subtune)
+              : null}
             tempo={this.state.tempo}
             title={title}
             toggleInfo={this.toggleInfo}

@@ -3,7 +3,7 @@ import FavoriteButton from './FavoriteButton';
 import DirectoryLink from './DirectoryLink';
 import { UserContext } from './UserProvider';
 import VirtualizedList from './VirtualizedList';
-import { isSongFolder, songRef } from '../util';
+import { isSongFolder, songRef, subtuneLabel } from '../util';
 import bytes from 'bytes';
 
 // Same escaping as Browse: %/# must be pre-escaped for react-router.
@@ -65,7 +65,7 @@ function favoritesToListing(faves) {
       type: 'file',
       container: songFolder ? path : dir,
       isSongFolder: songFolder,
-      name: songFolder ? (fave.subtuneTitle || `Tune ${subtune + 1}`) : filename,
+      name: songFolder ? subtuneLabel(subtune, fave.subtuneTitle) : filename,
     };
   });
 

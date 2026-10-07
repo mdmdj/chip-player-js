@@ -79,6 +79,15 @@ export function isSongFolderListing(listing) {
   return (listing || []).some(item => item.subtune != null);
 }
 
+/**
+ * How a sub-tune names itself: the format's own label when it has one, else its
+ * index within the file. Same wording everywhere, so Browse, Favorites, Top
+ * Charts and the player footer call the same song the same thing.
+ */
+export function subtuneLabel(subtune, title) {
+  return title || `Tune ${(subtune ?? 0) + 1}`;
+}
+
 export function updateQueryString(newParams) {
   const searchParams = new URLSearchParams(window.location.search);
   Object.entries(newParams).forEach(([key, value]) => {

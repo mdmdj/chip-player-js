@@ -166,7 +166,7 @@ looping/seek tests. From the browser console (or the t3 preview):
 
 ```js
 __cpDev.snapshot()          // player state + VGM loop fields (curLoop,
-                            //   fadeStartMs, fadeTailStartMs, playlistPositionMs)
+                            //   fadeStartMs, fadeTailStartMs)
 __cpDev.play() / pause()
 __cpDev.seek(ms)            // also drops a captured fade tail
 __cpDev.setRepeat(0|1|2)    // Off / All / One

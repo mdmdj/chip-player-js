@@ -422,39 +422,40 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
 
 ### Building the real chip-core
 
-> **Record what you built from; don't guess.** The shipped `src/chip-core.wasm`
-> was rescued (gitignored, so it was never in git) to
-> `~/dev/chip-core-frozen/` (sha256 `94c17c93…`) with a `PROVENANCE.md`. Its
-> source clones had all been deleted (`../libvgm`, `../libxmp`,
-> `../game-music-emu`, `../FluidLite`, `../libADLMIDI`; only
-> `../libsidplayfp` survived), so provenance had to be reconstructed
-> empirically on 2026-10-02. The conclusion: it is consistent with this repo's
-> vendored `libvgm/` (upstream `91b6542`), and `../libvgm` has been restored at
-> that commit. Two guards now make this class of confusion non-recurring:
+> **Engine sourcing changed 2026-10-08: the in-repo subtrees are gone and the
+> build uses sibling clones.** `libvgm/`, `libxmp/`, `fluidlite/` and
+> `game-music-emu/` were deleted — they were already dead (`master`'s own
+> `build-chip-core.js` exports `_gme_disable_echo` and `_xmp_seek_time_frame`,
+> neither of which the vendored trees contain, so nothing could link them) and
+> were a second, stale copy of every engine. The build takes those four from
+> siblings beside the checkout — `../libvgm` (ValleyBell), `../libxmp` (4.7.x),
+> `../FluidLite`, `../game-music-emu` (mmontag's fork) — plus `../libsidplayfp`
+> (mmontag fork, as before). `libADLMIDI/`, `psflib/` and `lazyusf2/` remain
+> vendored in-repo; `mdxmini/` and `farbrausch-v2m/` compile from source.
+> `scripts/build-subprojects.sh` builds all of them to the paths
+> `build-chip-core.js` links. (The vendor-tree deletion and sibling build live on
+> `dev/overlay` only; they are in `dev/promote-paths.txt` and never reach the PR.)
 >
-> - **A rebuild is byte-for-byte reproducible (verified 2026-10-02).** Rebuilding
->   from the in-repo trees reproduces the frozen artifact *exactly*: sha256
->   `94c17c9357d4b937…`, 1,912,960 B. So the shipped core was built from the
->   in-repo trees — not a lost sibling clone. `scripts/build-subprojects.sh`
->   builds the **in-repo** trees (`libvgm/`, `libxmp/`, `game-music-emu/`,
->   `fluidlite/`, `libADLMIDI/`); their `.a` files already exist under each tree's
->   `build/`. `../libsidplayfp` is the one genuine sibling (SID isn't vendored).
->   Never add a sibling clone of the other five: `normalizeInput()` prefers an
->   existing sibling, whose build outputs don't exist, which breaks linking.
-> - **An engine-content gate, not a blanket fallback ban.** A fallback to an
->   in-repo tree is this branch's *normal* state and only warns. What fails the
->   build is an engine whose **content hash changed** since the recorded
->   manifest — that is what silently swaps a version. Override with
->   `CHIP_ALLOW_ENGINE_FALLBACK=1`.
+> **What follows is kept for its findings, but its build mechanics are
+> pre-migration — read with these corrections:**
+> - **Reproducible within a checkout, not across checkouts.** A rebuild in the
+>   same directory is deterministic (2026-10-08: the same sha three times), but
+>   the wasm embeds its build path, so two checkouts give different bytes from
+>   identical sources. The pre-migration claim that a rebuild reproduced the
+>   frozen `94c17c93…` artifact exactly was a 2026-10-02 in-repo-tree result and
+>   no longer describes the build. Pinning the siblings (a lock of repo+commit)
+>   is the open reproducibility TODO — see `dev/UPSTREAMING_PLAN.md` §4.
+> - **The engine-content gate** still refuses a silent version swap (it compares
+>   the recorded manifest; `CHIP_ALLOW_ENGINE_FALLBACK=1` accepts a deliberate
+>   change). With the siblings present `normalizeInput()` never falls back, so an
+>   `engine-fallback` warning is no longer "normal" — treat it as a mistake.
 > - **Provenance is recorded, and readable from a running app.**
->   `scripts/build-info.js` is the single reader: per engine a tree hash
->   (`git rev-parse HEAD:<dir>`, works without the dir having its own `.git`) or
->   a sibling commit plus recursive submodule state, and a confidence `tier`:
->   `authoritative` (Matt-specified — SID) / `verified` (content-matched against
->   upstream: libvgm, libxmp, fluidlite, libADLMIDI) / `base+patches`
->   (game-music-emu — no upstream blob matched; declares 0.6.2 with our local
->   CMake edits) / `assumed`. Two consumers, so they cannot disagree: each build
->   writes `src/chip-core.wasm.buildinfo.json`, and
+>   `scripts/build-info.js` is the single reader: the four deleted engines are
+>   `source: 'sibling'` (a `revision`, plus recursive submodule state);
+>   `libADLMIDI` is `source: 'in-repo'` (a `git rev-parse HEAD:<dir>` tree hash);
+>   `tier` records confidence (`authoritative` for Matt-specified SID, `verified`
+>   for upstream-matched, `base+patches`, `assumed`). Two consumers, so they
+>   cannot disagree: each build writes `src/chip-core.wasm.buildinfo.json`, and
 >   `config/webpack.config.common.js` `DefinePlugin`s the same object as
 >   `__BUILD_INFO__`, which `src/index.js` assigns to `window.ChipCoreBuildInfo`.
 >   Deliberately **not** in the UI: run `JSON.parse(window.ChipCoreBuildInfo)` in
@@ -481,27 +482,20 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
 >   compiled against whatever libvgm happens to be present, so one wrapper
 >   links against many trees. An earlier version of this note concluded "and
 >   therefore this repo's `libvgm/`" — that was an invalid inference.
->   **Disproof, measured 2026-10-03:** with a byte-identical
->   `lvgm_get_position_ms`, prod's position scales with playback speed (1.98x
->   at 2x) while our vendored tree's does not (1.00x). Same getter, opposite
->   behaviour, so prod's tree is not ours. Treat the target tree as unknown and
->   never reason about prod behaviour from our tree.
+>   **Disproof, measured 2026-10-03 and re-measured 2026-10-08:** with a
+>   byte-identical `lvgm_get_position_ms`, prod's position scales with playback
+>   speed (1.98x at 2x on 2026-10-03; 1.99x at 2x on 2026-10-08, same file on
+>   both builds) while our build's does not (1.00x). Same getter,
+>   opposite behaviour, so prod's tree is not ours. Treat the target tree as
+>   unknown and never reason about prod behaviour from our tree.
 >
-> - **What libvgm are *we* on, and what that does and does not pin.** Ours is
->   upstream **91b6542**, recorded by `scripts/build-info.js` as
->   `{ name: 'libvgm', tier: 'verified', note: 'upstream 91b6542' }` — "verified"
->   meaning the vendored content was matched byte-for-byte against that upstream
->   commit. It landed as a plain subtree in `3f936ea0f` (2026-09-27) and there
->   is **no `.git` and no upstream remote inside `libvgm/`**, so `91b6542` is a
->   *note in a script*, not a fetchable ref: nothing re-verifies it, and
->   `build-info.js`/`config/webpack.config.common.js` are both path-listed so
->   none of this reaches the PR.
->   It is also **not guaranteed to be what we link**: `normalizeInput()`
->   prefers a sibling `../libvgm` when one exists, which silently swaps the
->   engine. The only guard is `build-chip-core.js`'s engine-content gate (fails
->   the build if an engine's content hash moved off the recorded manifest,
->   `CHIP_ALLOW_ENGINE_FALLBACK=1` to override). Verify with
->   `JSON.parse(window.ChipCoreBuildInfo)` in a running app.
+> - **What libvgm are *we* on.** The sibling `../libvgm` (ValleyBell; `c8b998b`
+>   when this was written), recorded by `scripts/build-info.js` as
+>   `source: 'sibling'` with its revision. The pre-migration vendored tree was
+>   upstream `91b6542`; that subtree is gone. The engine-content gate is still
+>   the only guard against a silent swap (it fails the build if an engine's
+>   recorded identity moved; `CHIP_ALLOW_ENGINE_FALLBACK=1` to override), so
+>   verify a given build with `JSON.parse(window.ChipCoreBuildInfo)`.
 >   **So: our tree is documented; the tree *Matt* builds against is not
 >   documented anywhere and cannot be inferred from the repo.** That is the
 >   standing risk behind the `* GetPlaybackSpeed()` assumption above.
@@ -534,11 +528,14 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
 > - **The band at load is correct as written; keep it.** `Tick2Second(t) *
 >   GetPlaybackSpeed()` is `t / (ticks per second at 1x)`, i.e. the song's true
 >   playing time at 1x — a physical property of the file, not of the tree.
->   Measured 2026-10-03, it is **speed-invariant**: band `[1142, 1942]`,
->   `intro=342`, `loop=800` at 1x, 2x *and* 0.5x, while `duration` over the same
->   sweep went 6442 / 10942 / 4192. So the multiplication is doing its job —
->   cancelling the speed term — and the band is stable and physically right in
->   every tree.
+>   Measured 2026-10-03 and re-confirmed 2026-10-08, it is
+>   **speed-invariant**: band `[1142, 1942]`, `intro=342`, `loop=800` at 1x, 2x
+>   *and* 0.5x, and on a different file the engine returned the identical band
+>   `[53199, 91599]` at all three tempos. (The `duration` figures this line once
+>   quoted as the contrast — 6442 / 10942 / 4192 — were an artifact of sampling a
+>   transient duration; see the speed table below. Do not reuse them.) So the
+>   multiplication is doing its job — cancelling the speed term — and the band is
+>   stable and physically right in every tree.
 >   **The earlier "open PR risk" was overstated.** The band is not a guess that
 >   might be wrong; it is a correct song-time value. The real asymmetry is that
 >   **`position` means different things per tree** (wall-clock in ours, song-time
@@ -552,13 +549,16 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
 >   this branch's remaining uncertainty: we cannot assume the vendored trees are
 >   what anyone else builds. Every row below is a symbol we checked, not an
 >   assumption. Prod was probed live at `https://chiptune.app` via
->   `typeof window.ChipPlayer.chipCore[name]`.
+>   `typeof window.ChipPlayer.chipCore[name]`. **The "ours" column names the
+>   then-vendored trees, deleted 2026-10-08; the build now uses modern siblings, so
+>   rows 1–2 no longer describe our build — they remain the proof that master's own
+>   scripts cannot link the old subtrees.**
 >
 >   | # | Evidence | Conflict with this repo |
 >   | --- | --- | --- |
 >   | 1 | prod exports `_xmp_seek_time_frame`; master **and** feature list it, but the vendored libxmp has no `seek_time_frame` anywhere | **Matt's libxmp is >= 4.7; ours is 4.5.** Our own script could not link against our own tree — the overlay comments it out for that reason |
 >   | 2 | prod exports `_gme_disable_echo`; master and feature list it, vendored `game-music-emu` has no `disable_echo` | **Matt's GME is >= 0.6.4; ours is the 2018 tree** |
->   | 3 | prod's position advances 1.98x at 2x speed, ours 1.00x, with a byte-identical `lvgm_get_position_ms` | **prod's libvgm is not our vendored 91b6542** |
+>   | 3 | prod's position advances 1.99x at 2x speed, ours 1.00x, with a byte-identical `lvgm_get_position_ms` (re-measured 2026-10-08 on one file present in both catalogs) | **prod's libvgm is not our vendored 91b6542** |
 >   | 4 | prod exports `_sid_set_speed`; **no** branch's build script lists it, yet master `SIDPlayer.js:145` calls it unguarded | our `EXPORTED_FUNCTIONS` is a **strict subset** of prod's. It works in prod and cannot work from this repo as configured — a latent break in *master*, not ours |
 >   | 5 | prod exports `_fluid_synth_get_active_voice_count`; the overlay dropped it (no call site) | same subset gap; confirms the overlay diverges from prod deliberately |
 >   | 6 | prod **does** export `_mdx_set_max_loop` | **an earlier note here claimed it did not** ("Prod ships MDX ... but not mdx_set_max_loop"). That was wrong; corrected 2026-10-03. Our `mdx_set_max_loop(0)` lever is therefore usable on prod's tree too |
@@ -633,28 +633,46 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
 >   trusting the matrix.
 >
 > - **Playback speed desyncs from the transport clock in OUR build only — prod
->   is correct.** Measured 2026-10-03 on `16 Hurry Up!.vgz`, position advance in
->   ms per wall-ms, with `curLoop` confirming the engine really is faster:
+>   is correct.** Re-measured 2026-10-08 on `Sonic the Hedgehog - Green Hill
+>   Zone`, the one file measured on *both* builds, read DOM-only from the footer
+>   so neither build is privileged by how it was sampled:
 >
->   | build | 1x | 2x | duration 1x -> 2x |
->   | --- | --- | --- | --- |
->   | prod (chiptune.app) | 1.005 | **1.979** | 33761 -> 34261 (+1.5%) |
->   | our dev core | 1.006 | **1.005** | 6442 -> **10942** (+70%) |
+>   | build | 1x | 2x | duration @1x | duration @2x |
+>   | --- | --- | --- | --- | --- |
+>   | prod (chiptune.app) | 0.995 | **1.994** | 1:36.0 | 1:36.0 |
+>   | our dev core | 1.001 | **1.003** | 1:40.5 | 1:40.5 |
 >
->   So prod's position scales with speed and its duration is ~speed-invariant,
+>   So prod's position scales with speed and its duration is speed-invariant,
 >   i.e. prod already behaves the way the UI is designed to behave ("absolute
 >   1x time, so the bar runs 2x as fast at 2x"). Our build reports position in
->   wall-clock regardless of speed, and inflates duration because
->   `lvgm_get_duration_ms` mixes bases — `Tick2Second` (speed-divided) for the
->   pass and `Sample2Second` (speed-multiplied) for fade/silence, then one
->   `* GetPlaybackSpeed()`. That is exactly `1942 + 9000` at 2x and
->   `1942 + 2250` at 0.5x. The cause is the **stale vendored libvgm tree**
->   (overlay-only): both getters are byte-identical to master, so the PR does
->   not carry this, and `dev/promote-paths.txt` excludes `libvgm/**`.
->   **Do not "fix" it by multiplying position by speed in the wrapper** — that
->   would match our stale tree and double-count against the newer libvgm prod
->   uses. Fixing our build means refreshing the tree (see the libvgm pin
->   section), which is engine work, not JS.
+>   wall-clock regardless of speed. Confirmed engine-side on ours:
+>   `getPositionMs()` slopes 1.005 / 0.998 / 0.998 at 0.5x / 1x / 2x, and
+>   `getLoopBandMs()` returns `[53199, 91599]` at all three — so the band claim
+>   above re-verifies, on the engine rather than the label.
+>
+>   **Do NOT repeat the old "+70% duration at 2x" figure — it does not
+>   reproduce, and it was a measurement artifact.** `getDurationMs()` is
+>   *transient* on our build: it reads short until the engine has resolved the
+>   loop and fade end, then settles. Read in sequence on that track it gave
+>   93849 (0.5x) -> 96099 (1x) -> 100599 (2x), and 100599 is where it stays —
+>   so the value tracked elapsed song time, not tempo. Both builds are in fact
+>   speed-invariant here; the real build difference is a constant ~4.6 s
+>   (prod 1:36.0, ours 1:40.5) in how each libvgm closes out the fade.
+>   **Practical rule: never sample duration before the engine has played past
+>   the first loop boundary, and never compare durations taken at different
+>   points in a song.** `16 Hurry Up!.vgz` is a bad fixture for any of this:
+>   its band folds the *displayed* position every ~1.1 s, which invalidates an
+>   end-to-end slope (measured: 2 drops, negative slope) even though the
+>   duration readout itself is unaffected.
+>
+>   The position difference is in the tree, not the wrapper: `PlayerA::GetCurTime`
+>   uses `Sample2Second` (wall-clock), and libvgm rescales the sample counter on a
+>   speed change. The 2026-10-08 sibling build (`c8b998b`) still reads wall-clock
+>   (1.00x at 2x), so refreshing the tree did **not** fix it. **Do not "fix" it by
+>   multiplying position by speed in the wrapper** — prod is correct with the
+>   byte-identical wrapper, so that would double-count against a newer libvgm; the
+>   fix is tree-side (scale by `GetPlaybackSpeed()`). See the open hand-off note at
+>   the top of "Session hand-off notes".
 >   **Open risk for the PR:** our loop getters multiply `Tick2Second` by
 >   `GetPlaybackSpeed()`, which is only correct if `Tick2Second` divides by
 >   speed in whatever tree the reader builds. That holds for our stale vendored
@@ -663,18 +681,17 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
 >   divide there, the band and the folded head will be off by the speed factor
 >   at non-1x. Cheap to confirm once a newer tree is built.
 
-Real audio works locally. `scripts/build-subprojects.sh` + changes to
-`scripts/build-chip-core.js` build all vendored engines into
-`src/chip-core.{js,wasm}`. This work touches vendored trees and lives on
-`dev/overlay`, **not** the feature branch. See "Audio engine roadmap" for
-what remains.
+Real audio works locally. `./scripts/build-subprojects.sh` (the sibling clones +
+the vendored `libADLMIDI`/`psflib`/`lazyusf2`) and `node scripts/build-chip-core.js`
+produce `src/chip-core.{js,wasm}`. This work lives on `dev/overlay`, **not** the
+feature branch. See "Audio engine roadmap" for what remains.
 
 Prereqs (Arch): `sudo pacman -S cmake emscripten xa` (emcc lands in
 `/usr/lib/emscripten`, added by `/etc/profile.d/emscripten.sh`; the script adds
 it to PATH; `xa` is the 6502 assembler libsidplayfp needs). Then:
 
 ```sh
-./scripts/build-subprojects.sh          # all vendored engines
+./scripts/build-subprojects.sh          # sibling clones + in-repo engines
 ./scripts/build-libsidplayfp.sh         # SID core (mmontag fork, needs xa65)
 node scripts/build-chip-core.js
 ```
@@ -690,39 +707,30 @@ Build env vars (all optional):
 Status: **GME, libvgm, libxmp, N64 (lazyusf2), V2M, MDX, fluidlite MIDI, SID,
 libADLMIDI (OPL3 MIDI)** build and run.
 
-Provenance note (2026-10, resolved): the running `src/chip-core.wasm` was
-once linked from out-of-band `../` sibling clones, then purely relinked from
-the in-repo trees (byte-identical across runs — deterministic). Sibling
-remotes were never recorded; do not reintroduce siblings. Known in-repo
-behavior deltas vs the old build: libxmp is 4.5.0 (positional clock and
-`loop_count` verified; `seek_time` semantics are 4.5's), libvgm is the stale
-vendored tree (durations/fade math differ from newer; `GetCurLoop` never
-counts — deep-leave is position-based), GME is the 2018 tree (no
-`disable_echo`; everything used is feature-detected).
+Provenance: the built `src/chip-core.wasm` links the sibling clones on this box
+plus the in-repo `libADLMIDI`/`psflib`/`lazyusf2`; the four siblings' revisions are
+recorded in `src/chip-core.wasm.buildinfo.json` (see the notes above). The
+2026-10-02 claim that the shipped artifact rebuilt byte-for-byte from the in-repo
+trees is historical — those trees are gone. Behavior deltas vs the *old* in-repo
+builds: libxmp is 4.7.x (not 4.5.0), libvgm is the `c8b998b` sibling (not the
+2023 vendored tree), GME is mmontag's fork (not the 2018 tree).
 
-Vendored-tree fixes needed to build (all pre-existing upstream breakage):
-- `game-music-emu/gme/CMakeLists.txt`: exclude `Spc_Sfm.cpp` (SFM type disabled);
-  add missing `Spc_Cpu.cpp`/`Snes_Spc.cpp`/`Spc_Dsp.cpp` (needed by SPC + VRC7).
-- `game-music-emu/gme/blargg_source.h`: define `debug_printf` in the `NDEBUG`
-  branch (missing; breaks with `HAVE_ZLIB_H`).
-- `libvgm/player/CMakeLists.txt`: drop stale `player_wrapper.cpp` reference (the
-  file moved to `src/bindings/` in `cad9a5545` and was never re-added).
-- `src/bindings/libvgm-wrapper.cpp`: compat defines (`DEVID_MSM6258/6295` →
-  `DEVID_OKIM6258/6295`, `PLAYTIME_*`, drop `parentIdx`).
-- libvgm uses its own iconv charset conversion (`utils/StrUtils-CPConv_IConv.c`);
-  Emscripten's musl iconv supports the tags libvgm needs (UTF-16LE/CP1252/CP932).
-  The libvgm configure passes `-DIconv_LIBRARY=c` because CMake's `FindIconv`
-  detects iconv built into libc but then fails its `find_library(c)` check. (An
-  earlier no-op `src/bindings/cpconv-shim.c` was removed: it passed UTF-16LE
-  bytes through untouched, truncating VGM GD3 tags.)
-- `scripts/build-chip-core.js`: duplicate-symbol tripwire over linked archives
-  (fails loudly on clashes; `--allow-multiple-definition` stays as
-  belt-and-braces); in-repo `../`→local path normalization; drop
-  dead `ALLOC_NORMAL` export; SID/SGC skip logic.
-- `src/libxmp-lite`: built directly from `libxmp/src` + lite `format.c` /
-  `mod_load.c` (the lite CMake project doesn't configure under CMake 4).
+Build notes:
+- `scripts/build-chip-core.js`: the duplicate-symbol tripwire over the linked
+  archives still fails the build on a strong-symbol clash
+  (`--allow-multiple-definition` is only belt-and-braces). The in-repo `../`→local
+  path fallback never fires now that the engines are siblings and could be removed.
+- libvgm charset: the configure passes `-DIconv_LIBRARY=c` because CMake's
+  `FindIconv` detects iconv built into libc but then fails its `find_library(c)`
+  check; Emscripten's musl iconv supports the tags libvgm needs
+  (UTF-16LE/CP1252/CP932).
 - `src/players/{GME,XMP,MIDI}Player.js`: feature-detect newer APIs
-  (`gme_disable_echo`, `xmp_seek_time_frame`) and ADLMIDI bank options.
+  (`gme_disable_echo`, `xmp_seek_time_frame`) and ADLMIDI bank options, so the app
+  works against either vintage of those engines.
+- **Moot since 2026-10-08** (the vendored trees are gone and the siblings build
+  clean): the old `game-music-emu/gme/CMakeLists.txt` and `blargg_source.h` fixes,
+  the `libvgm/player/CMakeLists.txt` `player_wrapper.cpp` drop, the hand-built
+  `libxmp-lite`, and the `libvgm-wrapper.cpp` compat defines.
 
 **libADLMIDI (OPL3 MIDI)** is built with the **Nuked** OPL3 core, not DOSBox.
 The DOSBox core aborts in `~DosBoxOPL3` (`emscripten_builtin_free`) under this
@@ -803,40 +811,36 @@ selectSong only marks the `SidTune`'s current song, so without the reload the
 engine keeps playing song 0 while `sid_get_subtune()` reports the requested
 index (every sub-tune sounds identical).
 
-### libvgm pin — attempted 2026-09, reverted
+### libvgm version — the 2026-09 pin attempt, resolved by the 2026-10-08 build
 
-The engines are built from **out-of-band clones** that the repo does not track:
-`build-chip-core.js` links `../libvgm/build/bin/*.a`, `../libxmp/...`,
-`../FluidLite/...`, `../libADLMIDI/...`, `../game-music-emu/...`. The in-repo
-`libvgm/`, `libxmp/`, `fluidlite/`, `game-music-emu/` trees are **deprecated
-subtrees** (the README says so) and are *not* what the build uses — except that
-`normalizeInput` (`build-chip-core.js:478`) falls back to the in-repo copy when
-the sibling `../<name>` is **absent**. So a stray clone in `../` silently changes
-what gets linked.
+We build the sibling `../libvgm` (ValleyBell). The wrapper carries no
+libvgm-version compat of its own any more — the `DEVID_OKIM*`/`PLAYTIME_*`
+defines were removed on 2026-10-08, and the wrapper is now `master` plus the loop
+functions.
 
-Our `libvgm-wrapper.cpp` only carries its `DEVID_OKIM*` / `PLAYTIME_*` /
-`LVGM_*` compat because we were building against the **stale in-repo libvgm**
-(no `parentIdx`, `DEVID_OKIM*`, bool `GetCurTime`). Against current
-`ValleyBell/libvgm` HEAD *all* of that is unnecessary: the wrapper diff vs
-master is exactly the 6 loop functions the looping feature adds (+56 / −0).
+History worth keeping: in 2026-09 we tried moving from the then-vendored stale
+tree (`91b6542`) to upstream HEAD (`c8b998b`) and **reverted** — it compiled, but
+`PlayerA::LoadFile` left `GetPlayer()` null so VGM rendered silence, and the
+post-link `wasm-opt` step failed a binaryen validation (Arch's `emscripten` ships
+its own `wasm-opt`, `extra/binaryen` is older, and the un-optimized wasm is valid
+and only ~600 KB larger, so no package fixes it).
 
-Attempted to move the pin to HEAD (`c8b998b`, 2026-09-05), reverted because:
-- **Runtime drift.** It compiles clean, but `PlayerA::LoadFile` leaves
-  `GetPlayer()` null → VGM renders silence (`GetCurTime`, loop getters all 0).
-  HEAD is ~8 months ahead of what the wrapper/engagement expects.
-- **`wasm-opt`.** The post-link `wasm-opt` step failed (binaryen validation
-  error). Cosmetic: the un-optimized wasm is valid and exposes every export, just
-  ~600 KB larger. **No pacman package fixes it** — Arch's `emscripten 6.0.9`
-  ships its own `wasm-opt` (binaryen 132); `extra/binaryen` is older (130).
-- Restored the stale in-repo libvgm + compat; VGM/looping work again (verified
-  `loopStart/End`, `fadeStart`, repeat-one.
-
-To resume the pin: target a revision just after `parentIdx` was added
-(2026-01-21, upstream `57585ea`) to minimise drift, then fix the `LoadFile` /
-`GetPlayer` integration. First `rm -rf ../libvgm` so `normalizeInput` picks the
-in-repo tree, or intentionally point the build at the new clone.
+That same commit builds and **renders VGM** on 2026-10-08, so the `GetPlayer()`
+null drift did not reproduce; treat the old "HEAD is broken" note as unverified.
+(`parentIdx` was added upstream at 2026-01-21, `57585ea`, if a different pin is
+ever needed.) See `dev/UPSTREAMING_PLAN.md`.
 
 ### Dev environment gotcha
+
+**Move the session before you delete its working directory (2026-10-08).** A T3
+Code thread is bound to a workspace directory. Deleting that directory out from
+under a live session — the obvious `git worktree remove` on the worktree the
+session is running in — breaks the thread: the next run dies with *"This
+thread's workspace folder no longer exists or is not a directory"* before the
+agent can act. The order is: `session_move` to the main checkout, **then** remove
+the worktree and its branch, **then** clean up the now-empty parent. Recovery is
+just `session_move` back to a directory that exists; the git objects are shared,
+so nothing is lost.
 
 The T3 Code browser-preview tab logs an Electron sandbox error
 (`Electron sandboxed_renderer.bundle.js script failed to run` /
@@ -1197,7 +1201,7 @@ because `Sequencer` copies its context).
     downloads correctly instead of using the whole path.
 12. Real audio locally: a chip-core wasm build works (GME/libvgm/libxmp/N64/
     V2M/MDX/fluidlite MIDI). Gitignored and not committed; the current engine
-    pin/build is documented under "Building the real chip-core" ("libvgm pin").
+    sourcing/build is documented under "Building the real chip-core".
 13. Repeat One for VGM (libvgm) — the looping baseline. Native loop count plus a
     band-relative "playlist position" so the head repeats the highlighted loop
     region, and switching repeat off plays past into the fade with no head jump.
@@ -1221,6 +1225,79 @@ checks no longer work. Compare a live context to a stored one with
 
 ## Session hand-off notes (read me first)
 
+- **OPEN — VGM position/jumping-head investigation (2026-10-08). Do not trust the
+  earlier entries in this file that describe this; two of them were wrong.**
+  Symptom: at 2x speed the footer time and slider head report **half** the true song
+  position, and **dragging the Speed slider makes the head jump backwards**.
+  Measured, same file both builds (`QvGJz9sd` = Sonic GHZ, a content hash so the
+  share id is identical on each):
+  - position slope, speed *held*: prod 0.995/1.994 (1x/2x), ours 1.001/1.003.
+  - drag test: **prod's raw counter has 0 backward steps; ours has several.** Same
+    caller (`VGMPlayer.getPositionMs` -> `_lvgm_get_position_ms`, master's one-liner),
+    same wrapper source ⇒ divergence is in the **tree**, not the wrapper/our JS.
+  - loop point (fixed song position) reached in 53.2s at 1x vs 26.6s at 2x ⇒ the
+    emulation really does run 2x faster on both builds; only the number differs.
+  - root cause candidate: `libvgm/player/playera.cpp:295` `PlayerA::GetCurTime`
+    uses `Sample2Second(GetCurPos(PLAYPOS_SAMPLE))` = `samples/_outSmplRate` =
+    **wall-clock**, and `_playSmpl` is the one counter `VGMPlayer::RefreshTSRates`
+    rescales on every speed change (`vgmplayer.cpp:769`). Measured rescale is
+    exactly the speed ratio: 1x→2x **0.5000**, 2x→1x **2.0001**.
+  - **The fix is in the tree, NOT the wrapper.** `PlayerA::GetCurTime` should scale
+    by `GetPlaybackSpeed()` (as `lvgm_get_duration_ms` and both loop getters already
+    do), which makes position song-time *and* cancels the rescale so the jump goes
+    away. `libvgm/` is path-listed so this is overlay-only and the PR is untouched.
+    **Do not "fix" this in `lvgm_get_position_ms`** — prod is correct with the
+    byte-identical wrapper, so multiplying by speed there double-counts against a
+    newer libvgm. (I proposed exactly that; the user correctly rejected it.)
+  - **NOT VERIFIED:** the fix has never been built or measured — it needs
+    `node scripts/build-chip-core.js` + relink. Also our fold
+    (`VGMPlayer.getDisplayPositionMs`) was **dormant** in every drag test
+    (`abs < bandEnd` early-out, bandEnd 91599 vs position ~64s), so **our fold has
+    never been tested live**; it consumes the counter through
+    `((abs-A)%B+B)%B`, which assumes monotonic song position, so the tree fix must
+    land first or the fold keeps consuming a rescaled value.
+- **Provenance hole (2026-10-08) — superseded by the sibling build the same day; kept as history.** The running core did **not** match
+  the documented reproducible artifact: `src/chip-core.wasm` is `3108c47a…`
+  / 1,913,268 B vs the frozen `94c17c93…` / 1,912,960 B. So "byte-for-byte
+  reproducible (verified 2026-10-02)" does not currently hold.
+  `chip-core.wasm.buildinfo.json` cannot settle it: `build-info.js` derives `tree`
+  from `git rev-parse HEAD:<dir>` (committed state) and `source: "in-repo"` is the
+  build script reporting on itself; the recorded build ran under node **v26.8.2**,
+  not the pinned 24.21.0. Verified independently: no sibling clones exist
+  (`../libvgm` absent then, only `../libsidplayfp`), so `normalizeInput` *could not*
+  be preferring a sibling; and the in-repo `libvgm` worktree was == HEAD with
+  `vgmplayer.cpp` blob `591511bf` (the recorded upstream `91b6542`). (Both siblings
+  exist now; this describes the state before the 2026-10-08 migration.)
+  **The rebuild above is what settles it** — if the jump reproduces, provenance is
+  moot for this bug; if it vanishes, the running core was never the in-repo tree and
+  the source-level explanation is wrong.
+- **AGENTS.md build sections corrected (2026-10-08).** The libvgm-version section
+  (formerly "libvgm pin") and the "Building the real chip-core" mechanics described
+  the pre-migration build
+  (in-repo trees, the `../` fallback, the wrapper compat); both were rewritten for
+  the sibling build. If you find another line still claiming the engines are
+  vendored, it is stale — the four trees were deleted on 2026-10-08.
+- **Changelog (`dev/record/site.mjs`).** The chip-core section's "One measurement
+  caveat" paragraph — its **second** body entry — is entirely "our build reports
+  position differently"; when the tree fix lands, delete it. The first entry (why
+  the app feature-detects both libvgm/GME vintages) is independent and stays. The
+  whole page was given a plain-prose polish pass on 2026-10-08.
+- **Committed on `dev/overlay` (2026-10-08):** `3098475e8` (the `server/index.js`
+  chart exclusion), then `730adec90` (engine vendoring → sibling build),
+  `9c7489b44` (upstreaming plan) and `b645bbd9f` (libvgm-wrapper `parentIdx`
+  restore + compat removal). Still uncommitted: `AGENTS.md`,
+  `dev/record/{site.mjs,build-site.mjs,scenarios.mjs,scenarios.check.mjs,site.css,README.md}`,
+  `dev/shims/recorder.js`, `dev/test-midi-loops.js`,
+  `src/players/midi/midi-helpers.js`. Nothing pushed; nothing promoted.
+- **Measurement hygiene, learned the hard way here:** (1) the Speed setting is
+  **persisted per user** — a leftover `tempo=2` from a prior session made an MDX run
+  report 2.0 song-ms/wall-ms at "1x" and read as a defect; always read the engine's
+  speed back from the wasm. (2) The t3 preview is the **`t3-code-…` MCP namespace**
+  (`preview_open`, then `preview_navigate`); `browser.*` is a different tool and
+  reports "no desktop browser connected". (3) ZCR over the audio is worthless for
+  speed questions — at 2x the engine consumes *different material*, so it compares
+  two different pieces of music. Use a fixed control in the song (the loop point) or
+  an engine counter instead.
 - **Branch model:** see "Branches" above. `feature/subtunes-as-first-class` is
   the PR (feature only); `dev/overlay` is stacked on it and holds the
   audio/engine/build/dev work. There is no commit list to maintain — a change
@@ -1489,9 +1566,9 @@ checks no longer work. Compare a live context to a stored one with
     `dev/promote-paths.txt` + `DEV-BEGIN/DEV-END` regions. See "Dev overlay &
     promotion" for the mechanism and the **Known gaps** (a few shared files are
     still path-listed and should become regions).
-  - **The libvgm pin move was attempted and reverted** (runtime drift +
-    `wasm-opt`). Working VGM again; see "libvgm pin" above. Do not leave a stray
-    `../libvgm` clone around — it hijacks the link.
+  - **The libvgm pin move was attempted and reverted in 2026-09** (runtime drift +
+    `wasm-opt`), then done on 2026-10-08: the build now uses the sibling `../libvgm`
+    clone and VGM renders. See "libvgm version" above.
   - **Branches pushed to `origin`**: `master`, `dev/overlay`,
     `feature/subtunes-as-first-class`. Worktrees: main = `dev/overlay`, sibling
     `chip-player-js-feature/` = feature. `backup/master-pre-upstream-catchup`
@@ -1575,10 +1652,15 @@ checks no longer work. Compare a live context to a stored one with
    (matching the repo, which has no test runner or CI). If Matt wants a durable
    suite, the same harnesses could move to a tracked `test/` dir and run via
    `node --test` with no new deps.
-3. **Changelog page with video examples.** *Tooling built 2026-10-05; **14/14 clips
-   recorded, passing and published** (6 main, 8 per-format), after a curation pass
-   merged four clips away.* `dev/record/` holds the whole pipeline: a clip registry
-   (`scenarios.mjs`, **15 scenarios of which 14 publish** — `v2m-tier3` is
+3. **Changelog page with video examples.** *Tooling built 2026-10-05; **16/16 clips
+   recorded, passing and published** (8 across two top-level sections, 8 per-format),
+   after a curation pass merged four clips away. The two sections are the two classes
+   of change — `subtunes` (songfolder, favorite-subtune, shuffle-subtunes,
+   charts-subtunes) and `looping` (loop-band, repeat-toggle-smooth, repeat-leave-fade,
+   blind-loop) — because they are separate pieces of work that are not even about the
+   same thing.* `dev/record/`
+   holds the whole pipeline: a clip registry
+   (`scenarios.mjs`, **17 scenarios of which 16 publish** — `v2m-tier3` is
    `ready: false` and withheld pending the V2M duration bug above; validated by
    `scenarios.check.mjs` and wired into `dev/run-tests.sh`), the page-side
    recorder shim
@@ -1659,8 +1741,8 @@ checks no longer work. Compare a live context to a stored one with
      engine override. Each clip names a `group`; `scenarios.check.mjs` rejects an
      unknown one, because a typo'd group silently drops a recorded, passing clip
      out of the page.
-   - **The green-verdict trap, three times over.** The single most valuable lesson
-     from the curation pass, and all three instances shipped a *passing* clip that
+   - **The green-verdict trap, four times over.** The single most valuable lesson
+     from the curation pass, and every instance shipped a *passing* clip that
      did not do the thing it claimed:
      1. `button[title*="avorite"]` — `FavoriteButton` renders no `title`, so the
         selector **matched nothing** and nothing was favourited. Then unscoped
@@ -1679,8 +1761,31 @@ checks no longer work. Compare a live context to a stored one with
      3. `document.body.textContent` searches for a song title pass on any page,
         because the **footer** keeps showing the playing song — scope assertions to
         `.BrowseList` (or to the trace), never to `body`.
+     4. The fourth instance, in `shuffle-subtunes` (2026-10-08), is the same shape
+        reached from the other side: the assertion asked "is the playing row
+        highlighted", and in a **virtualized** list that is true of a row rendered
+        but scrolled out of the box — ~33 of up to 73 rows exist. The first recorded
+        take passed 8/8 verdicts while **three of its eight song folders showed no
+        highlight at all**, and the reveal step that was supposed to scroll it into
+        view was a silent no-op. Three fixes, all of which the take alone would not
+        have surfaced: assert **visibility** (the sampler grew `hlInView`), **record
+        what the reveal did** as a trace mark (`reveal: row 25 -> 194px`, or
+        `no-op (…)` — a reveal that found nothing looks exactly like one that
+        worked), and make it **retry** while the listing is in flight. Two further
+        measured findings are in `dev/record/README.md` §7a: the row index must come
+        from the **sequencer's** ref, not `player.getSubtune()` (they disagree on ~2
+        in 14 nsfe songs, because GME reports the post-`plst` track), and
+        `list.scrollToRow` is a **no-op** on this WindowScroller/List pair where a
+        direct `scrollTop` write works 10/10. The same clip then found the
+        *click* variant: a shuffled directory is full of one-second sound effects, so
+        the song can end before the step runs, leaving the footer's path link
+        belonging to the song it replaced — the click navigated to that song's folder
+        and the frame contradicted the clip. `tryClick(sel, 'song-folder-link')`
+        refuses the click instead, and the refusal is **marked**, so a skipped beat
+        is visible in the proof instead of looking like one that worked.
      The general form: **assert on the artefact, not on the state you manipulated**,
-     and when the claim is "the viewer sees X happen", assert X is *visible*.
+     and when the claim is "the viewer sees X happen", assert X is *visible* — and
+     when a step is supposed to *make* it visible, assert that the step ran.
    - **A clip's fixture must support its own claim.** Three fixtures were replaced
      after measuring rather than after reading: a ~1.3 s test tone that *ends* for a
      clip about a driver that loops internally (GME reports `play_length` 101000 ms
@@ -2141,7 +2246,8 @@ only armed when `silenceDuration >= 0`, and both arms must end the song):
   silent state restore (no panic); the head folds into the band via the
   shared `getLoopBandMs`, with no fade tail (past the band the song ends).
   Lone CC111 (RPG Maker: loop to song end) expands the same way. Verified on
-  the catalog set (Mario Kart 64 [0, 58348], Descent Game01 [100, 200194]) via
+  the catalog set (Mario Kart 64 *03 - 3 Raceways, Wario Stadium* [0, 72062],
+  Descent Game01 [100, 200194]) via
   `dev/test-midi-loops.js` (in `dev/run-tests.sh`), which also *builds* minimal
   SMFs for the edge shapes so they do not need a catalog file. **Format 2 (async
   patterns, no shared timeline) gets no band at all** — the expansion is skipped

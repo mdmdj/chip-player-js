@@ -68,36 +68,61 @@ function makePlayer(synth) {
   });
 }
 
-const MARIO = 'midi/Nintendo 64 (SoundFont MIDI)_Mario Kart 64_01 - Main Theme.mid';
+// The catalog's Mario Kart MIDI. This used to be
+// `midi/Nintendo 64 (SoundFont MIDI)_Mario Kart 64_01 - Main Theme.mid`, a flattened
+// copy whose `/` had been replaced with `_`; that file is gone from disk and the
+// directory now holds only `03 - 3 Raceways, Wario Stadium.mid` and the sf2. The
+// replacement has the same *shape* of markers, so the checks below are the same tests
+// on a file that is actually there: no CC102 at all (9 x CC103, 8 x CC104), which is
+// the implicit-start branch, and the CC103 sits at the very end of the song.
+const MARIO = 'Nintendo 64 (SoundFont MIDI)/Mario Kart 64/03 - 3 Raceways, Wario Stadium.mid';
 const DESCENT = 'midi/Game MIDI_Descent (PC∕DOS, 1995)_Game01.mid';
 const DOOM = 'midi/DOOM/Game MIDI_Doom (PC∕DOS, 1993)_02 - At Doom\'s Gate (E1M1).mid';
 
-// Catalog is user-supplied and gitignored; skip (don't fail) without it.
-for (const rel of [MARIO, DESCENT, DOOM]) {
+// Catalog is user-supplied and gitignored, so a missing file skips its check rather
+// than failing it -- but per fixture, which this did not used to be. A single
+// `process.exit(0)` when *any* of the three paths was missing meant that when the
+// Mario Kart path went stale, the Descent and DOOM checks stopped running too, with
+// two perfectly good files sitting on disk and nothing in the output but one
+// "skip:" line to say so. Naming the fixture at each call site also makes it obvious
+// which check depends on which file.
+function catalogCheck(rel, name, fn) {
   if (!fs.existsSync(path.join(ROOT, 'catalog', rel))) {
-    console.log(`skip: catalog/${rel} not present`);
-    process.exit(0);
+    console.log(`skip  ${name}\n      (catalog/${rel} not present)`);
+    return;
   }
+  check(name, fn);
 }
 
-check('Mario Kart: loop range is implicit-start [0, 6535] ticks', () => {
+catalogCheck(MARIO, 'Mario Kart: loop range is implicit-start [0, 8071] ticks', () => {
   const mf = loadMidi(MARIO);
+  // Format 1 shares a timeline, so the song-global range below is honoured; format 2
+  // would make every number in this file meaningless (see midi-helpers getLoopedEvents).
+  assert.strictEqual(mf.header.getFormat(), 1, 'expected format 1');
   const range = mf.findLoopRange(tracksOf(mf));
-  assert.deepStrictEqual(range, { startTick: 0, endTick: 6535 });
+  assert.deepStrictEqual(range, { startTick: 0, endTick: 8071 });
 });
 
-check('Mario Kart: region is [0, ~58348] ms with two passes', () => {
+catalogCheck(MARIO, 'Mario Kart: region is the whole song, [0, ~72062] ms, two passes', () => {
   const mf = loadMidi(MARIO);
   const tracks = tracksOf(mf);
   const range = mf.findLoopRange(tracks);
   const { events, loopStartMs, loopEndMs } = mf.getLoopedEvents(tracks, 2, range);
   assert.strictEqual(loopStartMs, 0);
-  assert.ok(Math.abs(loopEndMs - 58348) < 1, `endMs=${loopEndMs}`);
+  assert.ok(Math.abs(loopEndMs - 72062.43) < 1, `endMs=${loopEndMs}`);
+  // This file's CC103 is the last event of the song, so the region *is* the whole
+  // track and two passes are exactly twice the song with no tail. Descent below is
+  // the other shape: its loop ends 3596 ms before the song does. Pinning both is the
+  // point -- "loop end" and "song end" are not the same thing, and neither is
+  // assumed anywhere.
+  const single = mf.getEvents();
+  assert.ok(Math.abs(loopEndMs - single[single.length - 1].playTime) < 1,
+    `loopEnd=${loopEndMs} songEnd=${single[single.length - 1].playTime}`);
   const dur = events[events.length - 1].playTime;
-  assert.ok(Math.abs(dur - 2 * loopEndMs) < 1500, `dur=${dur} (2 passes + tail)`);
+  assert.ok(Math.abs(dur - 2 * loopEndMs) < 1500, `dur=${dur} (2 passes)`);
 });
 
-check('Descent Game01: HMI range [12, 23939] ticks -> [~100, ~200194] ms', () => {
+catalogCheck(DESCENT, 'Descent Game01: HMI range [12, 23939] ticks -> [~100, ~200194] ms', () => {
   const mf = loadMidi(DESCENT);
   const tracks = tracksOf(mf);
   const range = mf.findLoopRange(tracks);
@@ -107,7 +132,7 @@ check('Descent Game01: HMI range [12, 23939] ticks -> [~100, ~200194] ms', () =>
   assert.ok(Math.abs(loopEndMs - 200194) < 2, `endMs=${loopEndMs}`);
 });
 
-check('DOOM (no markers): no range, plain single-pass merge', () => {
+catalogCheck(DOOM, 'DOOM (no markers): no range, plain single-pass merge', () => {
   const mf = loadMidi(DOOM);
   const tracks = tracksOf(mf);
   assert.strictEqual(mf.findLoopRange(tracks), null);
@@ -118,7 +143,7 @@ check('DOOM (no markers): no range, plain single-pass merge', () => {
   assert.ok(Math.abs(events[events.length - 1].playTime - single[single.length - 1].playTime) < 1);
 });
 
-check('wrap: looping Mario jumps to second-pass start at list end', () => {
+catalogCheck(MARIO, 'wrap: looping Mario jumps to second-pass start at list end', () => {
   const mf = loadMidi(MARIO);
   const synth = stubSynth(true);
   const p = makePlayer(synth);
@@ -142,7 +167,7 @@ check('wrap: looping Mario jumps to second-pass start at list end', () => {
   void before;
 });
 
-check('no wrap: repeat off ends the song at list end', () => {
+catalogCheck(MARIO, 'no wrap: repeat off ends the song at list end', () => {
   const mf = loadMidi(MARIO);
   const synth = stubSynth(true);
   const p = makePlayer(synth);
@@ -155,7 +180,7 @@ check('no wrap: repeat off ends the song at list end', () => {
   assert.strictEqual(p.position, 0);
 });
 
-check('Descent loads a loop and wraps too', () => {
+catalogCheck(DESCENT, 'Descent loads a loop and wraps too', () => {
   const mf = loadMidi(DESCENT);
   const synth = stubSynth(true);
   const p = makePlayer(synth);
@@ -170,7 +195,7 @@ check('Descent loads a loop and wraps too', () => {
   assert.ok(!p.paused);
 });
 
-check('setPosition still restores program state (seek regression)', () => {
+catalogCheck(DESCENT, 'setPosition still restores program state (seek regression)', () => {
   const mf = loadMidi(DESCENT);
   const p = makePlayer(stubSynth(true));
   p.load(mf, false);
@@ -234,27 +259,34 @@ function rollFor(rel) {
   return parseMidiData(new Uint8Array(buf));
 }
 
-check('piano roll covers the same two passes the audio plays (Mario)', () => {
+catalogCheck(MARIO, 'piano roll covers the same two passes the audio plays (Mario)', () => {
   const mf = loadMidi(MARIO);
-  const audioDur = mf.getPlaybackEvents(true).events.slice(-1)[0].playTime;
+  const audio = mf.getPlaybackEvents(true);
+  const audioDur = audio.events.slice(-1)[0].playTime;
   const roll = rollFor(MARIO);
   assert.ok(roll.notes.length > 100, `notes=${roll.notes.length}`);
   assert.ok(Math.abs(roll.durationMs - audioDur) < 1, `roll=${roll.durationMs} audio=${audioDur}`);
   // Second pass (the slider band) is populated, so the roll survives the
-  // loop point and Repeat-One wraps instead of going empty.
-  const bandStart = 58348;
+  // loop point and Repeat-One wraps instead of going empty. The band start comes
+  // from the file's own markers rather than a literal: this used to be the old
+  // fixture's 58348, which went stale with the file and left a check that passed
+  // against the wrong number for as long as the piano roll had notes past 58s.
+  const bandStart = audio.loopEndMs;
+  assert.ok(bandStart > 0, `loopEndMs=${bandStart}`);
   assert.ok(roll.notes.some(n => n.startMs >= bandStart), 'no notes in second pass');
 });
 
-check('piano roll covers the same two passes the audio plays (Descent)', () => {
+catalogCheck(DESCENT, 'piano roll covers the same two passes the audio plays (Descent)', () => {
   const mf = loadMidi(DESCENT);
-  const audioDur = mf.getPlaybackEvents(false).events.slice(-1)[0].playTime;
+  const audio = mf.getPlaybackEvents(false);
+  const audioDur = audio.events.slice(-1)[0].playTime;
   const roll = rollFor(DESCENT);
   assert.ok(Math.abs(roll.durationMs - audioDur) < 1, `roll=${roll.durationMs} audio=${audioDur}`);
-  assert.ok(roll.notes.some(n => n.startMs >= 200194), 'no notes in second pass');
+  // Band start from the file's markers, not the literal 200194 this used to carry.
+  assert.ok(roll.notes.some(n => n.startMs >= audio.loopEndMs), 'no notes in second pass');
 });
 
-check('piano roll unchanged for files without loops (DOOM)', () => {
+catalogCheck(DOOM, 'piano roll unchanged for files without loops (DOOM)', () => {
   const mf = loadMidi(DOOM);
   const audioDur = mf.getPlaybackEvents(false).events.slice(-1)[0].playTime;
   const roll = rollFor(DOOM);

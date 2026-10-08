@@ -29,10 +29,10 @@ const path = require('path');
 const ROOT = path.resolve(__dirname, '..');
 
 const ENGINES = [
-  { name: 'libvgm', dir: 'libvgm', tier: 'verified', note: 'upstream 91b6542' },
-  { name: 'libxmp', dir: 'libxmp', tier: 'verified', note: 'upstream 041c9ee5' },
-  { name: 'game-music-emu', dir: 'game-music-emu', tier: 'base+patches', note: 'declares 0.6.2; local CMake edits' },
-  { name: 'fluidlite', dir: 'fluidlite', tier: 'verified', note: 'upstream 3504d48' },
+  { name: 'libvgm', sibling: '../libvgm', tier: 'verified', repo: 'ValleyBell/libvgm' },
+  { name: 'libxmp', sibling: '../libxmp', tier: 'verified', repo: 'libxmp/libxmp' },
+  { name: 'game-music-emu', sibling: '../game-music-emu', tier: 'base+patches', repo: 'mmontag/game-music-emu' },
+  { name: 'fluidlite', sibling: '../FluidLite', tier: 'verified', repo: 'divideconcept/FluidLite' },
   { name: 'libADLMIDI', dir: 'libADLMIDI', tier: 'verified', note: 'upstream CMakeLists blob matched' },
   {
     name: 'libsidplayfp',

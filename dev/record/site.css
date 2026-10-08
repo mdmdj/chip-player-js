@@ -46,6 +46,35 @@ section { padding: 2rem 0; border-top: 1px solid var(--border); }
 section h2 { font-size: 1.35rem; margin: 0 0 .5rem; }
 .section-note { color: var(--dim); max-width: 46rem; margin-top: 0; }
 
+/* The summary sits above the two change sections and answers two different
+   questions, so it is split in two rather than run together: "what is this" is short
+   enough to read in full, and "what do I need before deploying" is the opposite --
+   long, and skimmable by its own headings. Each Look Out For block gets an id
+   because the summary is the part of the page someone links to, and a link into the
+   middle of it should land on the right block.
+
+   One column throughout, top to bottom, so it reads as a document rather than as a
+   layout: this is prose meant to be read, and two side-by-side halves make the eye
+   choose a column before it has read the first line. The measure is capped at the
+   same 62rem as the Look Out For paragraphs so the two halves share one left edge
+   and the line lengths stay readable on a wide screen. */
+.summary { border-top: 0; padding-top: 1rem; }
+.summary-block { margin-bottom: 2.25rem; }
+.summary h3 {
+  font-size: 1.05rem; margin: 0 0 .2rem;
+  color: var(--accent); letter-spacing: .02em;
+}
+.summary h4 {
+  font-size: .95rem; margin: 1.4rem 0 .35rem; color: var(--ink);
+}
+.summary-lede { color: var(--dim); max-width: 46rem; margin: .3rem 0 0; }
+.summary ul { margin: .4rem 0 0; padding-left: 1.1rem; max-width: 62rem; }
+.summary li { margin: .4rem 0; }
+.summary p { max-width: 62rem; margin: .5rem 0; }
+.summary code { background: var(--panel); padding: 0 .25em; border-radius: 3px; }
+/* Anchored headings sit under the sticky nav, so a deep link needs the offset. */
+.summary h4:target { scroll-margin-top: 4rem; }
+
 /* Clip rows: video beside the prose. The column is 600px rather than something
    smaller on purpose: the clip is a straight x264 encode of the capture, so the
    only thing between the viewer and a sharp image is how much the browser has to
@@ -126,6 +155,46 @@ code { font-family: var(--mono); }
 }
 /* The first group's heading would otherwise carry the section's own top margin. */
 section#deep > .group-title:first-of-type { margin-top: .6rem; }
+
+/* The one piece of app iconography the page borrows: the loop glyph that stands in
+   for the word "Repeat" in a heading, so the section title reads the way the app's
+   own Repeat One button does.
+
+   It is the app's own src/images/repeat.png, inlined as a data URI by
+   build-site.mjs. Two details are not incidental:
+
+   - It is drawn as a *mask*, exactly as the app draws it (index.css
+     `.icon-repeat { mask-image: ... }` over a `background-color`). The PNG's own
+     pixels are a yellow that the app discards; as an <img> it would render that
+     yellow at every theme and stop matching the text beside it. As a mask it takes
+     `currentColor`, so the glyph belongs to the heading it sits in.
+   - The `-webkit-` prefix is not in the app's CSS, and is here because the failure
+     without it is quiet rather than loud: an unsupported `mask-image` leaves an
+     empty inline-block, so the heading would read "Standardized to  One" with a gap
+     where the word was, and nothing would look broken enough to notice.
+
+   Sized in em rather than px so it tracks the h2 and the nav link it is also used
+   in. The proportions were picked by rendering the heading at its real size next to
+   five candidates and the app's own footer, not by arithmetic: the app draws a 16px
+   glyph against ~13px text, so the icon reads at roughly the cap height of the text
+   beside it. At 1em in a 1.35rem h2 that lands the same way; .62em (the first
+   guess, scaled straight from the app's pixel size) rendered as a sliver, and
+   1.24em competed with the heading. */
+.glyph {
+  display: inline-block;
+  width: .85em;
+  height: 1em;
+  vertical-align: -.02em;
+  background-color: currentColor;
+  -webkit-mask-image: var(--glyph-src);
+  mask-image: var(--glyph-src);
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+}
 
 footer { padding-top: 2rem; color: var(--dim); font-size: .9rem; }
 

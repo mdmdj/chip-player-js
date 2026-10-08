@@ -17,7 +17,8 @@ import { scenarios } from './scenarios.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const CATALOG = path.join(ROOT, 'catalog');
-// Must match the group keys build-site.mjs renders; see DEEP_GROUPS there.
+// Must match the group keys build-site.mjs renders; see MAIN_GROUPS / DEEP_GROUPS there.
+const MAIN_GROUPS = ['subtunes', 'looping'];
 const DEEP_GROUPS = ['native', 'indefinite', 'learned', 'floor'];
 
 const errors = [];
@@ -34,18 +35,28 @@ for (const s of scenarios) {
   // page knows. A typo'd group is the quietest possible failure in this file: the
   // clip is recorded, has a passing verdict, and build-site.mjs drops it out of the
   // section without rendering it anywhere. It fails there and only there, so catch
-  // it here, where the fix is one word.
+  // it here, where the fix is one word. Same rule for a 'main' clip, where an
+  // unknown group would silently leave it out of both top-level sections.
   if (s.section === 'deep' && !DEEP_GROUPS.includes(s.group)) {
     fail(s.id, 'section deep needs a known group, got ' + JSON.stringify(s.group) + ' (expected one of ' + DEEP_GROUPS.join(', ') + ')');
+  }
+  if (s.section === 'main' && !MAIN_GROUPS.includes(s.group)) {
+    fail(s.id, 'section main needs a known group, got ' + JSON.stringify(s.group) + ' (expected one of ' + MAIN_GROUPS.join(', ') + ')');
   }
   if (!s.section || !['main', 'deep'].includes(s.section)) fail(s.id, `bad section: ${s.section}`);
   // A share link is an in-app path too, and it is the one that arrives with the
   // song already loading: App.js reads `?play=<songId>` on mount (via the server's
-  // `__chipConfig`), so a scenario pointing at one opens on a playing song. Both
-  // forms are accepted; the check only insists it is a path into this app rather
-  // than some absolute URL that would silently record the wrong site.
+  // `__chipConfig`), so a scenario pointing at one opens on a playing song. `/top`
+  // is accepted for the same reason -- the Top Charts page is a page a clip can be
+  // *about*, and shoot.mjs's `waitForSelector('.BrowseList-row')` is satisfied
+  // because TopCharts renders that same row class. Both forms are accepted; the
+  // check only insists it is a path into this app rather than some absolute URL
+  // that would silently record the wrong site.
   const isShareLink = s.browse && /^\/\?play=/.test(s.browse);
-  if (!s.browse || (!s.browse.startsWith('/browse/') && !isShareLink)) fail(s.id, `browse must be an in-app path: ${s.browse}`);
+  const IN_APP_PAGES = ['/top', '/favorites'];
+  if (!s.browse || (!s.browse.startsWith('/browse/') && !isShareLink && !IN_APP_PAGES.includes(s.browse))) {
+    fail(s.id, `browse must be an in-app path: ${s.browse}`);
+  }
   if (!Array.isArray(s.steps) || !s.steps.length) fail(s.id, 'no steps: nothing would happen on screen');
   if (!Array.isArray(s.assert) || !s.assert.length) fail(s.id, 'no assertions: a clip with no verdict cannot be trusted');
 

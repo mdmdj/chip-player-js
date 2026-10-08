@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 #
-# Build the vendored C/C++ subprojects with Emscripten so that
+# Build the C/C++ subprojects with Emscripten so that
 # scripts/build-chip-core.js can link them into chip-core.wasm.
 #
-# All sources are vendored in this repo (the README's "clone side-by-side"
-# instructions are out of date). Each subproject is built to the exact static
-# library path build-chip-core.js expects.
+# The large engines are sibling checkouts, as README.md describes --
+# ../libvgm, ../libxmp, ../FluidLite, ../game-music-emu (clone them first).
+# libADLMIDI, psflib and lazyusf2 remain vendored in-repo and are built here.
+# Each subproject is built to the exact static library path build-chip-core.js
+# expects.
 #
 # Requires: emcc/emmake/emcmake on PATH (Arch: `pacman -S emscripten`) and
-# cmake. libsidplayfp (SID) is NOT vendored; build it separately with
+# cmake. libsidplayfp (SID) is a sibling too; build it separately with
 # scripts/build-libsidplayfp.sh, or skip it with CHIP_NO_SID=1.
 #
 # Usage:
@@ -41,7 +43,7 @@ EM_SYSROOT=$(emcc -sUSE_ZLIB=1 --show-ports >/dev/null 2>&1; emcc -E -x c /dev/n
 EM_ZLIB_LIB="$EM_SYSROOT/lib/wasm32-emscripten/libz.a"
 EM_ZLIB_INC="$EM_SYSROOT/include"
 
-# Force a clean cmake cache: the vendored trees carry stale absolute paths from
+# Force a clean cmake cache: the source trees carry stale absolute paths from
 # the maintainer's machine (and an old emsdk include dir).
 # CMAKE_POLICY_VERSION_MINIMUM=3.5 lets these old projects configure under
 # CMake >= 4 (which dropped compatibility with cmake_minimum_required < 3.5).
@@ -52,9 +54,10 @@ configure() {
   ( cd "$dir/build" && emcmake cmake "${EMCMAKE_FLAGS[@]}" -DCMAKE_POLICY_VERSION_MINIMUM=3.5 "$@" .. )
 }
 
-# Only build the requested subprojects (default: all but libsidplayfp).
+# Only build the requested subprojects (default: everything in the loop below,
+# i.e. all but libsidplayfp, which has its own script).
 want() {
-  [ "$#" -eq 0 ] && return 0
+  [ "${#SELECTED[@]}" -eq 0 ] && return 0
   local name="$1"
   for arg in "${SELECTED[@]}"; do [ "$arg" = "$name" ] && return 0; done
   return 1
@@ -70,7 +73,7 @@ build_gme() {
   # libvgm's cores -- see --allow-multiple-definition). NSF's VRC7 (ym2413.c)
   # is unconditional in gme/CMakeLists.txt so pruning is safe; the linker
   # will name anything else it still needs.
-  configure game-music-emu \
+  configure ../game-music-emu \
     -DBUILD_SHARED_LIBS=OFF \
     -DENABLE_UBSAN=OFF \
     -DUSE_GME_SGC=ON \
@@ -79,7 +82,7 @@ build_gme() {
     -DUSE_GME_HES=OFF \
     -DUSE_GME_KSS=OFF \
     -DZLIB_LIBRARY="$EM_ZLIB_LIB" -DZLIB_INCLUDE_DIR="$EM_ZLIB_INC"
-  ( cd game-music-emu/build && emmake make -j"$(nproc)" )
+  ( cd ../game-music-emu/build && emmake make -j"$(nproc)" )
   echo "   -> game-music-emu/build/gme/libgme.a"
 }
 
@@ -116,36 +119,12 @@ build_libADLMIDI() {
 
 build_libxmp() {
   echo "== libxmp (lite, static) =="
-  # libxmp/lite ships only its own format.c (it/mod/s3m/xm) + loader subset;
-  # the rest of the sources/header come from the parent libxmp/ tree. Compile
-  # from libxmp/src but substitute the lite format.c, matching `make dist`.
-  local abs="$PWD/libxmp"
-  local out="$abs/build"
-  mkdir -p "$out"
-  local common="src/period.c src/player.c src/read_event.c src/misc.c src/dataio.c \
-    src/lfo.c src/scan.c src/control.c src/filter.c src/effects.c src/mixer.c \
-    src/mix_all.c src/load_helpers.c src/load.c src/filetype.c src/hio.c \
-    src/smix.c src/memio.c src/loaders/common.c src/loaders/itsex.c \
-    src/loaders/sample.c src/loaders/xm_load.c \
-    src/loaders/s3m_load.c src/loaders/it_load.c src/virtual.c"
-  # emcc -c writes each object as basename.o in the cwd.
-  local objs
-  objs=$(echo "$common" | xargs -n1 basename | sed 's/\.c/.o/g')
-  objs="$objs lite_format.o lite_mod_load.o"
-  ( cd "$abs" \
-    && rm -f ./*.o \
-    && emcc -c -Oz -flto -DLIBXMP_CORE_PLAYER -DLIBXMP_NO_PROWIZARD -DLIBXMP_NO_DEPACKERS \
-         -I"$abs/include" -I"$abs/src" -I"$abs/src/loaders" $common \
-    && emcc -c -Oz -flto -DLIBXMP_CORE_PLAYER -DLIBXMP_NO_PROWIZARD -DLIBXMP_NO_DEPACKERS \
-         -I"$abs/include" -I"$abs/src" -I"$abs/src/loaders" \
-         -o lite_format.o lite/src/format.c \
-    && emcc -c -Oz -flto -DLIBXMP_CORE_PLAYER -DLIBXMP_NO_PROWIZARD -DLIBXMP_NO_DEPACKERS \
-         -I"$abs/include" -I"$abs/src" -I"$abs/src/loaders" \
-         -o lite_mod_load.o lite/src/loaders/mod_load.c \
-    && emar rcs build/libxmp-lite.a $objs lite_format.o \
-    && rm -f ./*.o )
-  mkdir -p libxmp/build
-  [ "$out/libxmp-lite.a" != "$PWD/libxmp/build/libxmp-lite.a" ] && cp -f "$out/libxmp-lite.a" libxmp/build/libxmp-lite.a
+  # Upstream libxmp builds the lite library from CMake (OUTPUT_NAME xmp-lite ->
+  # libxmp-lite.a on non-MSVC). The old in-repo tree instead shipped a separate
+  # lite/ subproject with a hand-compiled source list, and that layout no longer
+  # exists upstream, so the CMake target is the only recipe that works here.
+  configure ../libxmp -DBUILD_LITE=ON -DBUILD_STATIC=ON
+  ( cd ../libxmp/build && emmake make -j"$(nproc)" )
   echo "   -> libxmp/build/libxmp-lite.a"
 }
 
@@ -174,24 +153,22 @@ build_libvgm() {
   # Iconv_LIBRARY=c: CMake's FindIconv detects iconv built into libc but then
   # fails its find_library(c) check; satisfy it so libvgm uses real charset
   # conversion (musl iconv supports UTF-16LE/CP1252/CP932).
-  configure libvgm -DBUILD_LIBEMU=ON -DBUILD_LIBPLAYER=ON \
+  configure ../libvgm -DBUILD_LIBEMU=ON -DBUILD_LIBPLAYER=ON \
     -DBUILD_PLAYER=OFF -DBUILD_VGM2WAV=OFF -DBUILD_TESTS=OFF -DUSE_SANITIZERS=OFF \
     -DSNDEMU_YM2612_GENS=ON -DSNDEMU_YM2612_GPGX=ON -DSNDEMU_YM2612_NUKED=ON \
     -DIconv_LIBRARY=c \
     -DZLIB_LIBRARY="$zlibLib" -DZLIB_INCLUDE_DIR="$zlibInc"
-  ( cd libvgm/build && emmake make -j"$(nproc)" )
+  ( cd ../libvgm/build && emmake make -j"$(nproc)" )
   echo "   -> libvgm/build/bin/libvgm-{emu,utils,player}.a"
 }
 
 build_fluidlite() {
-  echo "== fluidlite (static; bundles libogg/libvorbis) =="
-  # NOTE: expected output path is ../FluidLite/build (capital L), but the
-  # vendored source dir is lowercase fluidlite/. Bridge the case difference.
-  configure fluidlite -DBUILD_STATIC=ON -DBUILD_SHARED=OFF
-  ( cd fluidlite/build && emmake make -j"$(nproc)" fluidlite-static )
-  mkdir -p FluidLite
-  cp -f fluidlite/build/libfluidlite.a FluidLite/build/libfluidlite.a 2>/dev/null || {
-    mkdir -p FluidLite/build && cp -f fluidlite/build/libfluidlite.a FluidLite/build/libfluidlite.a; }
+  echo "== fluidlite (static) =="
+  # README clones FluidLite (capital L); build-chip-core.js links
+  # ../FluidLite/build/libfluidlite.a. Its generated headers (fluidlite/
+  # version.h) land in the build dir, which tinyplayer.c's include needs.
+  configure ../FluidLite -DBUILD_STATIC=ON -DBUILD_SHARED=OFF
+  ( cd ../FluidLite/build && emmake make -j"$(nproc)" fluidlite-static )
   echo "   -> FluidLite/build/libfluidlite.a"
 }
 

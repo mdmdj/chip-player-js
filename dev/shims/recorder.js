@@ -59,11 +59,20 @@ const REPEAT = { off: 0, all: 1, one: 2 };
 // hooks every player answers, with Player.js owning the vocabulary.
 const snap = () => {
   const p = player();
-  if (!p) return { hasPlayer: false };
+  // The play context, read above the player check: "Shuffle Play shuffled a
+  // directory" is a claim about how many entries the sequencer is walking and
+  // how many files they live in, and that is true of the context whether or not
+  // an engine happens to be attached to it at this instant.
+  const ctx = (app().sequencer && app().sequencer.getCurrContext()) || [];
+  const ctxLen = ctx.length;
+  const ctxFiles = new Set(ctx.map((r) => r.path)).size;
+  if (!p) return { hasPlayer: false, ctxLen, ctxFiles };
   const s = {
     player: p.constructor.name,
     path: app().sequencer.currSongPath,
     ref: app().sequencer.currSongRef,
+    ctxLen,
+    ctxFiles,
     paused: typeof p.isPaused === 'function' ? p.isPaused() : null,
     playing: typeof p.isPlaying === 'function' ? p.isPlaying() : null,
     looping: !!p.looping,
@@ -166,6 +175,48 @@ sub: s.subtune,
       // that only looks at the final state cannot tell "reloaded the same song" from
       // "reloaded something else and it happens to be the last one".
       path: s.path,
+      // Which page, per tick, decoded. A navigation clip's claim is about the pages
+      // it passed *through*, and the final pathname says nothing about the other
+      // seven -- and it lies about this one whenever a short song ends mid-take and
+      // the sequencer advances underneath a folder page for the song it just left.
+      loc: decodeURIComponent(window.location.pathname),
+      // Is a row highlighted as the now-playing song right now? Sampled rather than
+      // read at the end for the reason `path` is: the highlight is per-tick evidence
+      // (VirtualizedList marks a row `Song-now-playing` from the sequencer's ref),
+      // and a clip that walks through many song folders needs to know it was right
+      // at the time, not only at the end.
+      hl: !!document.querySelector('.Song-now-playing'),
+      // Which song the highlighted row *is*, so "the chart highlights the sub-song
+      // I am hearing" is checkable rather than merely plausible. Both charts and
+      // browse rows carry `/?play=<songId>&subtune=N` on the name anchor, and the
+      // chart names a sub-song row `<filename> (<label>)`, so the row's own text
+      // plus its sub-tune parameter identify it against the playing song. Sampled
+      // per tick because the highlight moves between rows during playback.
+      hlName: (() => {
+        const row = document.querySelector('.Song-now-playing');
+        if (!row) return null;
+        const a = row.querySelector('.BrowseList-colName a');
+        return (a ? a.textContent : row.textContent).trim().slice(0, 80);
+      })(),
+      hlSub: (() => {
+        const row = document.querySelector('.Song-now-playing');
+        const a = row && row.querySelector('.BrowseList-colName a');
+        const m = a && /subtune=(\d+)/.exec(a.getAttribute('href') || '');
+        return m ? Number(m[1]) : null;
+      })(),
+      // ...and whether that row is inside the scroll container's box. The browse
+      // list is virtualized: it renders about 33 rows and highlights one that the
+      // viewer cannot see, so "a highlighted row exists" is not "the picture shows
+      // a highlighted row". Sampled per tick because the two are different claims
+      // and a clip about the highlight has to make the second one.
+      hlInView: (() => {
+        const row = document.querySelector('.Song-now-playing');
+        const box = document.querySelector('.App-main-content-area');
+        if (!row || !box) return false;
+        const b = row.getBoundingClientRect();
+        const c = box.getBoundingClientRect();
+        return b.top >= c.top - 1 && b.bottom <= c.bottom + 1 && b.height > 0;
+      })(),
       // Audibility, per tick. See levelRms: a MIDI clip whose SoundFont failed to
       // mount still advances the transport and still reports its band.
       rms: levelRms(),
@@ -311,7 +362,27 @@ const runStep = (step, trace) => {
       .catch((e) => trace.mark(`ERROR open ${e.message}`));
   });
   if (step.nav) fire(() => dev.navigate(step.nav));
-  if (step.play) fire(() => dev.clickSelector(step.play, { dbl: !!step.dbl }));
+  if (step.reveal) fire(() => {
+    // The outcome is recorded, not just attempted. A reveal that found nothing is
+    // a silent no-op that looks exactly like a reveal that worked -- the page is
+    // unchanged either way -- which is the shape this pipeline keeps having to
+    // guard against. Asynchronous because the listing may still be in flight.
+    Promise.resolve(dev.revealPlayingSongWhenReady()).then(
+      (r) => trace.mark(`reveal: ${r.alreadyVisible
+        ? 'already visible'
+        : r.revealed
+          ? `${r.index == null ? 'the highlighted row' : `row ${r.index}`} -> ${r.scrolledTo}px`
+          : `no-op (${r.why})`}`),
+      (e) => trace.mark(`ERROR reveal: ${e.message}`));
+  });
+  if (step.play) fire(() => {
+    const r = dev.tryClick(step.play, step.onlyIf);
+    // A blocked click is marked, because a step that does nothing and a step that
+    // did what it said look identical on screen -- the same trap as a selector
+    // that matches nothing. The mark is also the clip's own record of why a beat
+    // is missing, which is what the scenario's assertions fall back on.
+    if (r.blocked) trace.mark(`skipped "${step.label || step.play}": ${r.why}`);
+  });
   if (step.dbl) fire(() => dev.clickSelector(step.dbl, { dbl: true }));
   if (step.seek != null) fire(() => { const p = player(); if (p) p.seekMs(step.seek); });
   if (step.repeat != null) fire(() => {
@@ -351,6 +422,36 @@ const dev = {
     return { clicked: true, sel, label: el.textContent.trim().slice(0, 40) };
   },
 
+  /**
+   * `clickSelector`, optionally behind a named guard.
+   *
+   *   onlyIf: 'song-folder-link'  click only while the footer's folder path still
+   *                               points at the song that is playing *now*
+   *
+   * That guard exists because a shuffled directory is full of one-second sound
+   * effects, and the sequencer advances by itself when one ends. By the time the
+   * scenario gets round to clicking the folder path, the link belongs to the song
+   * that just ended, so the click navigates to *its* folder -- and the take then
+   * shows a folder page whose highlighted row is not the song in the footer, which
+   * is precisely the "green verdict over a frame that does not show the claim"
+   * failure this file keeps having to guard against. Skipping is honest and the
+   * skip is recorded; navigating to the song that *is* playing would paper over it.
+   */
+  tryClick(sel, guard) {
+    if (guard === 'song-folder-link') {
+      const a = app();
+      const song = a && a.sequencer && a.sequencer.currSongPath;
+      const link = document.querySelector('.AppFooter .SongDetails-filepath a');
+      // The href is react-router's doubly-encoded form; one decode matches the
+      // path the link was built from, which is what the app compares against.
+      const href = link ? decodeURIComponent(link.getAttribute('href') || '').split('?')[0] : null;
+      if (!song || href !== `/browse/${song}`) {
+        return { clicked: false, blocked: true, sel, why: 'the footer still links the previous song' };
+      }
+    }
+    return { blocked: false, ...this.clickSelector(sel) };
+  },
+
   // VirtualizedList activates a row on double-click, and Favorites/LocalFiles
   // rows are not anchors at all, so a real dblclick is sometimes the only way in.
   dblclick(sel) {
@@ -376,6 +477,117 @@ const dev = {
     window.history.pushState({}, '', path);
     window.dispatchEvent(new PopStateEvent('popstate', { state: {} }));
     return { navigated: path };
+  },
+
+  /**
+   * Scroll the list until the *playing* song's row is on screen.
+   *
+   * Two cases, because two different lists are involved. On a song folder the
+   * list is virtualized, so "the app highlights the playing row" is only a claim
+   * about the picture while the row is rendered -- a folder of 73 sub-tunes
+   * renders about 33 of them, so a row for sub-tune 60 of a shuffled song is
+   * simply not in the DOM at scrollTop 0. That is why this exists rather than an
+   * assertion: the alternative was a take that is green on 7 takes in 10 and
+   * shows nothing on the other 3. On a list that is *not* virtualized (Top
+   * Charts) the row is already rendered and this is just a scroll, so it needs
+   * no index and no knowledge of the page -- which is why it is written as one
+   * function rather than a per-page hook.
+   *
+   * Three things here are measured rather than guessed, and each replaced a
+   * version that looked fine and did not work:
+   *
+   *  - The row is found by matching the app's own listing against the
+   *    *sequencer's* ref, which is the same `songRefKey` comparison
+   *    VirtualizedList highlights with. The player's `getSubtune()` is not a
+   *    usable index: measured on the nsfe fixtures, it disagreed with the
+   *    sequencer's ref on 2 of 14 songs (56 vs 19), because GME reports the
+   *    track it loaded after the file's `plst` remap while the app's identity is
+   *    the sub-tune the shuffle asked for. Scrolling to the player's number
+   *    scrolled to the wrong row, or off the end of a 23-row list.
+   *  - The scroll is a direct `scrollTop` write, not `list.scrollToRow`. That is
+   *    measured working where `scrollToRow` is not: it is a no-op on this list,
+   *    because the WindowScroller forwards positions to a List whose visible slice
+   *    is already what `scrollToRow`'s visibility test thinks about. Writing
+   *    `scrollTop` on the scroll element fires the scroll event VirtualizedList
+   *    listens for, and it follows. 10/10 songs in view, where the imperative call
+   *    managed 3/4 of the ones it was asked to move.
+   *  - Nothing is scrolled when the row is already visible. A shuffle draws a
+   *    sub-tune index uniformly, so most songs need no scroll at all, and a jump
+   *    on every one would be noise in a clip about something else.
+   *
+   * Returns what it did, so a scenario can assert the beat actually happened
+   * rather than trusting that a scroll that changed nothing still looks fine.
+   */
+  revealPlayingSong() {
+    const a = app();
+    const scroller = document.querySelector('.App-main-content-area');
+    const ref = a && a.sequencer && a.sequencer.currSongRef;
+    if (!scroller || !ref) return { revealed: false, why: 'no list open' };
+    const row = document.querySelector('.Song-now-playing');
+    const box = scroller.getBoundingClientRect();
+    const inView = (el) => {
+      const b = el.getBoundingClientRect();
+      return b.top >= box.top - 1 && b.bottom <= box.bottom + 1 && b.height > 0;
+    };
+    const scrollRowIntoView = () => {
+      // A list that is not virtualized has already rendered the row, so this is all
+      // that is needed -- and it needs no index and no per-list arithmetic, which is
+      // what makes it work on a page this shim knows nothing about (the Top Charts
+      // list). Nudged to put the row a little below the top edge rather than flush
+      // against it, so it is plainly in the middle of the picture.
+      const b = row.getBoundingClientRect();
+      const target = scroller.scrollTop + (b.top - box.top) - 24;
+      scroller.scrollTop = Math.max(0, Math.round(target));
+      return { revealed: true, scrolledTo: scroller.scrollTop };
+    };
+
+    // On a page that is not a song folder -- Top Charts, Favorites -- the highlighted
+    // row is the thing to show, and it is already in the DOM.
+    if (decodeURIComponent(window.location.pathname) !== `/browse/${ref.path}`) {
+      if (row) return inView(row) ? { revealed: true, alreadyVisible: true } : scrollRowIntoView();
+      return { revealed: false, why: 'no highlighted row on this page' };
+    }
+
+    const key = (r) => `${r.path}\u0000${r.subtune ?? 0}`;
+    const browsePath = decodeURIComponent(window.location.pathname).replace(/^\/browse\//, '');
+    const items = (a.state.directories && a.state.directories[browsePath]) || [];
+    // Distinguishing "not here yet" from "not here to be found" matters, because
+    // only the first is worth waiting for. The second means the sequencer moved on
+    // to a song in another file while this folder was on screen -- which the short
+    // SFX tracks in a shuffled directory do often enough to matter -- and no amount
+    // of waiting puts the playing song into this listing.
+    if (!items.length) return { revealed: false, why: 'listing not fetched yet', retry: true };
+    const index = items.findIndex((it) => key(it) === key(ref));
+    if (index < 0) return { revealed: false, why: 'the playing song is not a row in this listing', rows: items.length };
+    if (row && inView(row)) return { revealed: true, alreadyVisible: true, index };
+    const rowHeight = parseInt(getComputedStyle(scroller).getPropertyValue('--rowHeight'), 10);
+    if (!rowHeight) return { revealed: false, why: 'no --rowHeight on the scroll container' };
+    // The listing is virtualized, so the row for a high sub-tune may not be rendered
+    // at all and there is nothing to scroll *to*: index off the app's own listing,
+    // matched against the sequencer's ref -- never the player's getSubtune(), which
+    // reports the track GME loaded after the file's `plst` remap and disagreed with
+    // it on 2 of 14 songs. The scrollTop write is deliberate: list.scrollToRow is a
+    // no-op on this WindowScroller/List pair, and this works 10/10.
+    scroller.scrollTop = index * rowHeight;
+    return { revealed: true, index, scrolledTo: scroller.scrollTop };
+  },
+
+  /**
+   * `revealPlayingSong`, retried while the listing is still in flight.
+   *
+   * The clip steps click a folder link and then reveal 1100ms later, which is
+   * usually but not always after the listing has been fetched: a 74-row folder
+   * whose rows are still being measured is not ready, and the single-shot version
+   * no-op'd on exactly those. Measured on the nsfe fixtures, the takes that came
+   * out with an unhighlighted list were the ones whose reveal landed first.
+   */
+  async revealPlayingSongWhenReady(waitMs = 1600, stepMs = 60) {
+    const deadline = Date.now() + waitMs;
+    for (;;) {
+      const r = this.revealPlayingSong();
+      if (r.revealed || !r.retry || Date.now() > deadline) return r;
+      await sleep(stepMs);
+    }
   },
 
   /**

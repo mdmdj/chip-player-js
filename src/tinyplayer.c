@@ -9,7 +9,9 @@
 #include <sys/stat.h>
 #include <emscripten.h>
 
-#include "../fluidlite/include/fluidlite.h"
+// fluidlite is a sibling checkout (README); the public header comes in via
+// -I../FluidLite/include set in scripts/build-chip-core.js.
+#include <fluidlite.h>
 // libADLMIDI is built with the Nuked OPL3 core (the DOSBox core aborts under
 // Emscripten); build with -DTP_ENABLE_ADLMIDI to compile this path in.
 #if defined(TP_ENABLE_ADLMIDI)
@@ -19,6 +21,12 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+// FluidLite moved these out of its public header (fluidlite/synth.h) but still
+// defines and uses them internally, and they remain exported; tinyplayer needs
+// the declarations to silence channels.
+extern int fluid_synth_all_notes_off(fluid_synth_t* synth, int chan);
+extern int fluid_synth_all_sounds_off(fluid_synth_t* synth, int chan);
 
 //TODO: Remove debug logging (EM_ASM_)
 fluid_synth_t *g_FluidSynth; // instance of FluidSynth

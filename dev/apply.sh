@@ -67,9 +67,10 @@ fi
 
 # 8. Sample catalog (gitignored) + catalog db
 mkdir -p catalog
-if [ -f game-music-emu/test.nsf ] && [ ! -f catalog/test.nsf ]; then
-  cp game-music-emu/test.nsf catalog/test.nsf
-  echo "[dev]   copied game-music-emu/test.nsf into catalog/"
+# game-music-emu is a sibling clone (README), not vendored in-repo.
+if [ -f ../game-music-emu/test.nsf ] && [ ! -f catalog/test.nsf ]; then
+  cp ../game-music-emu/test.nsf catalog/test.nsf
+  echo "[dev]   copied ../game-music-emu/test.nsf into catalog/"
 fi
 if [ ! -f server/catalog.db ]; then
   echo "[dev]   building server/catalog.db..."

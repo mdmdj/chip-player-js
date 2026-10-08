@@ -687,6 +687,32 @@ const topCache = new LRUCache({
   ttl: 1000 * 60 * 60, // 60 minutes
 });
 
+// DEV-ONLY, and deliberately NOT a DEV-BEGIN/DEV-END region: `server/index.js` is
+// path-listed in dev/promote-paths.txt, so promote.sh skips the whole file and that
+// is what makes this dev-only. A region here would be worse than nothing -- it would
+// imply the change strips back to prod, and it does not. Changing the outer LIMIT
+// argument of an existing call cannot be expressed by *adding* lines, which is the
+// only thing a strip can do (the two regions already in this file work precisely
+// because they override a line that already holds the prod value). Were this file
+// ever delisted, stripping this would leave `chartItems` referenced but undefined --
+// a runtime error, not a parse error, so promote.sh's `node --check` would not catch
+// it. See the "one seam file" note in dev/promote-paths.txt.
+//
+// What it excludes: catalog/nes-audio-tests is a copy of the bbbradsmith NES audio
+// hardware test suite, brought in as a *fixture* for the expansion-chip work in
+// AGENTS.md. Its files are one-second tests of a single chip's behaviour, not tunes,
+// and engine work put 11 plays on one of them -- enough to sit in the global Top 50
+// beside real music, which is the one place a fixture must not appear.
+//
+// Deliberately in JS rather than in the statement in database.js: the exclusion is a
+// property of *this* catalog, not of the feature, and the SQL is the part most worth
+// keeping readable.
+const CHART_EXCLUDE_PREFIXES = ['nes-audio-tests/'];
+
+const chartItems = (rows, limit) => rows
+  .filter((r) => !CHART_EXCLUDE_PREFIXES.some((p) => r.path?.startsWith(p)))
+  .slice(0, limit);
+
 /**
  * Returns: { items: [ { song_id, plays, title, artist, game, system, path, file_size, mtime }, ... ], total }
  */
@@ -707,7 +733,7 @@ router.get('/top', optionalAuth, (req, res) => {
       return res.json(cached);
     }
 
-    const items = getTopFavoritesStmt.all(overFetch, limit);
+    const items = chartItems(getTopFavoritesStmt.all(overFetch, overFetch), limit);
     const responseData = {
       items,
       total: items.length,
@@ -720,7 +746,7 @@ router.get('/top', optionalAuth, (req, res) => {
     if (!req.userId) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
-    const items = getUserTopStmt.all(req.userId, sinceTimestamp, overFetch, limit);
+    const items = chartItems(getUserTopStmt.all(req.userId, sinceTimestamp, overFetch, overFetch), limit);
     return res.json({
       items,
       total: items.length,
@@ -733,7 +759,7 @@ router.get('/top', optionalAuth, (req, res) => {
     return res.json(cached);
   }
 
-  const items = getGlobalTopStmt.all(sinceTimestamp, overFetch, limit);
+  const items = chartItems(getGlobalTopStmt.all(sinceTimestamp, overFetch, overFetch), limit);
   const responseData = {
     items,
     total: items.length,

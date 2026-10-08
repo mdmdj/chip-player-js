@@ -407,20 +407,103 @@ Measured, and the reasoning is recorded so nobody "improves" it:
 
 Format columns: fixture (pinned), script, and the verdict that must hold.
 
-### 7a. Main section — one clip per feature
+### 7a. Main sections — the two classes of change
 
-Six clips, after the curation pass above merged four away. The `songfolder` row
-carries the labels, the absent footer widget and the share-link format as prose,
-because those are notes about the same navigation rather than separate changes.
+Not one flat list: the page splits this into **two top-level sections**, because the
+two are separate pieces of work that ship together and are not even about the same
+thing. Sub-tunes change what a *song is*; looping changes what Repeat One *does*. A
+reader who only cares about one of them should not have to skip the other half, so
+each is a `<section>` of its own with its own nav anchor. `scenarios.check.mjs`
+rejects a `main` clip with no known group, because a clip that silently drops out of
+both sections is the kind of thing that ships looking complete.
+
+**Sub-tunes are Songs, First Class** (`group: 'subtunes'`) — a file containing many
+songs browses as a folder of songs, each of which is an ordinary song.
 
 | id | feature | fixture | script | verdict must show |
 | -- | ------- | ------- | ------ | ----------------- |
 | `songfolder` | A multi-song file browses as a folder (`<TUNES>` + count), and its rows are ordinary songs: real labels, no `Tune N of M` widget, share links unchanged | `nsfe/Akumajou Densetsu (VRC6).nsfe` (28 tunes) + `nsfe/Mega Man 2.nsfe` (22) | browse `/browse/nsfe`, into the folder, play `Mad Forest`, `..` back, into `Mega Man 2`, play `Stage Select` | `<TUNES>` + count; ends inside the *second* folder on sub-tune 3 of 22; both sub-tunes are separate songs |
 | `favorite-subtune` | Favourite one sub-tune; Favorites groups it under a song-folder heading | same | play `Epitaph`, click the **footer** heart, open Favorites | the heart's `.isFavorite` flips; the Favorites page holds exactly one row, labelled `Epitaph`, under the folder heading |
+| `shuffle-subtunes` | Shuffle Play shuffles *songs*: one entry per playable song, so a 13-file directory is a 100-song walk, and each song's own folder page highlights the row being played | `/browse/nsfe` (13 files, 352 playable songs) | Shuffle Play, then ×8: play 1.7 s, click the footer's folder path (guarded), hold the highlighted row 1.1 s, Next | `ctxLen` 100 over `ctxFiles` 13 — one entry per song, not per file; ≥6 distinct songs played, ≥3 of them past sub-tune 0; ≥5 songs observed with the highlighted row **visible** on their own folder page; no frame where a highlighted row sits on a page that is not the playing song's folder; ≥5 Next clicks; ends on a folder page showing the playing song; audible |
+
+| `charts-subtunes` | The Top Charts page ranks **songs**: one file appears at several ranks, each a different sub-song; Shuffle Play on the page plays those rows, and each song highlights its own row | `/top` (the global chart) | Shuffle Play, then ×10: play, reveal the highlighted chart row, Next | the chart's own DOM carries ≥3 rows linking `?play=…&subtune=…`; ≥2 distinct **sub-songs** played; ≥3 distinct songs confirmed highlighted per tick — the row's text must name the playing file *and* its `subtune` parameter must match; the highlight was inside the scroll box for ≥15 ticks; ≥7 Next clicks; audible |
+
+Ten songs, and that is measured: the chart is ~30% sub-song rows (30 of the top 100 on
+this catalog), so "at least one sub-song was played" fails with (1−0.3)^n — 12% of
+six-song takes. The first two takes here duly drew six and seven songs that were *all*
+sub-tune 0 (vgz, MDX, MOD, MIDI, miniusf — every one a single-song file). Ten draws
+puts it at ~3%.
+
+Three things this clip needed that the shuffle clip did not:
+
+- **`browse: '/top'`,** which `scenarios.check.mjs` now accepts alongside `/browse/*`
+  and share links. `shoot.mjs`'s `waitForSelector('.BrowseList-row')` is satisfied
+  because TopCharts renders that same row class, and `hlName`/`hlSub` read the row's
+  own name anchor, which carries `/?play=<songId>&subtune=N`.
+- **A reveal branch for non-virtualized lists.** `dev.revealPlayingSong` handles two
+  cases now: a song folder (virtualized, so the row may not be rendered at all and the
+  index comes from the app's own listing) and any other page (the row is rendered, so
+  it is a plain scroll needing no index). The chart is 50 rows tall and ~20 fit, so
+  without the scroll the highlight spends most of the take off screen.
+- **No song-folder detour,** where the shuffle clip has one. That beat is only available
+  when the drawn song is a multi-song file, which makes it a coin flip: a take drew
+  `midi/Darkseed 2/MM001GM.MID`, a single-song MIDI, and the footer's path link pointed
+  at its parent directory so the guarded click correctly refused. Charts and song folders
+  being one model is already shown twice on the page; repeating it here would have made
+  the take flaky to say something already said.
+
+The pacing is deliberate and was corrected once: the reveal hold began at 400 ms,
+which reads as a flicker rather than as "this song is highlighted in its folder". It
+is 1100 ms now, and the play hold went 1500 → 1700 ms. That is the whole of the
+"too fast" fix — 35 s of take instead of 27 s, ~13 MB instead of ~10 MB.
+
+**Looping Improvements, Standardized to One** (`group: 'looping'`) — one Repeat One
+for every format, loop region on the timeline, no jump at the toggle.
+
+| id | feature | fixture | script | verdict must show |
+| -- | ------- | ------- | ------ | ----------------- |
 | `loop-band` | The shaded band on the slider, head folding inside it, and Settings → "Show Loop Area" toggling it without touching playback | `arcade-capcom/Ghosts'N_Goblins_(Arcade)/16 Hurry Up!.vgz` | Repeat One, untick the band, tick it again | `band = {start,end}` ms from `getLoopBandMs()`; `displayMs` inside the band across ≥2 loops; band absent from the DOM for a stretch and back at the end; the checkbox was genuinely clickable (topmost element at its own centre) |
 | `repeat-toggle-smooth` | Enabling Repeat One mid-song: head continuous, no jump | same | play 6 s, toggle One | `displayMs` monotonic across the toggle (±1 tick) |
 | `repeat-leave-fade` | Leaving a deep repeat plays the current pass + full fade, then ends | same | loop deep, toggle off | position keeps advancing; song ends after the fade; `durationExtended` set |
 | `blind-loop` | No known region: head parks at the end, label reads `↻ Looping` | `nsfe/Akumajou Densetsu (VRC6).nsfe` sub-tune 3 (`play_length` 101000 ms) | Repeat One, seek to `play_length − 1000` | `isPlayingIndefinitely()` true, band null, `positionMs >= durationMs`, `Looping` in the DOM |
+
+Three notes on `shuffle-subtunes`, all of them learned by measuring:
+
+- **`reveal` exists because the list is virtualized.** It renders ~33 of up to 73
+  rows, so the highlighted row for a shuffled sub-tune is often not in the DOM at all,
+  and an assertion that a highlight *exists* is satisfied by a row the viewer cannot
+  see. `dev.revealPlayingSongWhenReady()` scrolls it into view by matching the app's
+  own listing against the **sequencer's** ref (`getSubtune()` disagrees on ~2 in 14
+  nsfe songs, because GME reports the post-`plst` track) and writing `scrollTop`
+  directly — `list.scrollToRow` is a no-op on this list, measured.
+- **Every reveal is recorded as a mark** (`reveal: row 25 -> 194px`, or
+  `no-op (…)`), because a reveal that found nothing looks exactly like one that
+  worked. The first recorded take showed 3 of 8 folders with no highlight and the
+  clip still passed every assertion, because the aggregate test used existence.
+- **The aggregate assertion counts visible highlights, not rendered ones**, and it is
+  per-tick rather than final: a song folder page is also on screen for the whole
+  stretch between a Next click and the folder click after it, when it belongs to the
+  song that just ended.
+- **The folder click is guarded (`onlyIf: 'song-folder-link'`), and that guard is
+  load-bearing.** A shuffled directory is full of one-second sound effects, and the
+  sequencer advances by itself when one ends — measured 2 draws in 14 inside a
+  1500 ms play hold. When that happens before the step runs, the footer's path link
+  still belongs to the song that just ended, so the click navigates to *its* folder
+  and the take shows a folder page whose highlight is not the song in the footer. The
+  guard refuses the click instead, `runStep` marks the refusal
+  (`skipped "song 4: …": the footer still links the previous song`), and `reveal`
+  refuses too (`this page is not the playing song's folder`) so a skipped beat does
+  not leave a stale scroll behind. Verified on both branches by polling through a
+  cache miss: in the stale window the click reports `blocked: true` and the page does
+  not move; once `/metadata` lands the same click is allowed. Navigating to the song
+  that *is* playing would have been the tempting alternative and would have hidden
+  the beat instead of accounting for it. The assertion
+  `never-highlights-a-song-that-is-not-playing` forbids the frame outright rather than
+  counting it.
+
+The `songfolder` row carries the labels, the absent footer widget and the share-link
+format as prose, because those are notes about the same navigation rather than
+separate changes.
 
 Removed, with their claims folded in: `subtune-is-a-song`, `labels`,
 `share-link`, `show-loop-area`. `top-charts-subtunes` was planned and never cut.
@@ -510,14 +593,34 @@ FINDINGS.md before repeating any story about it.
 
 ```
 Header          what changed, in one paragraph, link to the PR
-Main section    §7a clips, one per feature, each with:
-                  - "watch for" bullets
+Nav             one anchor per top-level section
+#subtunes        §7a, group 'subtunes' — the two classes of change are two
+                  <section>s, not one flat list, so a reader who only cares
+                  about one can stop reading
+#looping         §7a, group 'looping'
+  each clip      - "watch for" bullets
                   - "master did: ..." line
                   - <details> proof: verdict table + key numbers + trace link
-In depth        §7b per-format clips, same shape
-Snippets        §8, each with file:line and a one-paragraph "why this can't be a video"
-Limitations    XMP's late band, V2M's tier-3 reload, format-2 MIDI has no band
+#deep            §7b per-format clips, same shape, grouped by mechanism
+#snippets        §8, each with file:line and a one-paragraph "why this can't be a video"
+#limits          XMP's late band, V2M's tier-3 reload, format-2 MIDI has no band
 ```
+
+Prose (`site.mjs`: `before`, `watch`, section notes) is inserted as **HTML**, not
+escaped — it is authored by hand in this tree and written as markup. Escaping it was a
+bug that no check caught: the build reported success and the page showed readers a
+literal `&lt;em&gt;files&lt;/em&gt;`. Ids, labels, marks and verdict *details* — the
+only values that could carry anything unexpected — are still escaped.
+
+One piece of app iconography is borrowed: the Repeat One heading says
+"Standardized to ⟲ One", where ⟲ is the app's own `src/images/repeat.png` inlined as a
+data URI (200 bytes) by `build-site.mjs`, drawn as a CSS **mask** so it takes the
+heading's colour, and sized in `em` so the same span works in the nav link. It is
+`role="img" aria-label="Repeat"` rather than decoration, because there the glyph *is*
+the word: without it the heading, the nav link, the page outline and find-in-page all
+say "Standardized to One" (checked over CDP against the AX tree). An unknown
+`{{glyph:…}}` name throws rather than rendering, because the quiet failure is a
+heading with a gap in it.
 
 ## 10. Work plan
 
@@ -530,7 +633,7 @@ before any content work.
 | M1 | Recorder design proven | one clip recorded end to end **with audio**, muxed and trimmed to the mark. Also: pick the framing. | **done** — `loop-band`, verdict green. Framing settled by measurement: Playwright, **900×720 CSS px at dsf 2**, `recordVideo.size` set to exactly the viewport → 900×720 at a constant 25 fps, DPR-correct. Widened from 720×720 on 2026-10-05 because the browse list truncated item names at 239 px (419 px at 900). The host tab recorder was rejected (1× capture upscaled 1.5×, VFR, 50 MiB transfer loss). |
 | M2 | Shim additions | `__cpRec` staged by `dev/apply.sh`; `pinDefaults()` provably neutralises the stale `tempo: 2`; generic loop fields in `snap()` | **done** — `dev/shims/recorder.js`; pins both the localStorage and server copies; see FINDINGS.md for the three bugs it took |
 | M3 | Registry + validator | every clip in `scenarios.mjs`; `scenarios.check.mjs` fails on a missing fixture, duplicate id, dead harness, assertion-free scenario or vacuous quantifier; wired into `dev/run-tests.sh` | **done** — 14 clips, validator green |
-| M4 | Main section | one clip per user-visible change, recorded, muxed, verified | **done, 6 clips** — `songfolder`, `favorite-subtune`, `loop-band`, `repeat-toggle-smooth`, `repeat-leave-fade`, `blind-loop`. Curated down from 10: `subtune-is-a-song`, `labels`, `share-link` and `show-loop-area` were merged into the clips they duplicated (see "Curation pass") |
+| M4 | Main sections | one clip per user-visible change, in two top-level sections by class of change, recorded, muxed, verified | **done, 8 clips** — `subtunes` 4: `songfolder`, `favorite-subtune`, `shuffle-subtunes`, `charts-subtunes`; `looping` 4: `loop-band`, `repeat-toggle-smooth`, `repeat-leave-fade`, `blind-loop`. Curated down from 10: `subtune-is-a-song`, `labels`, `share-link` and `show-loop-area` were merged into the clips they duplicated (see "Curation pass") |
 | M5 | In-depth section | one clip per Repeat One mechanism, grouped by mechanism rather than format (§7b) | **done, 8 published of 9 registered** — `native` 3: `vgm-native`, `mdx-native`, `midi-cc102`; `indefinite` 3: `gme-looping-driver`, `sid-tail-restart`, `n64-indefinite`; `learned` 1: `xmp-learned-band`; `floor` 1: `sequencer-default-loop`. `v2m-tier3` is `ready: false` and withheld pending the V2M duration bug (AGENTS.md). Every clip asserts audibility, and every one was rebuilt where its text claimed more than its footage showed |
 | M6 | Page | `build-site.mjs` emits `site/`; prose per clip; relative URLs only | **done** — `dev/record/build-site.mjs` + `site.mjs` + `site.css`; 7 snippets with build-time line ranges; 0 external requests; `preload="none"` + generated posters; `./dev/record/serve.sh` (now `serve.mjs`, express — a range-less server, or a preload that pulls 35 MB before you click, makes clips unplayable; see FINDINGS.md) |
 | M7 | PR hand-off | decide with the maintainer whether anything of the page belongs in the PR (probably not) | not started |

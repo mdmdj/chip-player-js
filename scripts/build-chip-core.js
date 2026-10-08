@@ -200,7 +200,11 @@ const chipModules = [
       '_fluid_synth_set_polyphony',
       '_fluid_synth_bank_select',
     ],
-    flags: [],
+    // FluidLite is a sibling clone (README), and tinyplayer.c includes its
+    // public header by name; the include dir has to come from here. The clone
+    // generates fluidlite/version.h into its build dir, so that is an include
+    // path too.
+    flags: ['-I../FluidLite/include', '-I../FluidLite/build'],
   },
   {
     name: 'libADLMIDI',

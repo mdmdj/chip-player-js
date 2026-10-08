@@ -12,7 +12,11 @@
 // Fields
 //   id       file name stem: site/clips/<id>.mp4, dev/record/.work/<id>.*
 //   section  'main' (one clip per feature) | 'deep' (per format/variant)
-//   group    for section 'deep' only: which mechanism family the clip belongs to,
+//   group    which of the page's sections the clip belongs to. For section 'main'
+//            this is one of the two classes of change the PR makes, rendered as its
+//            own top-level section: 'subtunes' (a file that contains many songs is
+//            a folder of songs) or 'looping' (one Repeat One for every format).
+//            For section 'deep' it is the mechanism family the clip belongs to,
 //            rendered as a subheading. 'native'  the format declares a loop region
 //                     at load (VGM's loop points, MDX's mdxmini loop points, MIDI's
 //                     CC 102/103), so the band is correct from the first frame
@@ -23,9 +27,9 @@
 //            'floor'    the honest fallback: no loop points and no loop API, so the
 //                     song stops and reloads. Not a success -- the baseline the
 //                     others are measured against
-//            Every 'deep' clip must name one. scenarios.check.mjs rejects a missing
-//            or unknown group, because a clip that silently drops out of its
-//            subheading is the kind of thing that ships looking complete.
+//            Every clip must name one. scenarios.check.mjs rejects a missing or
+//            unknown group, because a clip that silently drops out of its section
+//            is the kind of thing that ships looking complete.
 //   ready    false until the clip has been recorded with a passing verdict;
 //            scenarios.check.mjs only enforces the fixture/assert rules on ready
 //            entries, so the registry can grow ahead of the recordings.
@@ -38,15 +42,105 @@
 
 const NSFE = 'nsfe/Akumajou Densetsu (VRC6).nsfe';      // 28 sub-tunes, labelled
 const MM2 = 'nsfe/Mega Man 2.nsfe';                      // 22 sub-tunes, labelled
+const NSFE_DIR = 'nsfe';                                 // 13 multi-song files
 
 const HURRY = "arcade-capcom/Ghosts'N_Goblins_(Arcade)/16 Hurry Up!.vgz";
 const HURRY_DIR = "arcade-capcom/Ghosts'N_Goblins_(Arcade)";
+
+// The shuffle clip's timeline: play a song, open the folder it lives in, show the
+// row being played, move on. Repeated eight times, so it is generated rather than
+// written out -- the numbers below are the whole design, and a hand-copied eighth
+// block is where the seventh block's timings would go wrong.
+//
+// Timings are measured, not chosen for looks. The play hold is 1700ms because the
+// footer's folder link is only the *song folder* once /metadata has answered --
+// measured 149ms, and the link points at the parent directory until then, so a
+// click earlier would navigate to the directory and the beat would silently not
+// happen. The 1200ms after the folder click is the listing fetch plus render.
+//
+// REVEAL is the beat this clip is about, and it is the one that was too short: the
+// first take held the highlighted row on screen for 400ms before moving on, which
+// reads as a flicker rather than as "this song is highlighted in its folder". At
+// 1100ms the viewer gets time to read the label next to the highlight and connect
+// it to the title in the footer. That plus a slightly longer play hold is the whole
+// of the "too fast" fix, and it costs 9 seconds of take and ~4 MB.
+const SHUFFLE_SONGS = 8;
+const shuffleSubtuneWalk = (() => {
+  const PLAY = 1700;
+  const FOLDER = 1200;
+  const REVEAL = 1100;
+  const NEXT = 500; // after which the next song has loaded and is playing
+  const steps = [{ atMs: 300, play: '.Browse-topRow button[title^="Shuffle"]', label: 'shuffle play this directory' }];
+  let at = 300;
+  for (let i = 1; i <= SHUFFLE_SONGS; i++) {
+    at += PLAY;
+    // `onlyIf` so a song that ended by itself -- a one-second sound effect, of
+    // which this directory has dozens -- skips its folder beat instead of opening
+    // the folder of the song it replaced. Measured: 2 of 14 draws advance inside a
+    // 1500ms play hold, so without it roughly one beat in four showed a folder page
+    // whose highlight was not the song in the footer.
+    steps.push({
+      atMs: at,
+      play: '.AppFooter .SongDetails-filepath a',
+      onlyIf: 'song-folder-link',
+      label: `song ${i}: open the file it lives in`,
+    });
+    at += FOLDER;
+    steps.push({ atMs: at, reveal: true, label: `song ${i}: the row being played` });
+    if (i === SHUFFLE_SONGS) break;
+    at += REVEAL;
+    steps.push({ atMs: at, play: '.AppFooter button[title="Next"]', label: 'next song' });
+    at += NEXT;
+  }
+  return steps;
+})();
+
+// The Top Charts clip: the same walk as the shuffle clip, but the list on screen is
+// the chart instead of a song folder.
+//
+// The chart is a *different* list in two ways that shaped this script. It is not
+// virtualized, so the highlighted row is already rendered and revealing it is a
+// plain scroll (see dev.revealPlayingSong's other branch) -- but it is 50 rows tall,
+// so most rows start below the fold and the highlight would otherwise spend most of
+// the take off screen. And its Shuffle Play shuffles the rows the chart is showing,
+// client-side, which is the claim: what plays is what was charted.
+//
+// No song-folder detour, where the shuffle clip has one: the chart page is the
+// subject, and seeing each song light up its own row is the whole point.
+//
+// Ten songs rather than six, and that is a measured number rather than a taste one.
+// The chart is ~30% sub-song rows (30 of the top 100 on this catalog), so a shuffle
+// draws a sub-song with p = 0.3 and "at least one sub-song was played" fails with
+// (1 - 0.3)^n: 12% of six-song takes, and the first two takes here duly drew six and
+// seven songs that were *all* sub-tune 0 -- vgz, MDX, MOD, MIDI, miniusf, every one a
+// single-song file. Ten draws puts it at ~3%, which is worth the extra 8 seconds;
+// the reveal is doing real work in those seconds too, since a chart row can start
+// 900px down the list.
+const CHARTS_SONGS = 10;
+const chartsSubtuneWalk = (() => {
+  const PLAY = 1600;
+  const CHART_HOLD = 900;
+  const NEXT = 400;
+  const steps = [{ atMs: 300, play: '.Browse-topRow button[title^="Shuffle all"]', label: 'shuffle play the chart' }];
+  let at = 300;
+  for (let i = 1; i <= CHARTS_SONGS; i++) {
+    at += PLAY;
+    steps.push({ atMs: at, reveal: true, label: `song ${i}: its row on the chart` });
+    at += CHART_HOLD;
+    if (i === CHARTS_SONGS) break;
+    at += 250;
+    steps.push({ atMs: at, play: '.AppFooter button[title="Next"]', label: 'next song' });
+    at += NEXT;
+  }
+  return steps;
+})();
 
 export const scenarios = [
   // ---------------------------------------------------------------- main ----
   {
     id: 'songfolder',
     section: 'main',
+    group: 'subtunes',
     ready: true,
     title: 'A file with many songs is a folder',
     watch: [
@@ -97,6 +191,7 @@ export const scenarios = [
   {
     id: 'favorite-subtune',
     section: 'main',
+    group: 'subtunes',
     ready: true,
     title: 'Favouriting one sub-tune leaves the others alone',
     watch: [
@@ -166,8 +261,132 @@ export const scenarios = [
   },
 
   {
+    id: 'shuffle-subtunes',
+    section: 'main',
+    group: 'subtunes',
+    ready: true,
+    title: 'Shuffle Play shuffles songs, not files',
+    watch: [
+      'One directory, one <b>Shuffle Play</b>: the transport walks song after song and the path under the title moves from file to file.',
+      'Click the folder path under the title and it opens the file that song actually lives in, with the row being played highlighted in it.',
+      'Some of these are one-second sound effects — when one ends the sequencer moves on by itself, and the next song is just the next entry in the same shuffle.',
+    ],
+    before: 'master shuffled <em>files</em>. <code>/shuffle</code> picked a file and played one of its tracks, so this directory\'s 13 files gave you at most 13 songs out of the 352 in them, and everything else was only reachable by hand — and because the pick was per file, a repeat pass could hand you the same track twice. Now it asks for songs: this take walks 100 of them across all 13 files (the request is capped at 100).',
+    harness: 'dev/test-subtunes-server.js',
+    browse: '/browse/nsfe',
+    // No fixture and no preload: the take opens on the listing with an empty
+    // transport, which is the state this clip is about. A preload would start a
+    // song and leave the shuffle with a song already half-played when it starts.
+    steps: shuffleSubtuneWalk,
+    until: null,
+    assert: [
+      // The whole claim, in one comparison. Shuffle Play asks /shuffle for 100
+      // items, and /shuffle returns one row per *playable song* (a LEFT JOIN on
+      // subtune), so the context is 100 entries spread over the 13 files in this
+      // directory -- not 13 entries that are files. master would read 13 and 13.
+      // This is also what proves the Shuffle Play click landed: without it the
+      // context would be the directory listing the page opened on, which is 13
+      // entries over 13 files and fails the first half of the test.
+      { name: 'shuffle-list-is-one-entry-per-song', test: 's.ctxLen >= 90 && s.ctxFiles >= 10 && s.ctxLen > 5 * s.ctxFiles' },
+      // Several *different* songs were played: distinct (path, sub-tune) pairs in
+      // the trace. Deliberately not "more songs than files" -- that reads like the
+      // same claim and is not: with 13 files and 8 draws, eight distinct files is a
+      // perfectly ordinary shuffle and the ratio failed a take whose every other
+      // number was right. The songs-not-files claim is settled exactly by
+      // ctxLen/ctxFiles above, where nothing is sampled.
+      { name: 'several-different-songs-were-played', test: '(() => { const seen = tr.samples.filter((x) => x.path); if (!(seen.length >= 200)) return false; return new Set(seen.map((x) => x.path + ":" + x.sub)).size >= 6; })()' },
+      // Not whole files: at least three distinct songs past the first sub-tune were
+      // played. 95 of this directory's 100 shuffle entries have subtune > 0, so
+      // this is not close, and it is what separates "shuffled songs" from
+      // "shuffled the first track of each file over and over".
+      { name: 'sub-tunes-past-the-first-were-played', test: '(() => { const seen = tr.samples.filter((x) => x.path); if (!(seen.length >= 200)) return false; return new Set(seen.filter((x) => x.sub > 0).map((x) => x.path + ":" + x.sub)).size >= 3; })()' },
+      // The beat this clip exists for: for at least five different songs, the page on
+      // screen was that song's own folder *and* the row being played was highlighted
+      // in it *and visible*. Per tick, not at the end -- a song folder page is also
+      // on screen for the whole stretch between a Next click and the folder click
+      // after it, when it belongs to the song that just ended. And "visible", not
+      // "in the DOM": the list is virtualized, so a highlighted row that is rendered
+      // but scrolled out of the box satisfies the weaker test and shows the viewer
+      // nothing. An earlier version of this assertion used the weaker one and a take
+      // passed with three of its eight folders showing no highlight at all.
+      { name: 'each-song-folder-highlighted-the-playing-song', test: '(() => { if (!(tr.samples.length >= 200)) return false; const ok = new Set(); for (const x of tr.samples) { if (!x.path || !x.hl || !x.hlInView) continue; if (x.loc === "/browse/" + x.path) ok.add(x.path + ":" + x.sub); } return ok.size >= 5; })()' },
+      // The safety the folder click now has, asserted as an absence: there is no
+      // instant in the take where a highlighted row is on screen inside a page that
+      // is *not* the playing song's folder. That is the frame a short sound effect
+      // used to produce -- the click landing on the previous song's folder -- and it
+      // is the exact shape of a green take that does not show its own claim, so it
+      // is now forbidden outright rather than counted.
+      { name: 'never-highlights-a-song-that-is-not-playing', test: '(() => { if (!(tr.samples.length >= 200)) return false; return !tr.samples.some((x) => x.hl && x.hlInView && x.loc !== "/browse/" + x.path); })()' },
+      // The Next clicks landed. Only a real advance changes (path, subtune), so a
+      // take whose Next buttons matched nothing still shows one song and fails the
+      // count above; this names the mechanism instead of only its consequence.
+      { name: 'next-was-clicked-repeatedly', test: 'tr.marks.filter((m) => /^next song$/.test(m.label)).length >= 5' },
+      // The frame supports the claim at the end: a highlighted row inside the scroll
+      // container's box, rather than one that exists but is rendered off-screen --
+      // same reasoning as loop-band's "checkbox-was-really-clickable". The fallback
+      // is for the last song having been *skipped*, which leaves the previous song's
+      // folder on screen with nothing highlighted; that is a legitimate state now
+      // that the skip is deliberate, and the clip's own marks say so. Capped at three
+      // so a take where nothing was shown cannot pass on the fallback alone.
+      { name: 'ends-on-a-song-folder-showing-the-playing-song', test: '(() => { if (!(tr.samples.length >= 200)) return false; const row = document.querySelector(".Song-now-playing"); const sc = document.querySelector(".App-main-content-area"); if (row && sc) { const b = row.getBoundingClientRect(); const c = sc.getBoundingClientRect(); if (b.top >= c.top - 1 && b.bottom <= c.bottom + 1 && b.height > 0) return true; } const skips = tr.marks.filter((m) => /^skipped /.test(m.label)).length; return skips >= 1 && skips <= 3; })()' },
+      // Every assertion above reads the transport or the DOM, neither of which can
+      // tell a playing engine from a silent one. 40 audible 100ms ticks is ~4s of
+      // music, well under the ~12s this take plays, so it cannot pass on one song.
+      { name: 'audible', test: '(() => { const r = tr.samples.map((x) => x.rms).filter((n) => n != null); if (!(r.length >= 200)) return false; return r.filter((n) => n > 0.02).length >= 40; })()' },
+    ],
+  },
+
+  {
+    id: 'charts-subtunes',
+    section: 'main',
+    group: 'subtunes',
+    ready: true,
+    title: 'Sub-songs chart, label and play as themselves',
+    watch: [
+      'The chart ranks <em>songs</em>, not files: <code>Cybernoid_II.sid (Tune 2)</code> is a row of its own, and <code>Akumajou Densetsu (VRC6).nsfe</code> turns up three times at three different ranks with three different songs.',
+      '<b>Shuffle Play</b> on this page plays those rows, so what you hear is the exact sub-song that was charted.',
+      'Each song lights up its own row, including the ones further down the chart, which the take scrolls to.',
+    ],
+    before: 'master charted <em>files</em>. One NSF was one row however many tunes it held, so a file nobody played sat at zero no matter which of its songs you liked, and the only sub-song the charts could ever show was the one the app happened to start on. Play counts were a property of the file, not of the song.',
+    harness: 'dev/test-subtunes-server.js',
+    browse: '/top',
+    // No fixture and no preload: the take opens on the chart with an empty transport,
+    // which is the state this clip is about. Preloading would start a song and leave
+    // Shuffle Play with one already half-played.
+    steps: chartsSubtuneWalk,
+    until: null,
+    assert: [
+      // The claim is about the chart, so it is checked against the chart's own DOM
+      // rather than against what the transport happens to be doing. Every chart row
+      // links `/?play=<songId>&subtune=N`; a sub-song row is the one carrying a
+      // subtune parameter, which is the same identity the rest of the app uses.
+      { name: 'the-chart-itself-ranks-sub-songs', test: 'document.querySelectorAll(".BrowseList-colName a[href*=\'subtune=\']").length >= 3' },
+      // Shuffle Play on this page plays the chart's own rows, so at least one song
+      // past sub-tune 0 was played -- the chart is ~30% sub-song rows, which is why
+      // the walk is ten songs long (see chartsSubtuneWalk). Without the button the
+      // page opens with nothing playing and every other assertion here fails on an
+      // empty trace.
+      { name: 'shuffle-played-sub-songs-not-just-files', test: '(() => { const seen = tr.samples.filter((x) => x.path); if (!(seen.length >= 200)) return false; return new Set(seen.filter((x) => (x.sub || 0) > 0).map((x) => x.path + ":" + x.sub)).size >= 2; })()' },
+      // The beat: on the chart page, the highlighted row *is* the song playing.
+      // Checked per tick and per song rather than once at the end, because a
+      // highlight that appears without belonging to anything would satisfy the weak
+      // version -- and TopCharts compares the sequencer's ref against each row, so
+      // the row's own text (which names the file) and its sub-tune parameter have to
+      // agree with the transport on their own.
+      { name: 'chart-highlighted-the-song-being-played', test: '(() => { if (!(tr.samples.length >= 200)) return false; const ok = new Set(); for (const x of tr.samples) { if (!x.path || x.loc !== "/top" || !x.hl || !x.hlName) continue; if (!x.hlName.startsWith(x.path.split("/").pop())) continue; if ((x.hlSub == null ? 0 : x.hlSub) !== (x.sub || 0)) continue; ok.add(x.path + ":" + x.sub); } return ok.size >= 3; })()' },
+      // The highlight has to be on screen, not merely rendered: the chart is 50 rows
+      // tall and only about 20 fit, so a row can be highlighted while the picture
+      // shows nothing but other songs.
+      { name: 'chart-highlight-was-on-screen', test: '(() => { const n = tr.samples.filter((x) => x.hl && x.hlInView && x.loc === "/top").length; return tr.samples.length >= 200 && n >= 15; })()' },
+      { name: 'next-was-clicked-repeatedly', test: 'tr.marks.filter((m) => /^next song$/.test(m.label)).length >= 7' },
+      { name: 'audible', test: '(() => { const r = tr.samples.map((x) => x.rms).filter((n) => n != null); if (!(r.length >= 200)) return false; return r.filter((n) => n > 0.02).length >= 40; })()' },
+    ],
+  },
+
+  {
     id: 'loop-band',
     section: 'main',
+    group: 'looping',
     ready: true,
     title: 'The loop region, drawn on the slider',
     watch: [
@@ -239,6 +458,7 @@ export const scenarios = [
   {
     id: 'repeat-toggle-smooth',
     section: 'main',
+    group: 'looping',
     ready: true,
     title: 'Turning Repeat One on mid-song never moves the playhead',
     watch: [
@@ -268,6 +488,7 @@ export const scenarios = [
   {
     id: 'repeat-leave-fade',
     section: 'main',
+    group: 'looping',
     ready: true,
     title: 'Turning Repeat One off plays the rest of the song',
     watch: [
@@ -341,6 +562,7 @@ export const scenarios = [
   {
     id: 'blind-loop',
     section: 'main',
+    group: 'looping',
     ready: true,
     title: 'No known loop region: the head parks and the label says Looping',
     watch: [

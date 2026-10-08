@@ -20,18 +20,6 @@
 #include "utils/MemoryLoader.h"
 #include "emu/EmuCores.h"
 
-// Compatibility with the vendored libvgm, which predates a few names this
-// wrapper uses. (The upstream fork names devices OKIM*, uses a bool for
-// GetCurTime's loop flag, and has no PLR_DEV_INFO.parentIdx.)
-#ifndef DEVID_MSM6258
-#define DEVID_MSM6258 DEVID_OKIM6258
-#endif
-#ifndef DEVID_MSM6295
-#define DEVID_MSM6295 DEVID_OKIM6295
-#endif
-#define PLAYTIME_TIME_FILE 0
-#define PLAYTIME_LOOP_INCL 1
-
 /* C wrapper functions */
 typedef struct lvgm_player lvgm_player;
 
@@ -319,7 +307,10 @@ UINT8 lvgm_load_data(lvgm_player *player, const UINT8 *data, const UINT32 size) 
   size_t curDev;
   for (curDev = 0; curDev < diList.size(); curDev++) {
     const PLR_DEV_INFO& pdi = diList[curDev];
-    // The vendored libvgm has no parentIdx; it only lists primary devices.
+    // Skip linked devices; they are added under their parent below.
+    if (pdi.parentIdx != (UINT32)-1) {
+      continue;
+    }
     const char* rawDevName = SndEmu_GetDevName(pdi.type, 1, pdi.devCfg);
     std::string devName = getNiceChipName(pdi.type, rawDevName);
 

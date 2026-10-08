@@ -139,7 +139,6 @@ class EventIterator {
       if (this.passesLeft > 1) {
         this.passesLeft--;
         this.elapsedLoops++;
-        console.debug('Channel looped at tick %d (%d passes left)', this.curTick, this.passesLeft);
         this.pos = this.startIdx;
       } else if (this.pos >= this.events.length) {
         return null;

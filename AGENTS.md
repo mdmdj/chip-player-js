@@ -371,9 +371,10 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
     user-supplied catalog: an N64 CC102/103 pair, a paired marker too short to be
     a region, a lone CC111, post-loop padding with and without notes, a markerless
     file under repeat one, and the format-2 no-band rule with a format-1 guard.
-  - `node dev/test-end-detector.js` — the SID/N64 tail detector: trip gate,
-    level+stillness rule, muted voices, restart re-arming, N64's config-default
-    length for untagged `.miniusf`.
+  - `node dev/test-end-detector.js` — the shared `EndDetector` as used by SID
+    and N64: trip gate, level+stillness rule, muted voices, restart re-arming,
+    N64's config-default length for untagged `.miniusf`, and the tuning layers
+    (module defaults, and a player override replacing only named fields).
   - `node dev/test-subtunes-server.js` — the sub-tune API over HTTP against the
     running dev server (song folders, sub-song rows, search union, metadata,
     shuffle/random/playback/top, and per-sub-tune favorites including a legacy
@@ -2353,15 +2354,18 @@ t3 preview to script enable/disable
 timing and spy on player state instead of listening.
 
 The Settings tab has a dev-only **End Detector (dev)** section at the bottom
-(all in `DEV-BEGIN/DEV-END` regions): live sliders for the SID/N64 tail
-detector thresholds (`quietMean`, `staticRange`, `windowSec`, `tapStep`) plus
-a position/trip/window-means readout. The players take an optional `tuning`
-override (`updateEndDetector`, `getEndDetectTripAtMs`; null keeps the tuned
-constants, so the seam is behavior-neutral in prod); the constructor routes
-both methods through a live `endTuning` store, and `setEndTuning` /
-`getEndDetectorState` (region-only, the panel's only callers) drive it.
-Sliders apply instantly; Reset clears back to the constants. When the active
-player has no end detector the panel renders nothing (a `console.debug` only).
+(all in `DEV-BEGIN/DEV-END` regions): live sliders for the tail detector's
+thresholds (`quietMean`, `staticRange`, `windowSec`, `tapStep`) plus a
+position/trip/window-means readout. The detector itself is `EndDetector`
+(`src/players/EndDetector.js`), a shared module SID and N64 instantiate as
+`this.endDetector`; GME gets the equivalent inside its engine, so it uses
+none. Values layer as module defaults <- the importing player's constructor
+`tuning` override (unspecified fields fall back to the default) <- the dev
+store `setTuning`, and `getTuning()` is the one place they are merged, so
+`getState` reports the values actually in force. Sliders apply instantly;
+Reset clears back to the player/default values. The panel appears only when
+the active player exposes a detector (`player.endDetector`, i.e. a player
+that uses the module); with none it renders nothing (a `console.debug` only).
 
 Testing gotchas learned the hard way:
 

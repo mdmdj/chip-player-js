@@ -332,15 +332,13 @@ export default class Player extends EventEmitter {
     return this.looping;
   }
 
-  // True when the fallback loop UI applies: the song is running past its
-  // length with no known loop region, so no honest playback position exists.
-  // The transport parks the head and the elapsed time climbs.
-  //
-  // Engines land here by free-running past a listed length -- an NSF driver
-  // looping internally, or SID/N64 under indefinite playback. Engines that
-  // keep their own clock bounded never do: a known loop region (band), a
-  // native loop (XMP), a JS wrap (MIDI with a region), or a stop + reload
-  // (MIDI without one, V2M). The past-the-end term is the scoping.
+  // True when the fallback loop UI applies: the song runs past its length with
+  // no known loop region, so no honest position exists -- the transport parks
+  // the head while the elapsed time climbs. Engines land here by free-running
+  // past a listed length (an NSF driver looping internally; SID/N64 under
+  // indefinite playback); a bounded clock -- a loop region, a native loop
+  // (XMP), a JS wrap (MIDI with a region), or a stop + reload (V2M) -- never
+  // does. The past-the-end term scopes it.
   isBlindLoop() {
     if (!this.isPlayingIndefinitely()) return false;
     if (this.getLoopBandMs()) return false;

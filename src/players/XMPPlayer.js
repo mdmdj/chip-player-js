@@ -53,15 +53,12 @@ export default class XMPPlayer extends Player {
     // Loop passes to hand libxmp for the current state (xmp_play_buffer's
     // loop count; 0 = forever). 1 ends at the scan end, like before.
     this._loopCount = 1;
-    // Learned loop band: order -> first-visit frame time. The band needs
-    // the loop start in ms, which libxmp doesn't expose -- but every
-    // order's first visit is observable, so the first backward order jump
-    // (the engine's own loop) resolves it exactly, tempo changes included.
-    // First-visit times are absolute song times, so seeks can't corrupt
-    // them; the only unlearnable case is a backward jump onto an order the
-    // linear flow never visited (a seek landing past the loop, or a skipped
-    // region), whose true start is unknowable -- that visit is skipped so a
-    // loop-end time can never become a loop start.
+    // Learned loop band: order -> first-visit frame time. libxmp exposes no
+    // loop start, but the first backward order jump (the engine looping)
+    // resolves it exactly, tempo included. First visits are absolute, so seeks
+    // can't corrupt them; a backward jump onto an order the linear flow never
+    // visited has an unknowable start, so it is skipped -- a loop-end time must
+    // never become a loop start.
     this._orderFirstSeen = new Map();
     this._lastPos = -1;
     this._skipOrder = null;
@@ -323,12 +320,9 @@ export default class XMPPlayer extends Player {
   }
 
   seekMs(seekMs) {
-    // A seek is a transport discontinuity, not a loop: forget the last
-    // position so the landing can't read as a backward jump. First-visit
-    // times are absolute, so earlier entries stay valid and learning
-    // continues (and still succeeds when the loop replays from before its
-    // start); only a loop whose start was never linearly visited stays
-    // unlearned, by the skip rule in learnLoopFromOrder.
+    // A seek is not a loop: forget the last position so the landing can't read
+    // as a backward jump. First visits are absolute, so learning continues
+    // across the seek; only a never-linearly-visited start stays unlearned.
     this._lastPos = -1;
     // xmp_seek_time_frame (libxmp 4.7+) is a more accurate seek; fall back to
     // xmp_seek_time on older builds (same millisecond units).

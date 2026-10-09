@@ -2212,15 +2212,17 @@ only armed when `silenceDuration >= 0`, and both arms must end the song):
   restart; `restartTrack()` is only for `track_ended` one-shots). Blind-loop
   UI: indefinite with no band, once past the track length, parks the slider
   head at the end (it rides the first pass normally), lets the elapsed time
-  climb unbounded, and labels the duration "Looping"
-   (`AppFooter.isBlindLoopNow` + `TimeSlider`). The exception is a genuine
+  climb unbounded, and labels the duration "Looping". The predicate is player
+  policy (`Player.isBlindLoop`); AppFooter/TimeSlider only render it. The
+  past-the-end term is the scoping: an engine that keeps its own clock
+  bounded -- a known band, a native loop (XMP), a JS wrap (MIDI with a
+  region), or a stop + reload (MIDI without one, V2M) -- never dwells there,
+  while SID free-runs past its listed length and so *can* dwell until its
+  tail detector restarts it. The exception is a genuine
   one-shot: it restarts in-buffer, which resets `getPositionMs()`, so the head
   *and* the elapsed label drop back to zero each cycle rather than
   accumulating. Drivers that loop internally never take that path, so for them
-  the label really does climb. The past-the-end condition is
-   the scoping: SID ends at its length and loops via stop + reload, so it
-   never dwells there and keeps the normal slider (MIDI and XMP used to be in
-   this group before they got native looping). Toggling repeat off
+  the label really does climb. Toggling repeat off
    restores the clamped head/duration (and the pending JS fade ends the song,
    since the position is already past the length). Repeat-off plays to the
    natural end + JS fade. Real per-track regions would need GME-side work

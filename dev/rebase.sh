@@ -88,7 +88,7 @@ fi
 #    content must not move a single byte of the tree.
 if git diff --quiet "$TIP" HEAD; then
   echo
-  echo "rebase: tree unchanged, $FEATURE is up to date. Push dev/overlay when ready."
+  echo "rebase: tree unchanged, $FEATURE is up to date. Publish with ./dev/push-overlay.sh"
   exit 0
 fi
 

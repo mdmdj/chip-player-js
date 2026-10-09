@@ -25,8 +25,9 @@
 // produce. `--text-only` and `--clips` force the assumption instead of caching it.
 //
 // Snippets are extracted from the working tree at build time so they cannot
-// drift from the code they describe: a line range that no longer exists fails the
-// build rather than rendering an empty <pre>.
+// drift from the code they describe: each is located by content anchors (see
+// extractSnippet), and an anchor that no longer matches fails the build rather
+// than rendering the wrong block.
 
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -107,19 +108,83 @@ const withGlyphs = (text) => esc(text).replace(/\{\{glyph:(\w+)\}\}/g, (_, name)
 });
 
 // ---------------------------------------------------------------- snippets --
+
+// Snippets are highlighted here, at build time, with shiki (VS Code's TextMate
+// grammars), so the published page stays static: the reader runs no highlighter,
+// fetches no theme, and every block is the same `<pre>` shape. shiki is a
+// dev-time dependency installed like playwright (`--no-save`; see README). It is
+// imported dynamically and only to render, so a checkout without it still builds
+// -- the block falls back to plain escaped text rather than failing the page.
+let renderSnippet = (body) => `<pre><code>${esc(body)}</code></pre>`;
+try {
+  const { createHighlighter } = await import('shiki');
+  const highlighter = await createHighlighter({
+    themes: ['github-dark'],
+    langs: ['javascript', 'sql', 'cpp'],
+  });
+  renderSnippet = (body, lang) =>
+    highlighter.codeToHtml(body, {
+      lang,
+      theme: 'github-dark',
+      // github-dark's own panel (#24292e) is a neutral gray; remapping it to the
+      // page's --panel (#141a30) seats the block in the layout instead of on top
+      // of it. Only the background moves; the token colors are untouched. The
+      // stylesheet's `.snippet pre` background stays as the no-shiki fallback.
+      colorReplacements: { '#24292e': '#141a30' },
+    });
+} catch (e) {
+  console.warn(`[build-site] shiki unavailable (${e.code || e.message}); snippets render unhighlighted`);
+}
+
+// Language is read from the file the snippet is cut from, so the registry never
+// names it and a block cannot be tagged as something other than its source.
+// `sn.lang` overrides for the rare case the extension is not the whole story.
+const LANG_BY_EXT = {
+  '.js': 'javascript', '.mjs': 'javascript', '.cjs': 'javascript', '.jsx': 'javascript',
+  '.cpp': 'cpp', '.cc': 'cpp', '.cxx': 'cpp', '.h': 'cpp', '.hpp': 'cpp',
+  '.sql': 'sql',
+};
+// The title bar reads better with the short name a reader recognises than with
+// shiki's loader id.
+const LANG_LABEL = { javascript: 'js', cpp: 'c++', sql: 'sql' };
+
+// A snippet is located by content, never by line number: `from` picks the first
+// line matching it, and `to` (inclusive) or `before` (exclusive) ends the span at
+// the next line matching. Line numbers drift silently every time the file above a
+// snippet grows; anchors cannot. When the anchored code is renamed or moved the
+// build fails loudly rather than rendering the wrong block, and the optional
+// `expect` pins a token inside the span so a change *within* it is caught too.
+const findAnchor = (lines, re, sn, which, startAt = 0) => {
+  for (let i = startAt; i < lines.length; i++) if (re.test(lines[i])) return i;
+  throw new Error(`snippet ${sn.id}: ${sn.file}: no line matches ${which} (${re})`);
+};
+
 function extractSnippet(sn) {
   const file = path.join(ROOT, sn.file);
   if (!exists(file)) throw new Error(`snippet ${sn.id}: missing file ${sn.file}`);
   const lines = read(file).split('\n');
-  const [from, to] = sn.lines;
-  if (from < 1 || to > lines.length) {
-    throw new Error(`snippet ${sn.id}: ${sn.file}:${from}-${to} is outside the file (${lines.length} lines)`);
+
+  const fromIdx = findAnchor(lines, sn.from, sn, 'from');
+  let lastIdx;
+  if (sn.to) lastIdx = findAnchor(lines, sn.to, sn, 'to', fromIdx);
+  else if (sn.before) lastIdx = findAnchor(lines, sn.before, sn, 'before', fromIdx + 1) - 1;
+  else throw new Error(`snippet ${sn.id}: needs a \`to\` or \`before\` anchor`);
+  // A `before` anchor points at the next block, so its separator -- blank lines
+  // and the doc-comment that introduces the next block -- is trimmed from the tail.
+  const isSeparator = (l) => l.trim() === '' || /^\s*(\/\/|\/\*|\*|--)/.test(l);
+  while (lastIdx > fromIdx && isSeparator(lines[lastIdx])) lastIdx--;
+
+  const body = lines.slice(fromIdx, lastIdx + 1).join('\n');
+  // Fail rather than render the wrong block: an anchor that matched something
+  // other than the intended code is a bug in the registry, not something to
+  // paper over on the page.
+  if (body.trim().length < 12) throw new Error(`snippet ${sn.id}: ${sn.file}: extracted nothing`);
+  if (sn.expect && !body.includes(sn.expect)) {
+    throw new Error(`snippet ${sn.id}: ${sn.file}: body does not contain ${JSON.stringify(sn.expect)} — the anchor matched the wrong code`);
   }
-  const body = lines.slice(from - 1, to).join('\n');
-  // Fail rather than render an empty block: a drifted range is a bug in the
-  // registry, not something to paper over on the page.
-  if (body.trim().length < 12) throw new Error(`snippet ${sn.id}: ${sn.file}:${from}-${to} extracted nothing`);
-  return { ...sn, body, ref: `${sn.file}:${from}-${to}` };
+  const from = fromIdx + 1;
+  const to = lastIdx + 1;
+  return { ...sn, body, from, to, ref: `${sn.file}:${from}-${to}` };
 }
 
 let snippetError = null;
@@ -320,11 +385,23 @@ function clipHtml({ s, proof, failed, mp4 }) {
 }
 
 function snippetHtml(sn) {
+  const lang = sn.lang || LANG_BY_EXT[path.extname(sn.file)] || 'text';
+  const label = LANG_LABEL[lang] || lang;
+  const range = sn.from === sn.to ? `${sn.from}` : `${sn.from}–${sn.to}`;
+  // shiki carries no chrome of its own, so the file bar is ours: a <figure> whose
+  // <figcaption> names the file and its lines, wrapped around the highlighted
+  // <pre>. This is the same shape Astro's <Code title> and rehype-pretty-code
+  // render -- the highlighter stays a highlighter.
   return `      <article class="snippet" id="${esc(sn.id)}">
         <h3>${esc(sn.title)}</h3>
         <p>${sn.why}</p>
-        <p class="src"><code>${esc(sn.ref)}</code></p>
-        <pre><code>${esc(sn.body)}</code></pre>
+        <figure class="code">
+          <figcaption class="code-bar">
+            <span class="code-file">${esc(sn.file)}</span>
+            <span class="code-meta">${esc(label)} · ${esc(range)}</span>
+          </figcaption>
+          ${renderSnippet(sn.body, lang)}
+        </figure>
       </article>`;
 }
 

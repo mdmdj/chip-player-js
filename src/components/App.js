@@ -408,17 +408,16 @@ class App extends React.Component {
     });
   }
 
-  // Keep the OS media session in step with the app's transport. The position
-  // is the player's "playlist" position -- folded inside a loop region, raw
-  // when there is none -- and the length is the track's single-pass duration.
-  // A blind loop (past its length with no region) has no defined end, and
-  // neither does a track whose length is not known yet, so report Infinity
-  // rather than 0, which would claim a zero-length track.
+  // Keep the OS media session in step with the app's transport: the position is
+  // the player's "playlist" position (folded inside a loop region, raw
+  // otherwise) and the length is the track's single-pass duration.
   updateMediaSessionPositionState() {
     if (!('mediaSession' in navigator)) return;
     const player = this.sequencer.getPlayer();
     if (!player) return;
 
+    // No defined end -- a blind loop, or a length not known yet. The Media
+    // Session spec spells that as Infinity; 0 would assert a zero-length track.
     const durationMs = player.isBlindLoop() ? Infinity : this.state.currentSongDurationMs;
     const duration = durationMs > 0 ? durationMs / 1000 : Infinity;
     const position = Math.max(0, (player.getDisplayPositionMs() || 0) / 1000);

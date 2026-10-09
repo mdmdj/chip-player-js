@@ -26,6 +26,12 @@
 // and overridden again by the dev-only tuning store (see setTuning below),
 // which the Settings panel drives. getTuning() reports what is actually used.
 
+// The settings hint shared by every player that uses this detector. The
+// toggle's label carries a React glyph, so each player keeps its own paramDef;
+// only the text is central here.
+export const DETECT_SONG_END_HINT =
+  'When Repeat One is active, restart the song when silence is detected.';
+
 const DEFAULT_TUNING = {
   // Per-second mean |sample| below which a second counts as quiet. Music
   // bodies run 0.03-0.16; ended tails sit at or below ~0.001.

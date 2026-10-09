@@ -14,6 +14,10 @@
 #
 # Promotion writes commits to feature/subtunes-as-first-class. Ask before
 # running it; see dev/promote.sh for the plan and the rules.
+#
+# Once the commit lands, this runs the whole mechanical tail -- dev/rebase.sh
+# (rebase + verify) then dev/push-overlay.sh -- so the cycle is one command after
+# arming. PROMOTE_SKIP_PUSH=1 holds the push back.
 set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -49,12 +53,25 @@ for f in "${plan[@]}"; do
   git show "HEAD:$f" | strip_regions > "$FEATURE_WT/$f"
 done
 if git -C "$FEATURE_WT" diff --quiet; then
+  rm -f "$ARMED"
   echo "promote-apply: no changes staged; nothing to commit."
-else
-  git -C "$FEATURE_WT" add -A
-  git -C "$FEATURE_WT" commit -q -m "Promote feature work from dev/overlay"
-  echo "promote-apply: committed on $FEATURE: $(git -C "$FEATURE_WT" rev-parse --short HEAD)"
+  exit 0
 fi
+git -C "$FEATURE_WT" add -A
+git -C "$FEATURE_WT" commit -q -m "Promote feature work from dev/overlay"
+echo "promote-apply: committed on $FEATURE: $(git -C "$FEATURE_WT" rev-parse --short HEAD)"
 rm -f "$ARMED"
-echo "promote-apply: dev/overlay unchanged. Now put it back on top:"
-echo "             ./dev/rebase.sh    # rebase + verify the tree did not move"
+
+# Mechanical tail: put dev/overlay back on top (rebase.sh verifies the tree), then
+# publish. A failing rebase stops here before the push (set -e above).
+echo
+"$DIR/rebase.sh"
+
+if [ "${PROMOTE_SKIP_PUSH:-0}" = "1" ]; then
+  echo
+  echo "promote-apply: PROMOTE_SKIP_PUSH=1, not pushed. When ready:"
+  echo "             ./dev/push-overlay.sh"
+  exit 0
+fi
+echo
+"$DIR/push-overlay.sh"

@@ -517,7 +517,7 @@ ${c.points.map((p) => `        <li>${p}</li>`).join('\n')}
       <h3>What To Look Out For</h3>
       <p class="summary-lede">Nothing here is a caveat about the code; it is what to know <em>before</em> you deploy, and none of it shows in a recording.</p>
 ${summary.lookout.map((b) => `      <h4 id="${esc(b.id)}">${b.title}</h4>
-${b.body.map((p) => `      <p>${p}</p>`).join('\n')}`).join('\n')}
+${b.body.map((p) => /^\s*<(ul|ol|table|h[1-6])\b/i.test(p) ? `      ${p}` : `      <p>${p}</p>`).join('\n')}`).join('\n')}
     </div>
   </section>`;
 
@@ -534,7 +534,7 @@ const html = `<!DOCTYPE html>
   <header>
     <h1>${esc(header.title)}</h1>
     <p class="lede">${header.lede}</p>
-    <p class="meta">${esc(header.pr)} · recorded from the feature branch, not from master</p>
+    <p class="meta">${esc(header.pr)} · recorded from the feature branch, not from <code>master</code></p>
   </header>
 
   <nav>
@@ -569,7 +569,7 @@ ${limitations.map((l) => `      <li>${l}</li>`).join('\n')}
   </section>
 
   <footer>
-    <p>Every clip was recorded from the dev build of the feature branch. <em>Before</em> lines describe master, read from the diff; no clip was recorded from master.</p>
+    <p>Every clip was recorded from the dev build of the feature branch. <em>Before</em> lines describe <code>master</code>, read from the diff; no clip was recorded from <code>master</code>.</p>
   </footer>
 </body>
 </html>

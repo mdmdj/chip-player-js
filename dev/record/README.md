@@ -115,6 +115,15 @@ and check `better-sqlite3`'s ABI afterwards):
 npm i --no-save --no-package-lock playwright@1.63.0 webpack@5.106.0
 ```
 
+The snippet blocks are highlighted at build time with `shiki`, installed the same
+way (a dev-time dependency, never in `package.json`). It is imported dynamically:
+without it the page still builds and the blocks render as plain text, so this is
+a nicety to add, not a hard requirement:
+
+```sh
+npm i --no-save --no-package-lock shiki
+```
+
 ## Where the pipeline stands
 
 For a handoff, the state is:
@@ -559,8 +568,12 @@ Not built, and deliberately: `gme-one-shot` and `midi-cc111` are covered by
 `dev/test-gme-loops.js` and `dev/test-midi-loops.js` rather than given page time.
 ## 8. Snippet appendix (no video)
 
-Each snippet is generated from the working tree at build time (file + line
-ranges), so it cannot drift from the code it describes.
+Each snippet is generated from the working tree at build time, so it cannot drift
+from the code it describes. Each is located by **content anchors**, not line
+numbers: a `from` regex finds the first line, and a `to` (inclusive) or `before`
+(exclusive) regex ends the span, with an optional `expect` token that must appear
+in the body. Editing around a snippet never breaks it; renaming or moving the
+anchored code fails the build instead of rendering the wrong block.
 
 | snippet | shows |
 | ------- | ----- |

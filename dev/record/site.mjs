@@ -187,7 +187,9 @@ export const snippets = [
     id: 'api-songfolder',
     title: 'A song folder is a listing, not a special case',
     file: 'server/index.js',
-    lines: [478, 500],
+    from: /const result = children\.map\(\(child\) => \{/,
+    before: /\} else \{/,
+    expect: 'isSongFolder',
     why: `The parent listing returns <code>type: "songfolder"</code> with a count and
       <code>url: null</code>; asking for the file itself returns one row per sub-tune,
       each a playable file with its own <code>/?play=…&amp;subtune=N</code>. No client
@@ -197,7 +199,12 @@ export const snippets = [
     id: 'schema-subtune',
     title: 'Sub-tunes are rows, and they are searchable',
     file: 'scripts/build-music.js',
-    lines: [118, 141],
+    from: /^  -- Each row is a playable sub-tune/,
+    before: /^  -- Triggers/,
+    expect: 'UNIQUE(music_id, subtune)',
+    // The file is JS, but this excerpt is the DDL inside its template literal, so
+    // highlight it as SQL rather than as the JS that wraps it.
+    lang: 'sql',
     why: `One table, one <code>UNIQUE(music_id, subtune)</code>, an fts5 mirror so
       sub-song titles are searchable, and <code>subtune_count</code> on the file row.
       Only multi-song files get rows, so a sub-song and a single-song file are the
@@ -207,7 +214,9 @@ export const snippets = [
     id: 'songref',
     title: 'Identity: a song is a path plus a sub-tune',
     file: 'src/util.js',
-    lines: [20, 55],
+    from: /^export function songRef\(/,
+    before: /^export function isSongFolder\(/,
+    expect: 'songRefKey',
     why: `The row highlight, the now-playing song and the shuffle order stay correct
       because every list, key and comparison goes through a <code>songRef</code>,
       never a bare path.`,
@@ -216,7 +225,9 @@ export const snippets = [
     id: 'handle-song-end',
     title: 'The player plays one song and stops',
     file: 'src/players/Player.js',
-    lines: [205, 215],
+    from: /^  handleSongEnd\(onSilenceEnd = null\) \{/,
+    to: /^  \}/,
+    expect: 'this.stop()',
     why: `master advanced to the next sub-tune inside the player, which is why sub-tunes
       were not context entries. The sequencer owns navigation now, so a sub-tune is
       another entry in the play context.`,
@@ -225,7 +236,9 @@ export const snippets = [
     id: 'parser-parity',
     title: 'NSFE sub-tunes are resolved the way the emulator does',
     file: 'scripts/metadata-parsers.js',
-    lines: [60, 78],
+    from: /^  \/\/ Mirror game-music-emu's Nsfe_Info:/,
+    to: /^  \}/,
+    expect: 'usePlaylist',
     why: `With a non-empty <code>plst</code> chunk the track count is the playlist length
       and track N is remapped through it; without one, all physical tracks are used 1:1.
       This mirrors <code>game-music-emu/gme/Nsfe_Emu.cpp</code>, which is the authority —
@@ -235,7 +248,9 @@ export const snippets = [
     id: 'wasm-loop-export',
     title: 'One engine export, and why it multiplies by playback speed',
     file: 'src/bindings/libvgm-wrapper.cpp',
-    lines: [386, 397],
+    from: /^\/\/ Loop region: the first pass is intro \+ loop/,
+    before: /^\/\/ Current loop index/,
+    expect: 'GetPlaybackSpeed',
     why: `The band has to be the song's playing time at 1x, so <code>Tick2Second</code>
       (which divides by the speed factor) is multiplied back by
       <code>GetPlaybackSpeed()</code>. The two cancel, which is what makes the value
@@ -247,7 +262,9 @@ export const snippets = [
     id: 'sid-subtune-reload',
     title: 'The fix that makes SID sub-tunes audible',
     file: 'src/bindings/libsidplayfp-wrapper.cpp',
-    lines: [206, 214],
+    from: /^void sid_set_subtune\(int subtune\) \{/,
+    to: /^\}/,
+    expect: 'load(currentTune)',
     why: `Selecting a SID sub-tune marks the tune's current song; the engine keeps playing
       the previously loaded one until <code>load()</code> is called again. Without this the
       wrapper reports the requested sub-tune while every sub-tune plays song 0 — a bug

@@ -4,7 +4,7 @@ import pathe from 'pathe';
 import React from 'react'; // For the icon in the detectSongEnd label
 
 import Player from "./Player.js";
-import EndDetector, { DETECT_SONG_END_HINT } from './EndDetector.js';
+import EndDetector from './EndDetector.js';
 import { vectorToArray } from '../util';
 import { API_BASE } from '../config';
 
@@ -20,16 +20,6 @@ function parseSongLength(length) {
   const parts = length.split(':');
   return Math.floor((parseFloat(parts[0]) * 60 + parseFloat(parts[1])) * 1000);
 }
-
-// Tail-end detector tuning (mean-abs per second): music bodies run 0.03-0.16
-// while ended tails sit at or below ~0.001, so the level gate separates them
-// by 6x or more. A quiet tail can hold steady just above that (≈1.2e-3), so
-// the stillness gate (frozen second-means) suppresses quiet-but-alive
-// passages. Window mirrors GME's 6s silence rule.
-const END_QUIET_MEAN = 0.004;
-const END_STATIC_RANGE = 0.001;
-const END_WINDOW_SEC = 6;
-const END_TAP_STEP = 7;
 
 export default class SIDPlayer extends Player {
   paramDefs = [
@@ -58,33 +48,21 @@ export default class SIDPlayer extends Player {
     this.bufferR = this.core._malloc(this.bufferSize * 4);
     this.subtuneDurations = [];
     this.initialized = false;
-    this.resetEndDetector();
-    // DEV-BEGIN (stripped for promotion; route the end detector through the
-    // live dev tuning store; production calls the methods directly)
-    this.endTuning = null;
-    const baseUpdateEndDetector = this.updateEndDetector;
-    const baseEndDetectTripAtMs = this.getEndDetectTripAtMs;
-    this.updateEndDetector = () => baseUpdateEndDetector(this.endTuning);
-    this.getEndDetectTripAtMs = () => baseEndDetectTripAtMs(this.endTuning);
-    // DEV-END
+    this.endDetector = new EndDetector({
+      sampleRate: this.sampleRate,
+      bufferSize: this.bufferSize,
+    });
   }
 
   resetEndDetector() {
-    this.endSecMeans = [];
-    this.endSecSum = 0;
-    this.endSecFrames = 0;
-    this.endDetectTripAtMs = null;
+    this.endDetector.reset();
   }
 
-  // Start of the end-detection trip window, cached per sub-tune: durations
-  // only change on load/sub-tune switches, which both reset the detector, so
-  // there is no per-callback lookup.
-  getEndDetectTripAtMs(tuning = null) {
-    const windowSec = tuning?.windowSec ?? END_WINDOW_SEC;
-    if (this.endDetectTripAtMs == null) {
-      this.endDetectTripAtMs = Math.max(0, (this.getDurationMs() || 0) - windowSec * 1000);
-    }
-    return this.endDetectTripAtMs;
+  // Start of the end-detection trip window, one window before the expected
+  // end. Cached per sub-tune: the duration only changes on load/sub-tune
+  // switches, which both reset the detector.
+  getEndDetectTripAtMs() {
+    return this.endDetector.getTripAtMs(this.getDurationMs());
   }
 
   setParameter(id, value) {
@@ -216,68 +194,16 @@ export default class SIDPlayer extends Player {
     channels[1].set(this.wasmViewR);
   }
 
-  // Fold one rendered buffer into the tail detector. Returns true once a
-  // full window of per-second means is both quiet and static. Muted voices
-  // fake both, so the detector stays out of the way unless the mask is clean
-  // (mirrors GME disabling silence detection on any mute). `tuning` is an
-  // optional threshold override; null keeps the tuned constants below.
-  updateEndDetector(tuning = null) {
-    const quietMean = tuning?.quietMean ?? END_QUIET_MEAN;
-    const staticRange = tuning?.staticRange ?? END_STATIC_RANGE;
-    const windowSec = tuning?.windowSec ?? END_WINDOW_SEC;
-    const tapStep = tuning?.tapStep ?? END_TAP_STEP;
+  // Fold one rendered buffer into the tail detector. Muted voices fake both
+  // gates, so stand down while the mask is not clean -- the JS echo of GME
+  // disabling its own silence detection on any mute.
+  updateEndDetector() {
     if (!Array.isArray(this.mask) || !this.mask.every(Boolean)) {
       this.endDetector.reset();
       return false;
     }
-    let sum = 0, n = 0;
-    for (let i = 0; i < this.bufferSize; i += tapStep) {
-      sum += Math.abs(this.wasmViewL[i]) + Math.abs(this.wasmViewR[i]);
-      n += 2;
-    }
-    this.endSecSum += (sum / n) * this.bufferSize;
-    this.endSecFrames += this.bufferSize;
-    if (this.endSecFrames < this.sampleRate) return false;
-    this.endSecMeans.push(this.endSecSum / this.endSecFrames);
-    if (this.endSecMeans.length > windowSec) this.endSecMeans.shift();
-    this.endSecSum = 0;
-    this.endSecFrames = 0;
-    if (this.endSecMeans.length < windowSec) return false;
-    let lo = Infinity, hi = -Infinity;
-    for (const m of this.endSecMeans) {
-      if (m >= quietMean) return false;
-      if (m < lo) lo = m;
-      if (m > hi) hi = m;
-    }
-    return hi - lo < staticRange;
+    return this.endDetector.fold(this.wasmViewL, this.wasmViewR);
   }
-
-  // DEV-BEGIN (stripped for promotion; live end-detector tuning for the
-  // dev-only Settings section, its only caller. The constructor routes the
-  // detector through the live store; production keeps the tuned constants.)
-  setEndTuning(patch) {
-    this.endTuning = patch ? { ...(this.endTuning || {}), ...patch } : null;
-    this.resetEndDetector();
-  }
-
-  getEndTuning() {
-    return {
-      quietMean: this.endTuning?.quietMean ?? END_QUIET_MEAN,
-      staticRange: this.endTuning?.staticRange ?? END_STATIC_RANGE,
-      windowSec: this.endTuning?.windowSec ?? END_WINDOW_SEC,
-      tapStep: this.endTuning?.tapStep ?? END_TAP_STEP,
-    };
-  }
-
-  getEndDetectorState() {
-    return {
-      ...this.getEndTuning(),
-      positionMs: this.getPositionMs(),
-      tripAtMs: this.getEndDetectTripAtMs(),
-      windowMeans: [...this.endSecMeans],
-    };
-  }
-  // DEV-END
 
   getNumSubtunes() {
     return this.core._sid_get_num_subtunes();

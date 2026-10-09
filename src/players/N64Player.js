@@ -1,5 +1,5 @@
 import Player from "./Player.js";
-import EndDetector, { DETECT_SONG_END_HINT } from './EndDetector.js';
+import EndDetector from './EndDetector.js';
 import { ensureEmscFileWithData, ensureEmscFileWithUrl, pathJoin } from '../util';
 import { CATALOG_PREFIX } from '../config';
 import pathe from 'pathe';
@@ -14,18 +14,6 @@ const INT16_MAX = 32767; // 2^15 - 1
 // N64 seek renders every sample up to the target on the main thread, so do it
 // in idle-time chunks (like GMEPlayer) instead of one long freeze.
 const SEEK_INCREMENT_MS = 1000;
-
-// Tail-end detector tuning, mirroring SIDPlayer: music bodies run 0.03-0.16
-// (mean-abs per second) while ended tails sit at or below ~0.001, so the
-// level gate separates them by 6x or more and the stillness gate (frozen
-// second-means) suppresses quiet-but-alive passages. N64 output is normalized
-// the same way (int16 full-scale), but the levels have not been verified on
-// USF content -- quiet game mixes are the case to watch. Window mirrors GME's
-// 6s silence rule.
-const END_QUIET_MEAN = 0.004;
-const END_STATIC_RANGE = 0.001;
-const END_WINDOW_SEC = 6;
-const END_TAP_STEP = 7;
 
 export default class N64Player extends Player {
   paramDefs = [
@@ -59,33 +47,23 @@ export default class N64Player extends Player {
     this.buffer = this.core._malloc(this.bufferSize * 4); // 2 ch, 16-bit
     this.seekRequestId = null;
     this.seekTargetMs = null;
-    this.resetEndDetector();
-    // DEV-BEGIN (stripped for promotion; route the end detector through the
-    // live dev tuning store; production calls the methods directly)
-    this.endTuning = null;
-    const baseUpdateEndDetector = this.updateEndDetector;
-    const baseEndDetectTripAtMs = this.getEndDetectTripAtMs;
-    this.updateEndDetector = (channels) => baseUpdateEndDetector(channels, this.endTuning);
-    this.getEndDetectTripAtMs = () => baseEndDetectTripAtMs(this.endTuning);
-    // DEV-END
+    // Same tail detector as SID (see EndDetector); its levels have not been
+    // verified on USF content, so quiet game mixes are the case to watch.
+    this.endDetector = new EndDetector({
+      sampleRate: this.sampleRate,
+      bufferSize: this.bufferSize,
+    });
   }
 
   resetEndDetector() {
-    this.endSecMeans = [];
-    this.endSecSum = 0;
-    this.endSecFrames = 0;
-    this.endDetectTripAtMs = null;
+    this.endDetector.reset();
   }
 
-  // Start of the end-detection trip window, cached per track: durations only
-  // change on load, which resets the detector, so there is no per-callback
-  // lookup.
-  getEndDetectTripAtMs(tuning = null) {
-    const windowSec = tuning?.windowSec ?? END_WINDOW_SEC;
-    if (this.endDetectTripAtMs == null) {
-      this.endDetectTripAtMs = Math.max(0, (this.getDurationMs() || 0) - windowSec * 1000);
-    }
-    return this.endDetectTripAtMs;
+  // Start of the end-detection trip window, one window before the expected
+  // end. Cached per track: the duration only changes on load, which resets the
+  // detector.
+  getEndDetectTripAtMs() {
+    return this.endDetector.getTripAtMs(this.getDurationMs());
   }
 
   loadData(data, filename, persistedSettings) {
@@ -198,33 +176,6 @@ export default class N64Player extends Player {
   updateEndDetector(channels) {
     return this.endDetector.fold(channels[0], channels[1] || channels[0]);
   }
-
-  // DEV-BEGIN (stripped for promotion; live end-detector tuning for the
-  // dev-only Settings section, its only caller. The constructor routes the
-  // detector through the live store; production keeps the tuned constants.)
-  setEndTuning(patch) {
-    this.endTuning = patch ? { ...(this.endTuning || {}), ...patch } : null;
-    this.resetEndDetector();
-  }
-
-  getEndTuning() {
-    return {
-      quietMean: this.endTuning?.quietMean ?? END_QUIET_MEAN,
-      staticRange: this.endTuning?.staticRange ?? END_STATIC_RANGE,
-      windowSec: this.endTuning?.windowSec ?? END_WINDOW_SEC,
-      tapStep: this.endTuning?.tapStep ?? END_TAP_STEP,
-    };
-  }
-
-  getEndDetectorState() {
-    return {
-      ...this.getEndTuning(),
-      positionMs: this.getPositionMs(),
-      tripAtMs: this.getEndDetectTripAtMs(),
-      windowMeans: [...this.endSecMeans],
-    };
-  }
-  // DEV-END
 
   // In-buffer restart for the Repeat One tail detector (like GME's
   // restartTrack): seek-to-0 re-runs the emulator from the top without

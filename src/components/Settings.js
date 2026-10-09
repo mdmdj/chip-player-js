@@ -22,9 +22,9 @@ const silenceOptions = [
   { value: 5, label: '5 seconds' },
 ];
 
-// DEV-BEGIN (stripped for promotion; dev-only end-detector tuning panel. Only
-// the SID/N64 players expose getEndDetectorState; this component and its usage
-// below strip together, leaving production untouched.)
+// DEV-BEGIN (stripped for promotion; dev-only end-detector tuning panel. A
+// player that uses EndDetector exposes it as `player.endDetector`; this
+// component and its usage below strip together, leaving production untouched.)
 function EndDetectorTuning({ sequencer }) {
   const [, setTick] = React.useState(0);
   React.useEffect(() => {
@@ -32,14 +32,18 @@ function EndDetectorTuning({ sequencer }) {
     return () => clearInterval(timer);
   }, []);
   const player = sequencer?.getPlayer?.();
-  if (!player || typeof player.getEndDetectorState !== 'function') {
+  const detector = player?.endDetector;
+  if (!detector || typeof detector.setTuning !== 'function') {
     console.debug('[dev] EndDetectorTuning: no end detector on %s.',
       player?.name || 'no player');
     return null;
   }
-  const state = player.getEndDetectorState();
+  const state = detector.getState({
+    positionMs: player.getPositionMs(),
+    durationMs: player.getDurationMs(),
+  });
   const tune = (patch) => {
-    player.setEndTuning(patch);
+    detector.setTuning(patch);
     setTick(n => n + 1);
   };
   const slider = (key, label, min, max, step, decimals) => (

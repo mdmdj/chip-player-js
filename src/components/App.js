@@ -274,6 +274,10 @@ class App extends React.Component {
     this.setState({ loading: false });
   }
 
+  componentWillUnmount() {
+    clearInterval(this.mediaSessionTimer);
+  }
+
   componentDidUpdate(prevProps) {
     const prevSilence = prevProps.userContext?.settings?.silenceDuration;
     const currSilence = this.props.userContext?.settings?.silenceDuration;
@@ -336,6 +340,16 @@ class App extends React.Component {
       navigator.mediaSession.setActionHandler('nexttrack', () => this.nextSong());
       navigator.mediaSession.setActionHandler('seekbackward', () => this.seekRelative(-5000));
       navigator.mediaSession.setActionHandler('seekforward', () => this.seekRelative(5000));
+
+      // The platform extrapolates the last position state with playbackRate, so
+      // a position that folds inside a loop region would drift out of step
+      // between updates; refresh it while playing.
+      this.mediaSessionTimer = setInterval(() => {
+        const player = this.sequencer && this.sequencer.getPlayer();
+        if (player && player.isPlaying && player.isPlaying()) {
+          this.updateMediaSessionPositionState();
+        }
+      }, 1000);
     }
 
     document.addEventListener('keydown', (e) => {
@@ -394,17 +408,25 @@ class App extends React.Component {
     });
   }
 
+  // Keep the OS media session in step with the app's transport: the position is
+  // the player's "playlist" position (folded inside a loop region, raw
+  // otherwise) and the length is the track's single-pass duration.
   updateMediaSessionPositionState() {
-    if (!('mediaSession' in navigator) || !this.sequencer.getPlayer()) return;
+    if (!('mediaSession' in navigator)) return;
+    const player = this.sequencer.getPlayer();
+    if (!player) return;
 
-    const duration = this.state.currentSongDurationMs || 0;
-    const position = this.sequencer.getPlayer().getPositionMs();
-    const positionState = {
-      duration: duration / 1000,
-      position: Math.min(position, duration) / 1000,
-      playbackRate: this.sequencer.getPlayer().getTempo(),
-    }
-    navigator.mediaSession.setPositionState(positionState);
+    // No defined end -- a blind loop, or a length not known yet. The Media
+    // Session spec spells that as Infinity; 0 would assert a zero-length track.
+    // https://w3c.github.io/mediasession/#dom-mediasession-setpositionstate
+    const durationMs = player.isBlindLoop() ? Infinity : this.state.currentSongDurationMs;
+    const duration = durationMs > 0 ? durationMs / 1000 : Infinity;
+    const position = Math.max(0, (player.getDisplayPositionMs() || 0) / 1000);
+    navigator.mediaSession.setPositionState({
+      duration,
+      position: Math.min(position, duration),
+      playbackRate: player.getTempo() || 1,
+    });
   }
 
   playContext(context, index = 0, subtune = null) {

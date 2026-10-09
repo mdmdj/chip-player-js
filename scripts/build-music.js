@@ -7,7 +7,7 @@ const { Command } = require('commander');
 const chalk = require('chalk');
 const { toArabic } = require('roman-numerals');
 const { FORMATS } = require('../src/config/index');
-const { parseMetadata } = require('./metadata-parsers');
+const { parseMetadata, cleanString } = require('./metadata-parsers');
 
 
 const program = new Command();
@@ -513,7 +513,7 @@ function escapeRegExp(string) {
 }
 
 // Formats that can contain more than one sub-tune in a single file.
-const MULTISONG_EXTENSIONS = new Set(['nsf', 'nsfe', 'sid', 'mus', 'gbs', 'ay']);
+const MULTISONG_EXTENSIONS = new Set(['nsf', 'nsfe', 'sid', 'gbs', 'ay']);
 
 /**
  * Describe the playable sub-tunes inside a file from parser metadata.
@@ -540,7 +540,7 @@ function describeSubtunes(extension, meta) {
 
   const subtunes = [];
   for (let i = 0; i < numSongs; i++) {
-    const label = labels[i] != null ? String(labels[i]).trim() : '';
+    const label = labels[i] != null ? cleanString(String(labels[i])) : '';
     subtunes.push({
       subtune: i,
       title: label || null,

@@ -3,13 +3,11 @@ import MIDIFile from './MIDIFile';
 const { EVENT_MIDI, EVENT_MIDI_CONTROLLER, EVENT_MIDI_NOTE_ON } = MIDIEvents;
 
 const CC_64_SUSTAIN = 64;
-// Loop-point controllers. N64 compressed sequences mark every track with a
-// CC102 (start) / CC103 (end) pair (CC104/105 counts, if present, are
-// ignored: Repeat One loops forever and repeat-off plays the two expanded
-// passes, the same compromise as the two-pass libvgm default); HMI
-// (Descent) marks one loop track with CC110 (start) / CC111 (end) and the
-// rest with CC108 alignment markers. A lone CC111 with no pair is the RPG
-// Maker convention: the loop starts there and runs to the end of the song.
+// Loop-point controllers. N64 marks a CC102 (start) / CC103 (end) pair on
+// every track (CC104/105 counts are ignored -- Repeat One loops forever and
+// repeat-off plays the two expanded passes, the two-pass libvgm compromise);
+// HMI (Descent) marks one loop track with CC110/CC111 (others carry CC108
+// alignment marks); a lone CC111 is the RPG Maker convention (loop to the end).
 const CC_102_N64_LOOP_START = 102;
 const CC_103_N64_LOOP_END = 103;
 const CC_110_HMI_LOOP_START = 110;
@@ -104,11 +102,10 @@ class EventIterator {
     this.passesLeft = loop ? loop.maxLoops : 1;
     this.absTicks = null;
     this.startIdx = 0;
-    // Whether the track has real music (note-ons) past the loop end. Outro
-    // cleanup (controllers, END_OF_TRACK, converter track padding) carries
-    // no timing information, so it attaches right at the loop end instead of
-    // pushing the duration out with dead air; a composed ending with notes
-    // keeps its exact timing.
+    // Whether the track has real music (note-ons) past the loop end. A noteless
+    // outro (controller cleanup, END_OF_TRACK, converter padding) attaches at
+    // the loop end instead of extending the duration with dead air; a composed
+    // ending with notes keeps its exact timing.
     this.postHasNotes = false;
     this.postStarted = false;
     if (loop) {
@@ -212,19 +209,16 @@ MIDIFile.prototype.getLoopedEvents = function (tracks, loopCount = 2, range = nu
   const type = null;
   const subtype = null;
   // First-pass loop region in ms. The start latches off the first loop-start
-  // controller (CC102/110 paired; CC111 RPG Maker style; 0 when the start is
-  // left implicit); the end is the latest first-pass playTime, which is
-  // exactly the end of the first loop iteration — later passes and the outro
-  // all carry a higher pass number. Single global latch: only the outermost
-  // loop is reported.
+  // controller (0 when implicit); the end is the latest first-pass playTime --
+  // the end of the first iteration, since later passes carry a higher pass
+  // number. One global latch, so only the outermost loop is reported.
   let loopStartMs = null;
   let loopEndMs = null;
   const isRpgMaker = range != null && range.endTick == null;
-  // Async format-2 tracks have no shared timeline, so a song-global range is
-  // meaningless there: those files play once and must not report a band. Only
-  // report one when the loop was actually expanded below -- otherwise the
-  // "end of the first iteration" latch degenerates to the end of the song, and
-  // the UI would highlight the whole file as the loop region.
+  // Format-2 tracks have no shared timeline, so a song-global range is
+  // meaningless: they play once and must not report a band. Reporting one
+  // would make the "end of the first iteration" latch degenerate to the end of
+  // the song, highlighting the whole file as the loop region.
   const expandLoop = range != null && format !== 2;
   const channelsByTrack = {};
   const capturePush = (trackIdx, srcElapsedLoops, ev) => {

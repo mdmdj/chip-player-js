@@ -100,14 +100,11 @@ export default class MDXPlayer extends Player {
   }
 
   // Measure the song's built-in loop region once, at load. _mdx_get_length
-  // re-parses the song and resets the track work area to the start, so it must
-  // only run here (never while playing -- callers poll getDurationMs every
-  // 100 ms tick, and re-reading it would rewind the engine each tick). Passing
-  // max_loop=2 also makes the engine record where its infinite loop completes
-  // each pass: length(k) = intro + k * loop + fade, so two recorded loop points
-  // give the exact loop length and, since the fade is a constant offset, the
-  // intro as well (no fade guessing). Engines without the loop API fall back to
-  // a plain duration and no band.
+  // re-parses the song and rewinds the track, so it must run only here (callers
+  // poll getDurationMs every 100 ms). max_loop=2 makes the engine record where
+  // its infinite loop completes each pass: length(k) = intro + k * loop + fade,
+  // so two loop points give the exact loop length and, since the fade is a
+  // constant offset, the intro too. No loop API: a plain duration, no band.
   _readLoopRegion() {
     const core = this.core;
     this.durationExtended = false;
@@ -171,10 +168,9 @@ export default class MDXPlayer extends Player {
     return this.core._mdx_get_position_ms(this.mdxCtx);
   }
 
-  // Repeat One loops MDX natively: the engine's own infinite loop, with the
-  // loop-count limit disabled (0 = forever) so the region repeats seamlessly
-  // instead of fading after N passes. Leaving Repeat One restores a finite
-  // count so the current pass finishes and the engine fades, like libvgm.
+  // Repeat One loops the engine's own infinite loop (0 = forever) so the region
+  // repeats seamlessly; leaving restores a finite count so the current pass
+  // finishes and the engine fades, like libvgm.
   setLooping(looping) {
     const wasLooping = this.looping;
     // Capture before applyLoopCount() changes the pass count.
@@ -194,11 +190,9 @@ export default class MDXPlayer extends Player {
   }
 
   // Capture the fade start before the pass count changes to 0. mdxmini latches
-  // fade_out once the loop counter reaches max_infinite_loops, and only reinit
-  // clears it, so a fade already running keeps running: enabling repeat one
-  // then ends the song rather than looping it. Remembering where the fade began
-  // keeps the head on that tail instead of folding it back into the band
-  // (VGMPlayer.syncFadeTailCapture is the same idea for libvgm).
+  // fade_out and only reinit clears it, so a fade already running keeps running
+  // (enabling repeat one then ends the song); remembering where it began keeps
+  // the head on that tail (cf. VGMPlayer.syncFadeTailCapture).
   syncFadeTailCapture(looping) {
     if (!looping || this.fadeTailStartMs != null) return;
     const fadeStart = this._fadeStartMs();

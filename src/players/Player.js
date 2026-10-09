@@ -325,11 +325,27 @@ export default class Player extends EventEmitter {
   }
 
   // True when playback legitimately runs past durationMs and the engine (not
-  // the base end detector) owns the end: Repeat One, a player's
-  // indefinite-playback setting, or an extended tail left over from leaving a
-  // deep repeat. Position keeps running past durationMs in all of those.
+  // the base end detector) owns the end. The base returns Repeat One only;
+  // subclasses OR in their own indefinite-playback setting and any extended
+  // tail left over from leaving a deep repeat.
   isPlayingIndefinitely() {
     return this.looping;
+  }
+
+  // True when the fallback loop UI applies: the song runs past its length with
+  // no known loop region, so no honest position exists -- the transport parks
+  // the head while the elapsed time climbs. Engines land here by free-running
+  // past a listed length (an NSF driver looping internally; SID/N64 under
+  // indefinite playback); a bounded clock -- a loop region, a native loop
+  // (XMP), a JS wrap (MIDI with a region), or a stop + reload (V2M) -- never
+  // does. The past-the-end term scopes it.
+  isBlindLoop() {
+    if (!this.isPlayingIndefinitely()) return false;
+    if (this.getLoopBandMs()) return false;
+    const duration = this.getDurationMs();
+    if (!(duration > 0)) return false;
+    if (!this.isPlaying()) return false;
+    return this.getPositionMs() >= duration;
   }
 
   setSilenceDuration(seconds) {

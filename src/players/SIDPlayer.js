@@ -4,6 +4,7 @@ import pathe from 'pathe';
 import React from 'react'; // For the icon in the detectSongEnd label
 
 import Player from "./Player.js";
+import EndDetector, { DETECT_SONG_END_HINT } from './EndDetector.js';
 import { vectorToArray } from '../util';
 import { API_BASE } from '../config';
 
@@ -20,24 +21,13 @@ function parseSongLength(length) {
   return Math.floor((parseFloat(parts[0]) * 60 + parseFloat(parts[1])) * 1000);
 }
 
-// Tail-end detector tuning (probed 2026-09, mean-abs per second): music
-// bodies run 0.03-0.16; Bionic Commando T2/T3 tails sit ~0.00005-0.0001;
-// Monty on the Run T2 pins at 0.00118 +/- 3e-6 for 7s straight. The level
-// gate alone separates all three tails from music by 6x or more; the
-// stillness gate (frozen second-means) earns the Monty case and suppresses
-// quiet-but-alive passages. Window mirrors GME's 6s silence rule.
-const END_QUIET_MEAN = 0.004;
-const END_STATIC_RANGE = 0.001;
-const END_WINDOW_SEC = 6;
-const END_TAP_STEP = 7;
-
 export default class SIDPlayer extends Player {
   paramDefs = [
     {
       id: 'detectSongEnd',
       label: (<span>Detect Song End While <span className='inline-icon icon-repeat'/>One</span>),
       type: 'toggle',
-      hint: 'Restart the sub-tune when its tail goes quiet and static under Repeat One.',
+      hint: DETECT_SONG_END_HINT,
       defaultValue: true,
     },
   ];
@@ -58,25 +48,21 @@ export default class SIDPlayer extends Player {
     this.bufferR = this.core._malloc(this.bufferSize * 4);
     this.subtuneDurations = [];
     this.initialized = false;
-    this.resetEndDetector();
+    this.endDetector = new EndDetector({
+      sampleRate: this.sampleRate,
+      bufferSize: this.bufferSize,
+    });
   }
 
   resetEndDetector() {
-    this.endSecMeans = [];
-    this.endSecSum = 0;
-    this.endSecFrames = 0;
-    this.endDetectTripAtMs = null;
+    this.endDetector.reset();
   }
 
-  // Start of the end-detection trip window, cached per sub-tune: durations
-  // only change on load/sub-tune switches, which both reset the detector, so
-  // there is no per-callback lookup.
-  getEndDetectTripAtMs(tuning = null) {
-    const windowSec = tuning?.windowSec ?? END_WINDOW_SEC;
-    if (this.endDetectTripAtMs == null) {
-      this.endDetectTripAtMs = Math.max(0, (this.getDurationMs() || 0) - windowSec * 1000);
-    }
-    return this.endDetectTripAtMs;
+  // Start of the end-detection trip window, one window before the expected
+  // end. Cached per sub-tune: the duration only changes on load/sub-tune
+  // switches, which both reset the detector.
+  getEndDetectTripAtMs() {
+    return this.endDetector.getTripAtMs(this.getDurationMs());
   }
 
   setParameter(id, value) {
@@ -183,17 +169,12 @@ export default class SIDPlayer extends Player {
       return;
     }
 
-    // Tail-end restart, Repeat One only: a tail that goes quiet AND static
-    // for a full window is an ending, so re-run the sub-tune from the top
-    // (stop + load re-runs the init routine, like GME's restartTrack). The
-    // position gate comes first, so the per-buffer tap only runs once the
-    // trip window opens one window before the expected end -- the listed
-    // length is approximate, so the detector may conclude slightly early
-    // (fade-outs). Anything earlier stays gated, keeping quiet intros and
-    // breakdowns mid-song from ever tripping it. Repeat-off keeps the HVSC
-    // behavior above, byte-identical.
-    // Caveat: tunes shorter than the window trip nearly ungated; a quiet
-    // static intro there could restart early. Rare, and the toggle covers it.
+    // Repeat One tail restart (rule and window in EndDetector). Re-running the
+    // sub-tune is a stop + load, which re-runs the init routine. The position
+    // gate runs first, so quiet intros and mid-song breakdowns stay gated; the
+    // listed length is approximate, so the detector may trip slightly early
+    // (fade-outs). Repeat-off keeps the HVSC behavior above. Caveat: a tune
+    // shorter than the window trips nearly ungated.
     if (this.params.detectSongEnd && this.isPlayingIndefinitely() &&
         this.getPositionMs() >= this.getEndDetectTripAtMs() && this.updateEndDetector()) {
       this.playSubtune(this.getSubtune());
@@ -208,42 +189,16 @@ export default class SIDPlayer extends Player {
     channels[1].set(this.wasmViewR);
   }
 
-  // Fold one rendered buffer into the tail detector. Returns true once a
-  // full window of per-second means is both quiet and static. Muted voices
-  // fake both, so the detector stays out of the way unless the mask is clean
-  // (mirrors GME disabling silence detection on any mute). `tuning` is an
-  // optional threshold override; null keeps the tuned constants below.
-  updateEndDetector(tuning = null) {
-    const quietMean = tuning?.quietMean ?? END_QUIET_MEAN;
-    const staticRange = tuning?.staticRange ?? END_STATIC_RANGE;
-    const windowSec = tuning?.windowSec ?? END_WINDOW_SEC;
-    const tapStep = tuning?.tapStep ?? END_TAP_STEP;
+  // Fold one rendered buffer into the tail detector. Muted voices fake both
+  // gates, so stand down while the mask is not clean -- the JS echo of GME
+  // disabling its own silence detection on any mute.
+  updateEndDetector() {
     if (!Array.isArray(this.mask) || !this.mask.every(Boolean)) {
-      this.resetEndDetector();
+      this.endDetector.reset();
       return false;
     }
-    let sum = 0, n = 0;
-    for (let i = 0; i < this.bufferSize; i += tapStep) {
-      sum += Math.abs(this.wasmViewL[i]) + Math.abs(this.wasmViewR[i]);
-      n += 2;
-    }
-    this.endSecSum += (sum / n) * this.bufferSize;
-    this.endSecFrames += this.bufferSize;
-    if (this.endSecFrames < this.sampleRate) return false;
-    this.endSecMeans.push(this.endSecSum / this.endSecFrames);
-    if (this.endSecMeans.length > windowSec) this.endSecMeans.shift();
-    this.endSecSum = 0;
-    this.endSecFrames = 0;
-    if (this.endSecMeans.length < windowSec) return false;
-    let lo = Infinity, hi = -Infinity;
-    for (const m of this.endSecMeans) {
-      if (m >= quietMean) return false;
-      if (m < lo) lo = m;
-      if (m > hi) hi = m;
-    }
-    return hi - lo < staticRange;
+    return this.endDetector.fold(this.wasmViewL, this.wasmViewR);
   }
-
 
   getNumSubtunes() {
     return this.core._sid_get_num_subtunes();

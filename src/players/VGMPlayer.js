@@ -160,23 +160,12 @@ export default class VGMPlayer extends Player {
       return this.core._lvgm_get_position_ms(this.vgmCtx);
   }
 
-  // The "playlist" position: what the slider head and left time label follow.
-  // getPositionMs() stays the absolute "time playing" (it includes completed
-  // loops). The head cycles inside the highlighted band (see getLoopBandMs),
-  // so the head repeats the region instead of running on.
-  //
-  // The head's phase within the loop body is (abs - A) mod B; it maps to the
-  // band as bandStart + phase. The same mapping is used while looping and while
-  // leaving, so switching repeat off never makes the head jump. When not
-  // looping, once the fade has started (abs >= fadeStart) the head runs the
-  // fade tail from the band end instead of wrapping again — toggle or no
-  // toggle. If repeat one / indefinite playback is enabled while a fade is
-  // already running (enabled after the last non-fade loop region), the audio
-  // finishes that fade and the song ends: fadeTailStartMs (captured at enable
-  // time, before the loop count changes) keeps the head on the tail instead of
-  // folding back into the band. While looping with no captured fade, the
-  // configured fade start is meaningless (loop count 0), so only the fold
-  // applies.
+  // The "playlist" position the slider head follows, distinct from the absolute
+  // getPositionMs(). The head's phase in the loop body, (abs - A) mod B, maps
+  // onto the band as bandStart + phase; looping and leaving share that mapping,
+  // so toggling repeat never jumps. Once the fade starts -- or was already
+  // running when repeat was enabled (fadeTailStartMs) -- the head runs the fade
+  // tail from the band end instead of folding again.
   getDisplayPositionMs() {
     const abs = this.getPositionMs();
     const meta = this.metadata;
@@ -265,10 +254,9 @@ export default class VGMPlayer extends Player {
     }
   }
 
-  // Capture the configured fade start before the loop count changes to 0
-  // (which makes _lvgm_get_fade_start_ms meaningless). Only meaningful when a
-  // fade is actually running, i.e. repeat is enabled after the last non-fade
-  // loop region; the audio then finishes that fade and the song ends.
+  // Capture the fade start before the loop count changes to 0 (which makes
+  // _lvgm_get_fade_start_ms meaningless). Only meaningful when a fade is
+  // already running: the audio then finishes it and the song ends.
   syncFadeTailCapture(looping) {
     if (!looping || this.vgmCtx == null || this.fadeTailStartMs != null ||
         typeof this.core._lvgm_get_fade_start_ms !== 'function')
@@ -278,15 +266,12 @@ export default class VGMPlayer extends Player {
       this.fadeTailStartMs = fadeStart;
   }
 
-  // Repeat-one overrides the "Indefinite Playback" setting: loop the track
-  // indefinitely (0) instead of fading out after two passes. `wasLooping`
-  // says whether the player was looping before this transition: only then
-  // does leaving re-derive the count (finish the in-progress pass; libvgm
-  // fades at the next boundary). Re-deriving when already not looping would
-  // push the configured fade start past a fade that is already running — the
-  // engine keeps looping through the fade, so curLoop has advanced — and a
-  // no-op repeat toggle (e.g. Off→All mid-tail) then made the head fold back
-  // into the band even though playback state hadn't changed.
+  // Repeat-one loops indefinitely (0) instead of fading after two passes; the
+  // count is re-derived only when actually leaving a looping state
+  // (`wasLooping`). Re-deriving when already not looping would push the fade
+  // start past a fade already running (the engine loops through the fade, so
+  // curLoop has advanced), folding the head back into the band on a no-op
+  // toggle.
   applyLoopCount(wasLooping) {
     if (this.vgmCtx && typeof this.core._lvgm_set_loop_count === 'function') {
       const looping = this.looping || !!this.params.indefinitePlayback;
@@ -294,23 +279,17 @@ export default class VGMPlayer extends Player {
         this.core._lvgm_set_loop_count(this.vgmCtx, 0);
       } else if (wasLooping) {
         const curLoop = this.getCurLoop();
-        // Engine loop mirrors differ across libvgm versions (older trees
-        // never count past the first pass), so deep is decided by position
-        // too: already past the normal two-pass end means leaving deep
-        // regardless of what the mirror says.
+        // Some libvgm versions never count past the first pass, so treat
+        // "already past the two-pass end" as deep too.
         const band = this.getLoopBandMs();
         const absNow = this.getPositionMs() || 0;
         const deep = curLoop >= 2 || (band != null && absNow >= band.endMs);
         const count = deep ? Math.max(2, curLoop + 1) : 2;
         this.core._lvgm_set_loop_count(this.vgmCtx, count);
-        // Leaving a deep repeat: the position is already past the two-pass
-        // duration the wrapper reports, so the base end detector (armed again
-        // now that looping is off) would cut the song instantly before the
-        // re-scheduled fade can start. Stand it down for the tail; the engine
-        // ends the song itself when the fade and its trailing silence finish.
-        // The playlist clock needs no change: the display tail runs from the
-        // band end for exactly fade + silence, which lands it at the two-pass
-        // duration (= 100%) when the song actually ends.
+        // Already past the reported duration, so the base end detector
+        // (re-armed now) would cut the song before the re-scheduled fade can
+        // play; `durationExtended` stands it down. The engine still ends the
+        // song after the fade and its trailing silence.
         if (deep)
           this.durationExtended = true;
       }

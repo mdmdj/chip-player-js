@@ -414,7 +414,7 @@ export default class MIDIPlayer extends Player {
     const fp = filepath.toLowerCase().replace('_', ' ');
     const opl3def = this.paramDefs.find(def => def.id === 'opl3bank');
     // No bank options when the core lacks libADLMIDI: options stays the empty
-    // array it was declared with, which is truthy, so test the first group.
+    // array it was declared with (truthy), so test its length, not the array.
     if (opl3def && opl3def.options.length > 0) {
       const opl3banks = opl3def.options[0].items;
       const findBank = (str) => opl3banks.findIndex(bank => bank.label.indexOf(str) > -1);

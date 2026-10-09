@@ -88,7 +88,7 @@ const PARSERS = {
   midi: parseMIDI,
   mdx: parseMIDI, // Fallback: MDX often uses SMF-like structures or no header, but standard MIDI parser won't hurt if format is different.
   sid: parseSID,
-  mus: parseSID, // MUS files are a stripped C64 format; header is compatible enough for counts.
+  mus: parseSID, // The single-tune C64 Sidplayer format has no PSID header; parseSID only supplies its C64 label.
 };
 
 function parseVGM(buf) {
@@ -126,14 +126,14 @@ function parseVGM(buf) {
         return '';
       };
 
-      meta.title = readString(); // Track Title (En)
-      readString();              // Track Title (Jp)
-      meta.game = readString();  // Game Name (En)
-      readString();              // Game Name (Jp)
-      meta.system = readString();// System Name (En)
-      readString();              // System Name (Jp)
-      meta.artist = readString();// Author (En)
-      readString();              // Author (Jp)
+      meta.title = readString();             // Track Title (English)
+      readString();                          // Track Title (Japanese)
+      meta.game = readString();              // Game Name (English)
+      readString();                          // Game Name (Japanese)
+      meta.system = readString();            // System Name (English)
+      readString();                          // System Name (Japanese)
+      meta.artist = readString();            // Author (English)
+      readString();                          // Author (Japanese)
       meta.date = extractDate(readString()); // Release Date
       meta.ripper = readString();     // Ripper
       meta.comment = readString();    // Notes
@@ -186,7 +186,7 @@ function parseNsfeStrings(buf, start, end) {
 }
 
 function parseNSFe(buf) {
-  // Spec: https://www.nesdev.org/wiki/NSFe
+  // Spec: https://wiki.nesdev.org/w/index.php/NSFe
   //
   // NSFE is a chunked ("tagged") format. Each chunk is a little-endian
   // uint32 size followed by a 4-byte ASCII tag (INFO, BANK, time, auth,
@@ -291,12 +291,14 @@ function parseNSFe(buf) {
 }
 
 function parseGBS(buf) {
-  // Spec: https://gbdev.io/pandocs/Audio.html ("GBS" format)
+  // Spec: https://gbdev.gg8.se/wiki/articles/GBS_Music_Format (deleted?)
+  //       https://ocremix.org/info/GBS_Format_Specification
+  //       https://web.archive.org/web/20250518043814/https://ftp.modland.com/pub/documents/format_documentation/Gameboy%20Sound%20System%20%28.gbs%29.txt
   // Layout mirrors game-music-emu/gme/Gbs_Core.h: track_count at 0x04,
   // first_track (1-based) at 0x05, then three null-padded 32-byte strings.
-  if (buf.length < 0x70) return {};
-  if (buf.toString('ascii', 0, 3) !== 'GBS') {
+  if (buf.length < 0x70 || buf.toString('ascii', 0, 3) !== 'GBS') {
     console.warn('[GBS] Missing GBS signature.');
+    return {};
   }
   const copyright = readStr(buf, 0x50, 0x70);
   return {

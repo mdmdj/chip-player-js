@@ -142,6 +142,19 @@ check('rejects short buffer', () => {
   const m = parseMetadata(Buffer.alloc(0x10), 'gbs');
   assert.strictEqual(m.numSongs, undefined);
 });
+check('rejects a bad signature, not just a short buffer', () => {
+  const bad = buildGBS({ numSongs: 2, title: 'X' });
+  bad.write('XXX', 0, 'ascii');
+  const m = parseMetadata(bad, 'gbs');
+  assert.strictEqual(m.numSongs, undefined);
+});
+check('the "?" unknown-field placeholder is stored as absent', () => {
+  const m = parseMetadata(buildGBS({ numSongs: 2, title: '?', artist: '?', copyright: '?' }), 'gbs');
+  assert.strictEqual(m.title, '');
+  assert.strictEqual(m.artist, '');
+  assert.strictEqual(m.copyright, '');
+  assert.strictEqual(m.date, null);
+});
 
 console.log('AY (synthetic)');
 check('multi-track counts + per-track labels', () => {

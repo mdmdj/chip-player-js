@@ -95,9 +95,9 @@ touch dev/.promote-armed   # the user arms the writer
 ```
 
 `promote-apply.sh` runs the whole mechanical tail once armed: commit the
-stripped files on the feature branch, then `./dev/rebase.sh` (which verifies the
-tree), then `./dev/push-overlay.sh`. The arm key is the only decision; the rest
-is one command. `PROMOTE_SKIP_PUSH=1` stops it after the rebase.
+stripped files on the feature branch, `./dev/rebase.sh` (rebase + verify), push
+the feature branch, then `./dev/push-overlay.sh`. The arm key is the only
+decision; the rest is one command. `PROMOTE_SKIP_PUSH=1` stops after the rebase.
 
 `promote.sh` requires a clean overlay tree, then, for every file that differs
 from the feature branch, it:
@@ -126,10 +126,11 @@ It writes the result into the feature-branch worktree and commits it there as on
 commit ("Promote feature work from dev/overlay"), leaves `dev/overlay`
 untouched, and refuses if `DEV-BEGIN`/`DEV-END` sentinels are unbalanced. Then
 `promote-apply.sh` puts `dev/overlay` back on top — **via the script, not by
-hand** — and publishes it:
+hand** — and publishes both branches:
 
 ```sh
 ./dev/rebase.sh        # rebases onto the feature branch, then verifies the tree
+git -C ../chip-player-js-feature push origin feature/subtunes-as-first-class
 ./dev/push-overlay.sh  # --force-with-lease; NEVER `git pull` dev/overlay
 ```
 
@@ -944,7 +945,11 @@ parsers below still live here; the shared helpers and all MIDI parsing moved out
 
 - `scripts/metadata-utils.js` — `cleanString`, `decodeBuffer`, `isShiftJIS`,
   `readStr`. Imported at the top of `metadata-parsers.js` and re-exported from
-  it, so older importers keep working.
+  it, so older importers keep working. `cleanString` also maps a field that is
+  *only* placeholder punctuation (`?`, `<?>`, `???` — the rippers' "unknown") to
+  empty, so the catalog binds NULL rather than the marker; a title that merely
+  contains a question mark (`Continue?`) is untouched. Sub-tune labels run
+  through it too (in `describeSubtunes`).
 - `scripts/metadata-midi.js` — every MIDI heuristic plus strategy routing.
   `parseMetadata(buffer, ext, relPath = null, strategy = null)` sends
   `mid`/`midi` to `parseMidiWithStrategy` and everything else through `PARSERS`.
@@ -1299,10 +1304,34 @@ checks no longer work. Compare a live context to a stored one with
 - **Committed on `dev/overlay` (2026-10-08):** `3098475e8` (the `server/index.js`
   chart exclusion), then `730adec90` (engine vendoring → sibling build),
   `9c7489b44` (upstreaming plan) and `b645bbd9f` (libvgm-wrapper `parentIdx`
-  restore + compat removal). Still uncommitted: `AGENTS.md`,
-  `dev/record/{site.mjs,build-site.mjs,scenarios.mjs,scenarios.check.mjs,site.css,README.md}`,
-  `dev/shims/recorder.js`, `dev/test-midi-loops.js`,
-  `src/players/midi/midi-helpers.js`. Nothing pushed; nothing promoted.
+  restore + compat removal). Those and everything after them are committed;
+  `git status` is clean and both branches are pushed to `origin`.
+- **Comment review + EndDetector, promoted (2026-10-09).** A pass over the
+  comments the feature/loop work added: dev-process leakage dropped where it was
+  not a recurring-trap warning (`4bf7cbbb0`), loop comments trimmed to their
+  invariants (`fef5c7bff`), and wrong long-standing notes corrected
+  (`isPlayingIndefinitely`, the OPL3 bank guard, the GD3 block). The SID/N64 tail
+  detector became a shared `src/players/EndDetector.js` (`70e686487`,
+  `d058ec3da`, `1c2484d02`; dev tuning lives in the module and the Settings panel
+  keys off `player.endDetector`); `Player.isBlindLoop()` replaced the footer's
+  copy of the rule (`3d9e5fd06`); the media-session position state mirrors the
+  transport and uses `Infinity` for a blind loop (`926cda50d`, `a436bd25e`,
+  `a2e70cab0`); MUS is no longer treated as multi-song (`039255dca`); the
+  NSFe/GBS spec links are master's again plus mirrors (`c5673210c`, `4bf3bd724`);
+  `parseGBS` regained its signature-guard `return {}` (`055405a70`) and
+  `cleanString` now maps a bare placeholder (`?`/`<?>`/`???`) to empty so the
+  catalog binds NULL (`282bcfa36`). Promoted as `5c641c240`, overlay rebased, both
+  pushed. Catalog rebuilt clean (6787 files / 87 multi-song / 1140 sub-tunes /
+  0 bare placeholders).
+  - Promote tooling hardened here: `promote-plan.sh` falls back to a
+    `@babel/core` JSX parse when `node --check` fails; `promote-apply.sh` folds
+    the rebase + publish tail; `dev/push-overlay.sh` does the
+    `--force-with-lease` push.
+  - Left deliberately: `build-music.js` schema lines 195-196 keep the trailing
+    whitespace of the `music_fts` block above them; `parseSID`'s "for now" hedge.
+  - Considered and not done: dropping the promote rebase (the 2026-10-09
+    discussion) to remove the history rewrite/force-push. Not needed for
+    correctness, but it is the one lever if the rehash ever costs real time.
 - **Measurement hygiene, learned the hard way here:** (1) the Speed setting is
   **persisted per user** — a leftover `tempo=2` from a prior session made an MDX run
   report 2.0 song-ms/wall-ms at "1x" and read as a defect; always read the engine's

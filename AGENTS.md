@@ -107,8 +107,11 @@ Two rules the stripping obeys, both learned the hard way:
   on and swallowed every line after it. "First word behind non-alphanumeric
   characters" is the rule — it covers `//`, `#`, `--` and JSX's `{/* … */}`
   without enumerating comment styles.
-- **Stripping must leave a valid file.** JS goes through `node --check`;
-  everything else through brace balance. A region that unbalances a brace used
+- **Stripping must leave a valid file.** JS goes through `node --check`, with a
+  `@babel/core` parse (jsx plugin) as fallback because `node --check` rejects
+  JSX outright — several `src/` files are JSX-bearing, so without the fallback
+  any JSX file that differs from the feature branch reads as unsound; everything
+  else goes through brace balance. A region that unbalances a brace used
   to produce a file that was wrong but still committed.
 
 It writes the result into the feature-branch worktree and commits it there as one

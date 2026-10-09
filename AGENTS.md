@@ -496,13 +496,8 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
 >   **this repo's wrapper**. That does **not** identify the tree: a wrapper is
 >   compiled against whatever libvgm happens to be present, so one wrapper
 >   links against many trees. An earlier version of this note concluded "and
->   therefore this repo's `libvgm/`" — that was an invalid inference.
->   **Disproof, measured 2026-10-03 and re-measured 2026-10-08:** with a
->   byte-identical `lvgm_get_position_ms`, prod's position scales with playback
->   speed (1.98x at 2x on 2026-10-03; 1.99x at 2x on 2026-10-08, same file on
->   both builds) while our build's does not (1.00x). Same getter,
->   opposite behaviour, so prod's tree is not ours. Treat the target tree as
->   unknown and never reason about prod behaviour from our tree.
+>   therefore this repo's `libvgm/`" — that was an invalid inference. Treat the
+>   target tree as unknown and never reason about prod behaviour from our tree.
 >
 > - **What libvgm are *we* on.** The sibling `../libvgm` (ValleyBell; `c8b998b`
 >   when this was written), recorded by `scripts/build-info.js` as
@@ -514,51 +509,11 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
 >   **So: our tree is documented; the tree *Matt* builds against is not
 >   documented anywhere and cannot be inferred from the repo.** That is the
 >   standing risk behind the `* GetPlaybackSpeed()` assumption above.
->   **Why no tick-math fix settles it** (checked 2026-10-03; this rules out the
->   obvious patch): `PlayerBase::Sample2Second()` is
->   `samples / _outSmplRate` — pure wall-clock, speed-agnostic — which is why
->   `GetCurTime()` makes position a **wall-clock** value. `Tick2Second()` is
->   instead `ticks * _ttMult / _tsDiv`, and `_tsDiv` carries `pbSpeed`. The two
->   conversions therefore differ by exactly the speed factor, and which unit the
->   band *must* be in depends on the tree:
->   - `Sample2Second(Tick2Sample(t))` → `t/88200` at 2x — matches position in
->     **our** tree.
->   - `Tick2Second(t) * GetPlaybackSpeed()` → `t/44100` at 2x — matches
->     position in **prod's** tree.
->   Mutually exclusive; both cannot be right, and the target tree is unknown, so
->   guessing is the one thing to stop doing. (`Tick2Sample` also truncates — it
->   returns `UINT32` and can be 0 for sub-sample tick counts, which would
->   silently collapse the band.)
->   `Sample2Second` is *uniform* across our variants — every per-player override
->   (`vgmplayer.hpp:176`, `droplayer.hpp:121`, `gymplayer.hpp:97`,
->   `s98player.hpp:97`) is commented out, so VGM/DRO/GYM/S98 all inherit
->   `samples / _outSmplRate`. The unknown tree, not engine variety, is the risk.
->   **Version-independent fix: stop converting units.** Derive the band by
->   observing the engine at its own loop boundary — record `getPositionMs()`
->   when `getCurLoop()` increments. That would be in position's units by
->   construction on any tree. **Rejected 2026-10-03: it costs the band at load**
->   (it can only appear after the first loop), and the tick math it would
->   replace is already correct — see below.
->
-> - **The band at load is correct as written; keep it.** `Tick2Second(t) *
->   GetPlaybackSpeed()` is `t / (ticks per second at 1x)`, i.e. the song's true
->   playing time at 1x — a physical property of the file, not of the tree.
->   Measured 2026-10-03 and re-confirmed 2026-10-08, it is
->   **speed-invariant**: band `[1142, 1942]`, `intro=342`, `loop=800` at 1x, 2x
->   *and* 0.5x, and on a different file the engine returned the identical band
->   `[53199, 91599]` at all three tempos. (The `duration` figures this line once
->   quoted as the contrast — 6442 / 10942 / 4192 — were an artifact of sampling a
->   transient duration; see the speed table below. Do not reuse them.) So the
->   multiplication is doing its job — cancelling the speed term — and the band is
->   stable and physically right in every tree.
->   **The earlier "open PR risk" was overstated.** The band is not a guess that
->   might be wrong; it is a correct song-time value. The real asymmetry is that
->   **`position` means different things per tree** (wall-clock in ours, song-time
->   in prod's), so on *our* tree the band and position disagree at non-1x while
->   on prod's they agree. Since prod is the reference and our tree is
->   overlay-only, there is nothing to change here — do not "fix" the getters to
->   chase our tree. Only `duration` is genuinely non-invariant, and that is
->   pre-existing master code, not ours.
+>   **The band math is correct; do not "fix" the getters.** `Tick2Second(t) *
+>   GetPlaybackSpeed()` is the song's 1x playing time and is measured
+>   speed-invariant (`[1142, 1942]` at 0.5x/1x/2x), so the band is right on any
+>   tree. The only open question is whether the reader's tree divides by speed
+>   inside `Tick2Second` (see "Building the real chip-core").
 > - **What we have inferred about Matt's build that CONFLICTS with this
 >   repo.** Consolidated 2026-10-03, because it is the root cause of most of
 >   this branch's remaining uncertainty: we cannot assume the vendored trees are
@@ -573,10 +528,9 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
 >   | --- | --- | --- |
 >   | 1 | prod exports `_xmp_seek_time_frame`; master **and** feature list it, but the vendored libxmp has no `seek_time_frame` anywhere | **Matt's libxmp is >= 4.7; ours is 4.5.** Our own script could not link against our own tree — the overlay comments it out for that reason |
 >   | 2 | prod exports `_gme_disable_echo`; master and feature list it, vendored `game-music-emu` has no `disable_echo` | **Matt's GME is >= 0.6.4; ours is the 2018 tree** |
->   | 3 | prod's position advances 1.99x at 2x speed, ours 1.00x, with a byte-identical `lvgm_get_position_ms` (re-measured 2026-10-08 on one file present in both catalogs) | **prod's libvgm is not our vendored 91b6542** |
->   | 4 | prod exports `_sid_set_speed`; **no** branch's build script lists it, yet master `SIDPlayer.js:145` calls it unguarded | our `EXPORTED_FUNCTIONS` is a **strict subset** of prod's. It works in prod and cannot work from this repo as configured — a latent break in *master*, not ours |
->   | 5 | prod exports `_fluid_synth_get_active_voice_count`; the overlay dropped it (no call site) | same subset gap; confirms the overlay diverges from prod deliberately |
->   | 6 | prod **does** export `_mdx_set_max_loop` | **an earlier note here claimed it did not** ("Prod ships MDX ... but not mdx_set_max_loop"). That was wrong; corrected 2026-10-03. Our `mdx_set_max_loop(0)` lever is therefore usable on prod's tree too |
+>   | 3 | prod exports `_sid_set_speed`; **no** branch's build script lists it, yet master `SIDPlayer.js:145` calls it unguarded | our `EXPORTED_FUNCTIONS` is a **strict subset** of prod's. It works in prod and cannot work from this repo as configured — a latent break in *master*, not ours |
+>   | 4 | prod exports `_fluid_synth_get_active_voice_count`; the overlay dropped it (no call site) | same subset gap; confirms the overlay diverges from prod deliberately |
+>   | 5 | prod **does** export `_mdx_set_max_loop` | **an earlier note here claimed it did not** ("Prod ships MDX ... but not mdx_set_max_loop"). That was wrong; corrected 2026-10-03. Our `mdx_set_max_loop(0)` lever is therefore usable on prod's tree too |
 >
 >   Net: **rows 1 and 2 mean master itself cannot be built against this repo's
 >   vendored trees.** That is the strongest available proof that Matt builds
@@ -647,54 +601,14 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
 >   `16 Hurry Up!.vgz`; AGENTS.md's matrix records A=342/B=800. Re-measure before
 >   trusting the matrix.
 >
-> - **Playback speed desyncs from the transport clock in OUR build only — prod
->   is correct.** Re-measured 2026-10-08 on `Sonic the Hedgehog - Green Hill
->   Zone`, the one file measured on *both* builds, read DOM-only from the footer
->   so neither build is privileged by how it was sampled:
->
->   | build | 1x | 2x | duration @1x | duration @2x |
->   | --- | --- | --- | --- | --- |
->   | prod (chiptune.app) | 0.995 | **1.994** | 1:36.0 | 1:36.0 |
->   | our dev core | 1.001 | **1.003** | 1:40.5 | 1:40.5 |
->
->   So prod's position scales with speed and its duration is speed-invariant,
->   i.e. prod already behaves the way the UI is designed to behave ("absolute
->   1x time, so the bar runs 2x as fast at 2x"). Our build reports position in
->   wall-clock regardless of speed. Confirmed engine-side on ours:
->   `getPositionMs()` slopes 1.005 / 0.998 / 0.998 at 0.5x / 1x / 2x, and
->   `getLoopBandMs()` returns `[53199, 91599]` at all three — so the band claim
->   above re-verifies, on the engine rather than the label.
->
->   **Do NOT repeat the old "+70% duration at 2x" figure — it does not
->   reproduce, and it was a measurement artifact.** `getDurationMs()` is
->   *transient* on our build: it reads short until the engine has resolved the
->   loop and fade end, then settles. Read in sequence on that track it gave
->   93849 (0.5x) -> 96099 (1x) -> 100599 (2x), and 100599 is where it stays —
->   so the value tracked elapsed song time, not tempo. Both builds are in fact
->   speed-invariant here; the real build difference is a constant ~4.6 s
->   (prod 1:36.0, ours 1:40.5) in how each libvgm closes out the fade.
->   **Practical rule: never sample duration before the engine has played past
->   the first loop boundary, and never compare durations taken at different
->   points in a song.** `16 Hurry Up!.vgz` is a bad fixture for any of this:
->   its band folds the *displayed* position every ~1.1 s, which invalidates an
->   end-to-end slope (measured: 2 drops, negative slope) even though the
->   duration readout itself is unaffected.
->
->   The position difference is in the tree, not the wrapper: `PlayerA::GetCurTime`
->   uses `Sample2Second` (wall-clock), and libvgm rescales the sample counter on a
->   speed change. The 2026-10-08 sibling build (`c8b998b`) still reads wall-clock
->   (1.00x at 2x), so refreshing the tree did **not** fix it. **Do not "fix" it by
->   multiplying position by speed in the wrapper** — prod is correct with the
->   byte-identical wrapper, so that would double-count against a newer libvgm; the
->   fix is tree-side (scale by `GetPlaybackSpeed()`). See the open hand-off note at
->   the top of "Session hand-off notes".
->   **Open risk for the PR:** our loop getters multiply `Tick2Second` by
->   `GetPlaybackSpeed()`, which is only correct if `Tick2Second` divides by
->   speed in whatever tree the reader builds. That holds for our stale vendored
->   tree (`_tsDiv *= genOpts.pbSpeed` in `RefreshTSRates`) and is unverified
->   against the newer libvgm prod is built from. If Matt's tree does not
->   divide there, the band and the folded head will be off by the speed factor
->   at non-1x. Cheap to confirm once a newer tree is built.
+> - **The loop getters' speed factor is the open risk.** `lvgm_get_loop_*_ms` and
+>   `lvgm_get_fade_start_ms` multiply `Tick2Second` by `GetPlaybackSpeed()`, which
+>   is only correct if the reader's tree divides by speed there — true for ours
+>   (`c8b998b`), unverified against Matt's newer libvgm. If it does not, the band
+>   and the folded head are off by the speed factor at non-1x. (`GetCurTime` needs
+>   no such care: it scales by `GetPlaybackSpeed()` itself, so position is
+>   song-time.) Never sample `getDurationMs()` before the engine has played past
+>   the first loop boundary — it reads short, then settles.
 
 Real audio works locally. `./scripts/build-subprojects.sh` (the sibling clones +
 the vendored `libADLMIDI`/`psflib`/`lazyusf2`) and `node scripts/build-chip-core.js`
@@ -1244,37 +1158,12 @@ checks no longer work. Compare a live context to a stored one with
 
 ## Session hand-off notes (read me first)
 
-- **OPEN — VGM position/jumping-head investigation (2026-10-08). Do not trust the
-  earlier entries in this file that describe this; two of them were wrong.**
-  Symptom: at 2x speed the footer time and slider head report **half** the true song
-  position, and **dragging the Speed slider makes the head jump backwards**.
-  Measured, same file both builds (`QvGJz9sd` = Sonic GHZ, a content hash so the
-  share id is identical on each):
-  - position slope, speed *held*: prod 0.995/1.994 (1x/2x), ours 1.001/1.003.
-  - drag test: **prod's raw counter has 0 backward steps; ours has several.** Same
-    caller (`VGMPlayer.getPositionMs` -> `_lvgm_get_position_ms`, master's one-liner),
-    same wrapper source ⇒ divergence is in the **tree**, not the wrapper/our JS.
-  - loop point (fixed song position) reached in 53.2s at 1x vs 26.6s at 2x ⇒ the
-    emulation really does run 2x faster on both builds; only the number differs.
-  - root cause candidate: `libvgm/player/playera.cpp:295` `PlayerA::GetCurTime`
-    uses `Sample2Second(GetCurPos(PLAYPOS_SAMPLE))` = `samples/_outSmplRate` =
-    **wall-clock**, and `_playSmpl` is the one counter `VGMPlayer::RefreshTSRates`
-    rescales on every speed change (`vgmplayer.cpp:769`). Measured rescale is
-    exactly the speed ratio: 1x→2x **0.5000**, 2x→1x **2.0001**.
-  - **The fix is in the tree, NOT the wrapper.** `PlayerA::GetCurTime` should scale
-    by `GetPlaybackSpeed()` (as `lvgm_get_duration_ms` and both loop getters already
-    do), which makes position song-time *and* cancels the rescale so the jump goes
-    away. `libvgm/` is path-listed so this is overlay-only and the PR is untouched.
-    **Do not "fix" this in `lvgm_get_position_ms`** — prod is correct with the
-    byte-identical wrapper, so multiplying by speed there double-counts against a
-    newer libvgm. (I proposed exactly that; the user correctly rejected it.)
-  - **NOT VERIFIED:** the fix has never been built or measured — it needs
-    `node scripts/build-chip-core.js` + relink. Also our fold
-    (`VGMPlayer.getDisplayPositionMs`) was **dormant** in every drag test
-    (`abs < bandEnd` early-out, bandEnd 91599 vs position ~64s), so **our fold has
-    never been tested live**; it consumes the counter through
-    `((abs-A)%B+B)%B`, which assumes monotonic song position, so the tree fix must
-    land first or the fold keeps consuming a rescaled value.
+- **VGM position is song-time (verified 2026-10-09).** If the footer head ever
+  jumps when the Speed slider changes, check that the linked libvgm's
+  `PlayerA::GetCurTime` scales by `GetPlaybackSpeed()` (it does unless
+  `PLAYTIME_TIME_PBK` is set); the vendored tree before `c8b998b` did not. Do not
+  multiply by speed in `lvgm_get_position_ms` — that double-counts a tree that
+  already scales.
 - **Provenance hole (2026-10-08) — superseded by the sibling build the same day; kept as history.** The running core did **not** match
   the documented reproducible artifact: `src/chip-core.wasm` is `3108c47a…`
   / 1,913,268 B vs the frozen `94c17c93…` / 1,912,960 B. So "byte-for-byte
@@ -1296,11 +1185,9 @@ checks no longer work. Compare a live context to a stored one with
   (in-repo trees, the `../` fallback, the wrapper compat); both were rewritten for
   the sibling build. If you find another line still claiming the engines are
   vendored, it is stale — the four trees were deleted on 2026-10-08.
-- **Changelog (`dev/record/site.mjs`).** The chip-core section's "One measurement
-  caveat" paragraph — its **second** body entry — is entirely "our build reports
-  position differently"; when the tree fix lands, delete it. The first entry (why
-  the app feature-detects both libvgm/GME vintages) is independent and stays. The
-  whole page was given a plain-prose polish pass on 2026-10-08.
+- **Changelog:** if `dev/record/site.mjs`'s chip-core section still has the "One
+  measurement caveat" entry (VGM position wall-clock / the head jumps on speed),
+  delete it — position is song-time.
 - **Committed on `dev/overlay` (2026-10-08):** `3098475e8` (the `server/index.js`
   chart exclusion), then `730adec90` (engine vendoring → sibling build),
   `9c7489b44` (upstreaming plan) and `b645bbd9f` (libvgm-wrapper `parentIdx`
@@ -2462,9 +2349,10 @@ way. Cheap to state, expensive to learn:
 
 - **Measure engine behaviour; do not derive it.** The playback-speed desync was
   "obvious" from `Tick2Second` vs `Sample2Second` — and the opposite was true in
-  the other tree. Prod at 2x scales position 1.98x, ours does not, with a
-  byte-identical getter. Reasoning from source produced three wrong answers in a
-  row here; measuring took minutes and settled each one.
+  the other tree. Prod and our current tree both scale position with speed; the
+  pre-`c8b998b` vendored tree did not, with a byte-identical getter. Reasoning
+  from source produced three wrong answers in a row here; measuring took minutes
+  and settled each one.
 - **Never reason about prod (or anyone's build) from our tree.** Our own note
   asserted prod used this repo's vendored libvgm, on a tie-breaker that did not
   hold. It does not. We also proved master *cannot* be built against our vendored

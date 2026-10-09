@@ -291,7 +291,9 @@ function parseNSFe(buf) {
 }
 
 function parseGBS(buf) {
-  // Spec: https://gbdev.gg8.se/wiki/articles/GBS_Music_Format
+  // Spec: https://gbdev.gg8.se/wiki/articles/GBS_Music_Format (deleted?)
+  //       https://ocremix.org/info/GBS_Format_Specification
+  //       https://web.archive.org/web/20250518043814/https://ftp.modland.com/pub/documents/format_documentation/Gameboy%20Sound%20System%20%28.gbs%29.txt
   // Layout mirrors game-music-emu/gme/Gbs_Core.h: track_count at 0x04,
   // first_track (1-based) at 0x05, then three null-padded 32-byte strings.
   if (buf.length < 0x70 || buf.toString('ascii', 0, 3) !== 'GBS') {

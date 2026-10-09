@@ -126,14 +126,14 @@ function parseVGM(buf) {
         return '';
       };
 
-      meta.title = readString();             // Track Title (English)
-      readString();                          // Track Title (Japanese)
-      meta.game = readString();              // Game Name (English)
-      readString();                          // Game Name (Japanese)
-      meta.system = readString();            // System Name (English)
-      readString();                          // System Name (Japanese)
-      meta.artist = readString();            // Author (English)
-      readString();                          // Author (Japanese)
+      meta.title = readString();      // Track Title (English)
+      readString();                   // Track Title (Japanese)
+      meta.game = readString();       // Game Name (English)
+      readString();                   // Game Name (Japanese)
+      meta.system = readString();     // System Name (English)
+      readString();                   // System Name (Japanese)
+      meta.artist = readString();     // Author (English)
+      readString();                   // Author (Japanese)
       meta.date = extractDate(readString()); // Release Date
       meta.ripper = readString();     // Ripper
       meta.comment = readString();    // Notes

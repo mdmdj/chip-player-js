@@ -35,6 +35,7 @@ libxmp/lite/cmake/libxmp-checks.cmake
 _ignore/
 dev/nes-audio-tests/
 dev/.promote-armed
+
 # dev/rebase.sh's scratch state: the pre-rebase tip, kept for the failure path.
 dev/.pre-rebase
 
@@ -42,3 +43,6 @@ dev/.pre-rebase
 # the raw per-take audio/proof, site/ is the generated upload directory.
 dev/record/.work/
 site/
+
+#diff review
+review.html

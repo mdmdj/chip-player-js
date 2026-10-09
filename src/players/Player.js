@@ -325,9 +325,9 @@ export default class Player extends EventEmitter {
   }
 
   // True when playback legitimately runs past durationMs and the engine (not
-  // the base end detector) owns the end: Repeat One, a player's
-  // indefinite-playback setting, or an extended tail left over from leaving a
-  // deep repeat. Position keeps running past durationMs in all of those.
+  // the base end detector) owns the end. The base returns Repeat One only;
+  // subclasses OR in their own indefinite-playback setting and any extended
+  // tail left over from leaving a deep repeat.
   isPlayingIndefinitely() {
     return this.looping;
   }

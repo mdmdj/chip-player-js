@@ -16,8 +16,9 @@
 # running it; see dev/promote.sh for the plan and the rules.
 #
 # Once the commit lands, this runs the whole mechanical tail -- dev/rebase.sh
-# (rebase + verify) then dev/push-overlay.sh -- so the cycle is one command after
-# arming. PROMOTE_SKIP_PUSH=1 holds the push back.
+# (rebase + verify), then pushes the feature branch, then dev/push-overlay.sh --
+# so the cycle is one command after arming. PROMOTE_SKIP_PUSH=1 holds the
+# publishes back.
 set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -69,9 +70,13 @@ echo
 
 if [ "${PROMOTE_SKIP_PUSH:-0}" = "1" ]; then
   echo
-  echo "promote-apply: PROMOTE_SKIP_PUSH=1, not pushed. When ready:"
+  echo "promote-apply: PROMOTE_SKIP_PUSH=1, not published. When ready:"
+  echo "             git -C $FEATURE_WT push origin $FEATURE"
   echo "             ./dev/push-overlay.sh"
   exit 0
 fi
+echo
+echo "promote-apply: publishing $FEATURE to origin..."
+git -C "$FEATURE_WT" push origin "$FEATURE"
 echo
 "$DIR/push-overlay.sh"

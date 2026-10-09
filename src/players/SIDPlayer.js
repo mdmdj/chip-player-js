@@ -4,7 +4,7 @@ import pathe from 'pathe';
 import React from 'react'; // For the icon in the detectSongEnd label
 
 import Player from "./Player.js";
-import EndDetector from './EndDetector.js';
+import EndDetector, { DETECT_SONG_END_HINT } from './EndDetector.js';
 import { vectorToArray } from '../util';
 import { API_BASE } from '../config';
 

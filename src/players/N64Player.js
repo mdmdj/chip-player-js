@@ -1,5 +1,5 @@
 import Player from "./Player.js";
-import EndDetector from './EndDetector.js';
+import EndDetector, { DETECT_SONG_END_HINT } from './EndDetector.js';
 import { ensureEmscFileWithData, ensureEmscFileWithUrl, pathJoin } from '../util';
 import { CATALOG_PREFIX } from '../config';
 import pathe from 'pathe';

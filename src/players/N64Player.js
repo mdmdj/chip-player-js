@@ -15,13 +15,13 @@ const INT16_MAX = 32767; // 2^15 - 1
 // in idle-time chunks (like GMEPlayer) instead of one long freeze.
 const SEEK_INCREMENT_MS = 1000;
 
-// Tail-end detector tuning, mirrored from SIDPlayer (probed 2026-09 on SID
-// output, mean-abs per second): music bodies run 0.03-0.16 while ended tails
-// sit at or below ~0.001, so the level gate separates them by 6x or more and
-// the stillness gate (frozen second-means) suppresses quiet-but-alive
-// passages. N64 output is normalized the same way (int16 full-scale), but the
-// levels have not been probed on USF content yet -- verify before trusting the
-// trip on quiet game mixes. Window mirrors GME's 6s silence rule.
+// Tail-end detector tuning, mirroring SIDPlayer: music bodies run 0.03-0.16
+// (mean-abs per second) while ended tails sit at or below ~0.001, so the
+// level gate separates them by 6x or more and the stillness gate (frozen
+// second-means) suppresses quiet-but-alive passages. N64 output is normalized
+// the same way (int16 full-scale), but the levels have not been verified on
+// USF content -- quiet game mixes are the case to watch. Window mirrors GME's
+// 6s silence rule.
 const END_QUIET_MEAN = 0.004;
 const END_STATIC_RANGE = 0.001;
 const END_WINDOW_SEC = 6;
@@ -155,12 +155,17 @@ export default class N64Player extends Player {
     }
     this.writeChannels(channels);
 
-    // Repeat One tail restart (rule and window in EndDetector). Under
-    // indefinite playback the engine free-runs past durationMs: looping game
-    // code never goes quiet, but a one-shot whose content has ended sits silent
-    // forever, so re-run it from the top in-buffer (no refetch, no gap). The
-    // position gate runs first, so quiet intros and mid-song breakdowns stay
-    // gated. Repeat-off keeps the fade-and-end behavior above.
+    // Tail-end restart, Repeat One only (mirrors SIDPlayer): with indefinite
+    // playback the engine free-runs past durationMs -- looping game code keeps
+    // rendering, so the detector never trips -- but a one-shot whose content
+    // has ended sits in silence forever. A tail that goes quiet AND static
+    // for a full window is an ending, so re-run the tune from the top
+    // in-buffer (no refetch, no gap). The position gate comes first, so the
+    // per-buffer tap only runs once the trip window opens one window before
+    // the expected end -- the length tag is approximate -- and anything
+    // earlier stays gated, keeping quiet intros and breakdowns mid-song from
+    // ever tripping it. Repeat-off keeps the engine fade-and-end behavior
+    // above, unchanged.
     if (this.params.detectSongEnd && this.isPlayingIndefinitely() &&
         this.getPositionMs() >= this.getEndDetectTripAtMs() && this.updateEndDetector(channels)) {
       this.restartTrack();
@@ -297,9 +302,9 @@ export default class N64Player extends Player {
   // The engine flag is what actually holds the fade: Repeat One and the
   // Indefinite Playback setting both free-run past durationMs through it (the
   // wrapper still ends non-looping tracks itself, since it ANDs the flag with
-  // song_loops). Keep it OR'd from both sources on every transition -- Repeat
-  // One alone never reaching the engine is what used to fade-and-end each
-  // cycle and reload the whole miniusf/usflib per loop.
+  // song_loops). Keep it OR'd from both sources on every transition: Repeat
+  // One alone not reaching the engine would fade-and-end each cycle and
+  // reload the whole miniusf/usflib per loop.
   syncIndefinitePlayback() {
     this.core._n64_set_indefinite_playback(this.looping || !!this.params.indefinitePlayback);
   }

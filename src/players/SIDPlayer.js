@@ -21,6 +21,16 @@ function parseSongLength(length) {
   return Math.floor((parseFloat(parts[0]) * 60 + parseFloat(parts[1])) * 1000);
 }
 
+// Tail-end detector tuning (mean-abs per second): music bodies run 0.03-0.16
+// while ended tails sit at or below ~0.001, so the level gate separates them
+// by 6x or more. A quiet tail can hold steady just above that (≈1.2e-3), so
+// the stillness gate (frozen second-means) suppresses quiet-but-alive
+// passages. Window mirrors GME's 6s silence rule.
+const END_QUIET_MEAN = 0.004;
+const END_STATIC_RANGE = 0.001;
+const END_WINDOW_SEC = 6;
+const END_TAP_STEP = 7;
+
 export default class SIDPlayer extends Player {
   paramDefs = [
     {
@@ -189,7 +199,7 @@ export default class SIDPlayer extends Player {
     // length is approximate, so the detector may conclude slightly early
     // (fade-outs). Anything earlier stays gated, keeping quiet intros and
     // breakdowns mid-song from ever tripping it. Repeat-off keeps the HVSC
-    // behavior above, byte-identical.
+    // behavior above, unchanged.
     // Caveat: tunes shorter than the window trip nearly ungated; a quiet
     // static intro there could restart early. Rare, and the toggle covers it.
     if (this.params.detectSongEnd && this.isPlayingIndefinitely() &&

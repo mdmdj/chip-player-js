@@ -285,7 +285,7 @@ export default class VGMPlayer extends Player {
   // fades at the next boundary). Re-deriving when already not looping would
   // push the configured fade start past a fade that is already running — the
   // engine keeps looping through the fade, so curLoop has advanced — and a
-  // no-op repeat toggle (e.g. Off→All mid-tail) then made the head fold back
+  // no-op repeat toggle (e.g. Off→All mid-tail) would then fold the head back
   // into the band even though playback state hadn't changed.
   applyLoopCount(wasLooping) {
     if (this.vgmCtx && typeof this.core._lvgm_set_loop_count === 'function') {
@@ -294,10 +294,10 @@ export default class VGMPlayer extends Player {
         this.core._lvgm_set_loop_count(this.vgmCtx, 0);
       } else if (wasLooping) {
         const curLoop = this.getCurLoop();
-        // Engine loop mirrors differ across libvgm versions (older trees
-        // never count past the first pass), so deep is decided by position
-        // too: already past the normal two-pass end means leaving deep
-        // regardless of what the mirror says.
+        // Engine loop mirrors differ across libvgm versions (some never
+        // count past the first pass), so deep is decided by position too:
+        // already past the normal two-pass end means leaving deep regardless
+        // of what the mirror says.
         const band = this.getLoopBandMs();
         const absNow = this.getPositionMs() || 0;
         const deep = curLoop >= 2 || (band != null && absNow >= band.endMs);

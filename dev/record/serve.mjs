@@ -14,12 +14,14 @@
 // `express.static` does Range/206, ETag and Content-Type properly -- which is
 // also what nginx/Apache/a static host do for the uploaded page. Node itself has
 // no static file server, so there is nothing built in to reach for; using the
-// dependency we already ship beats hand-rolling the header parsing.
+// dependency we already ship beats hand-rolling the header parsing. It is
+// resolved from server/node_modules by ./express.mjs, since this file sits in
+// dev/record/ and a bare `import 'express'` would not see it there.
 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import express from 'express';
+import express from './express.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const OUT = path.join(ROOT, 'site');

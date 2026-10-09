@@ -300,16 +300,10 @@ function parseGBS(buf) {
     console.warn('[GBS] Missing GBS signature.');
     return {};
   }
-  // A lone "?" is the spec's unknown-field marker; treat it as absent so the
-  // catalog stores null rather than the placeholder.
-  const stringField = (start, end) => {
-    const s = cleanString(readStr(buf, start, end));
-    return s === '?' ? '' : s;
-  };
-  const copyright = stringField(0x50, 0x70);
+  const copyright = readStr(buf, 0x50, 0x70);
   return {
-    title: stringField(0x10, 0x30),
-    artist: stringField(0x30, 0x50),
+    title: readStr(buf, 0x10, 0x30),
+    artist: readStr(buf, 0x30, 0x50),
     copyright,
     date: extractDate(copyright),
     system: 'Game Boy',

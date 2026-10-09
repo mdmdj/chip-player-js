@@ -148,12 +148,17 @@ check('rejects a bad signature, not just a short buffer', () => {
   const m = parseMetadata(bad, 'gbs');
   assert.strictEqual(m.numSongs, undefined);
 });
-check('the "?" unknown-field placeholder is stored as absent', () => {
-  const m = parseMetadata(buildGBS({ numSongs: 2, title: '?', artist: '?', copyright: '?' }), 'gbs');
+check('placeholder-only fields ("?" / "<?>") are stored as absent', () => {
+  const m = parseMetadata(buildGBS({ numSongs: 2, title: '<?>', artist: '?', copyright: '???' }), 'gbs');
   assert.strictEqual(m.title, '');
   assert.strictEqual(m.artist, '');
   assert.strictEqual(m.copyright, '');
   assert.strictEqual(m.date, null);
+});
+check('a value that merely contains "?" is kept', () => {
+  const m = parseMetadata(buildGBS({ numSongs: 2, title: 'Continue?', artist: 'Yuzo Koshiro(?)', copyright: '' }), 'gbs');
+  assert.strictEqual(m.title, 'Continue?');
+  assert.strictEqual(m.artist, 'Yuzo Koshiro(?)');
 });
 
 console.log('AY (synthetic)');
@@ -220,7 +225,7 @@ function realTest(label, globDir, ext, assertions) {
 realTest('SID files have plausible metadata', 'sid', 'sid', (m, f) => {
   assert.ok(m.numSongs >= 1, `${f}: numSongs`);
   assert.ok(m.title && m.title.length > 0, `${f}: title empty`);
-  assert.ok(m.artist && m.artist.length > 0, `${f}: artist empty`);
+  // artist may be unknown; a bare "<?>"/"?" is normalized to absent by cleanString.
 });
 
 realTest('RSID files parse like PSID (counts + speeds)', 'sid', 'sid', (m, f) => {

@@ -129,9 +129,29 @@ summary { cursor: pointer; font-size: .9rem; color: var(--accent); }
 .snippet { padding: 1.25rem 0; border-bottom: 1px solid var(--border); }
 .snippet h3 { margin: 0 0 .3rem; font-size: 1.05rem; }
 .snippet p { margin: 0 0 .5rem; max-width: 46rem; }
-.snippet pre {
-  background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
-  padding: .85rem 1rem; overflow-x: auto;
+/* A code block is a <figure>: a title bar naming the file and its lines, then the
+   highlighted <pre>. shiki ships no chrome of its own, so this is ours -- the same
+   shape Astro's <Code title> and rehype-pretty-code render around it. The <pre>'s
+   background and token colors are written inline by the build; the background
+   here is the fallback for a build without shiki, and the build remaps shiki's
+   panel color to the same --panel so the two agree. */
+.code {
+  margin: 0; border: 1px solid var(--border); border-radius: 6px; overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: baseline; gap: .75rem;
+  padding: .45rem .85rem;
+  /* A hair lighter than the code panel, so the bar reads as a window title strip
+     rather than a second block. */
+  background: color-mix(in srgb, var(--ink) 7%, var(--panel));
+  border-bottom: 1px solid var(--border);
+  font-family: var(--mono); font-size: .78rem;
+}
+.code-file { color: var(--ink); }
+.code-meta { margin-left: auto; color: var(--dim); }
+.code pre {
+  margin: 0; padding: .85rem 1rem; overflow-x: auto;
+  background: var(--panel);
   font-family: var(--mono); font-size: .82rem; line-height: 1.5;
 }
 code { font-family: var(--mono); }

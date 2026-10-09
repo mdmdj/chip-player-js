@@ -169,17 +169,12 @@ export default class SIDPlayer extends Player {
       return;
     }
 
-    // Tail-end restart, Repeat One only: a tail that goes quiet AND static
-    // for a full window is an ending, so re-run the sub-tune from the top
-    // (stop + load re-runs the init routine, like GME's restartTrack). The
-    // position gate comes first, so the per-buffer tap only runs once the
-    // trip window opens one window before the expected end -- the listed
-    // length is approximate, so the detector may conclude slightly early
-    // (fade-outs). Anything earlier stays gated, keeping quiet intros and
-    // breakdowns mid-song from ever tripping it. Repeat-off keeps the HVSC
-    // behavior above, unchanged.
-    // Caveat: tunes shorter than the window trip nearly ungated; a quiet
-    // static intro there could restart early. Rare, and the toggle covers it.
+    // Repeat One tail restart (rule and window in EndDetector). Re-running the
+    // sub-tune is a stop + load, which re-runs the init routine. The position
+    // gate runs first, so quiet intros and mid-song breakdowns stay gated; the
+    // listed length is approximate, so the detector may trip slightly early
+    // (fade-outs). Repeat-off keeps the HVSC behavior above. Caveat: a tune
+    // shorter than the window trips nearly ungated.
     if (this.params.detectSongEnd && this.isPlayingIndefinitely() &&
         this.getPositionMs() >= this.getEndDetectTripAtMs() && this.updateEndDetector()) {
       this.playSubtune(this.getSubtune());

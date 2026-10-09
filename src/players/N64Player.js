@@ -133,17 +133,12 @@ export default class N64Player extends Player {
     }
     this.writeChannels(channels);
 
-    // Tail-end restart, Repeat One only (mirrors SIDPlayer): with indefinite
-    // playback the engine free-runs past durationMs -- looping game code keeps
-    // rendering, so the detector never trips -- but a one-shot whose content
-    // has ended sits in silence forever. A tail that goes quiet AND static
-    // for a full window is an ending, so re-run the tune from the top
-    // in-buffer (no refetch, no gap). The position gate comes first, so the
-    // per-buffer tap only runs once the trip window opens one window before
-    // the expected end -- the length tag is approximate -- and anything
-    // earlier stays gated, keeping quiet intros and breakdowns mid-song from
-    // ever tripping it. Repeat-off keeps the engine fade-and-end behavior
-    // above, unchanged.
+    // Repeat One tail restart (rule and window in EndDetector). Under
+    // indefinite playback the engine free-runs past durationMs: looping game
+    // code never goes quiet, but a one-shot whose content has ended sits silent
+    // forever, so re-run it from the top in-buffer (no refetch, no gap). The
+    // position gate runs first, so quiet intros and mid-song breakdowns stay
+    // gated. Repeat-off keeps the fade-and-end behavior above.
     if (this.params.detectSongEnd && this.isPlayingIndefinitely() &&
         this.getPositionMs() >= this.getEndDetectTripAtMs() && this.updateEndDetector(channels)) {
       this.restartTrack();

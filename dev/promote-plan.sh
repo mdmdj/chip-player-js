@@ -66,15 +66,29 @@ strip_regions() {
 # brace or a paren produces a file that is wrong but still commits; the only
 # cheap guard is to ask the language. Anything we cannot check is reported
 # rather than assumed fine.
+# Parse a .js file that may contain JSX, which node --check rejects outright.
+parses_as_jsx() {
+  node -e '
+    const fs = require("fs");
+    require("@babel/core").parseSync(fs.readFileSync(process.argv[1], "utf8"), {
+      filename: process.argv[1], configFile: false, babelrc: false,
+      parserOpts: { plugins: ["jsx"] },
+    });
+  ' "$1" >/dev/null 2>&1
+}
+
 check_syntax() {
   local file="$1" stripped="$2"
   case "$file" in
     *.js|*.cjs|*.mjs)
-      node --check "$stripped" >/dev/null 2>&1 || {
+      # node --check can't parse JSX, which several src/ files use, so fall back
+      # to @babel/core's parser (a declared dependency) with the jsx plugin. A
+      # file that fails both is genuinely broken.
+      if ! node --check "$stripped" >/dev/null 2>&1 && ! parses_as_jsx "$stripped"; then
         echo "promote: $file does not parse after stripping DEV regions" >&2
         node --check "$stripped" 2>&1 | head -5 >&2
         return 1
-      }
+      fi
       ;;
     *)
       : # no cheap syntax check for this language; brace balance is all we get

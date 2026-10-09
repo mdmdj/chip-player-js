@@ -418,6 +418,7 @@ class App extends React.Component {
 
     // No defined end -- a blind loop, or a length not known yet. The Media
     // Session spec spells that as Infinity; 0 would assert a zero-length track.
+    // https://w3c.github.io/mediasession/#dom-mediasession-setpositionstate
     const durationMs = player.isBlindLoop() ? Infinity : this.state.currentSongDurationMs;
     const duration = durationMs > 0 ? durationMs / 1000 : Infinity;
     const position = Math.max(0, (player.getDisplayPositionMs() || 0) / 1000);

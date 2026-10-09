@@ -1,14 +1,16 @@
 #!/usr/bin/env node
-// DEV-ONLY SID/N64 tail-end detector check: the Repeat One tail restart that
-// stands in for a native loop API on engines that have none, driven by fake
-// cores with scripted audio levels (no wasm, no HVSC fetch).
+// DEV-ONLY EndDetector check: the Repeat One tail restart that stands in for a
+// native loop API on engines that have none, driven by fake SID/N64 cores with
+// scripted audio levels (no wasm, no HVSC fetch).
 //
 // What is being pinned:
 //   * the position gate: the per-buffer tap only runs once the trip window
 //     opens one window before the listed length, so quiet intros and mid-song
 //     breakdowns can never trip it
 //   * the level+stillness rule: a full window of per-second means, all below
-//     END_QUIET_MEAN and within END_STATIC_RANGE of each other
+//     quietMean and within staticRange of each other
+//   * the tuning layers: the module defaults, and a player override replacing
+//     only the fields it names
 //   * the documented gap: with no listed length (no HVSC entry, no time/fade
 //     tag) the trip gate collapses to 0 and the detector runs from frame 0
 // Run: node dev/test-end-detector.js
@@ -53,6 +55,7 @@ redaxios.get = () => Promise.resolve({ status: 404, data: {} });
 
 const SIDPlayer = require('../src/players/SIDPlayer').default;
 const N64Player = require('../src/players/N64Player').default;
+const EndDetector = require('../src/players/EndDetector').default;
 
 const SAMPLE_RATE = 44100;
 const BUFFER_SIZE = 1024;
@@ -62,6 +65,7 @@ const STEP_MS = BUFFER_SIZE / SAMPLE_RATE * 1000;
 const WINDOW_SEC = 6;
 const QUIET_MEAN = 0.004;
 const STATIC_RANGE = 0.001;
+const TAP_STEP = 7;
 // Probed levels (AGENTS.md): music bodies sit far above the gate; ending tails
 // are orders of magnitude below it.
 const MUSIC_LEVEL = 0.05;
@@ -159,6 +163,17 @@ function run(p, core, script) {
     const frames = Math.round(seconds * 1000 / STEP_MS); // STEP_MS is ms per frame
     for (let i = 0; i < frames; i++) p.processAudio([ch(), ch()]);
   }
+}
+
+// Drive a bare EndDetector (no player) so the tuning layers can be checked on
+// their own. Returns true if any folded buffer trips.
+function feedDetector(detector, level, seconds) {
+  const left = new Float32Array(detector.bufferSize).fill(level);
+  const right = new Float32Array(detector.bufferSize).fill(level);
+  const frames = Math.round(seconds * 1000 / STEP_MS);
+  let tripped = false;
+  for (let i = 0; i < frames; i++) tripped = detector.fold(left, right) || tripped;
+  return tripped;
 }
 
 // N64 shares the detector but taps the converted float channels, and its
@@ -352,6 +367,49 @@ async function main() {
     assert.strictEqual(core.state.indefinite, true,
       'OR-ed from repeat one, so looping tracks free-run instead of fading');
     assert.strictEqual(p.isPlayingIndefinitely(), true);
+  });
+
+  await check('EndDetector: no player tuning uses the module defaults', async () => {
+    const det = new EndDetector({ sampleRate: SAMPLE_RATE, bufferSize: BUFFER_SIZE });
+    assert.deepStrictEqual(det.getTuning(), {
+      quietMean: QUIET_MEAN, staticRange: STATIC_RANGE,
+      windowSec: WINDOW_SEC, tapStep: TAP_STEP,
+    });
+  });
+
+  await check('EndDetector: a player override replaces only the fields it names', async () => {
+    const det = new EndDetector({
+      sampleRate: SAMPLE_RATE, bufferSize: BUFFER_SIZE, tuning: { windowSec: 2 },
+    });
+    assert.deepStrictEqual(det.getTuning(), {
+      quietMean: QUIET_MEAN, staticRange: STATIC_RANGE, windowSec: 2, tapStep: TAP_STEP,
+    });
+  });
+
+  await check('EndDetector: a player override drives the trip (shorter window)', async () => {
+    const def = new EndDetector({ sampleRate: SAMPLE_RATE, bufferSize: BUFFER_SIZE });
+    const player = new EndDetector({
+      sampleRate: SAMPLE_RATE, bufferSize: BUFFER_SIZE, tuning: { windowSec: 2 },
+    });
+    // Four seconds of tail: past the player's 2s window, short of the 6s default.
+    assert.strictEqual(feedDetector(def, TAIL_LEVEL, 4), false, 'the default window is 6s');
+    assert.strictEqual(feedDetector(player, TAIL_LEVEL, 4), true, 'the player window is 2s');
+  });
+
+  await check('EndDetector: a player override can make the level gate stricter', async () => {
+    const det = new EndDetector({
+      sampleRate: SAMPLE_RATE, bufferSize: BUFFER_SIZE, tuning: { quietMean: 1e-9 },
+    });
+    assert.strictEqual(feedDetector(det, TAIL_LEVEL, WINDOW_SEC + 1), false,
+      'a tail above the player gate must never trip');
+  });
+
+  await check('SIDPlayer uses the EndDetector defaults (no player override yet)', async () => {
+    const { p } = await makePlayer({}, 20000);
+    assert.deepStrictEqual(p.endDetector.getTuning(), {
+      quietMean: QUIET_MEAN, staticRange: STATIC_RANGE,
+      windowSec: WINDOW_SEC, tapStep: TAP_STEP,
+    });
   });
 
   console.log(`\n${passed} checks passed${xfailed ? `, ${xfailed} known failure(s)` : ''}${process.exitCode ? ' (WITH FAILURES)' : ''}.`);

@@ -116,9 +116,9 @@ const dbStatements = {
   // per sub-tune (only multi-song files have them), so a sub-tune is shuffled
   // exactly like a single-song file. The first parameter matches a file at
   // exactly this path and the second matches everything below it, so a directory
-  // shuffles recursively while a file shuffles as itself. The prefix is escaped
-  // because paths may contain LIKE wildcards (e.g. "Famicompo_mini_vol1"), which
-  // would otherwise drag in songs from a sibling folder.
+  // shuffles recursively while a file shuffles as itself. The second parameter
+  // is a LIKE pattern, so the prefix is escaped (see escapeLike) to keep any
+  // wildcards in the path literal rather than matching a sibling.
   getShuffleStmt: db.prepare(`
       SELECT m.path, COALESCE(st.subtune, 0) AS subtune
       FROM music m

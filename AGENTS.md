@@ -50,8 +50,11 @@ a list of commits to remember:
 Workflow: commit feature changes on the feature branch; commit dev/overlay changes
 only on `dev/overlay`; then, after a promote, pick up the feature moves with
 `./dev/rebase.sh` — which rebases (`-X theirs`, so DEV regions survive) **and
-verifies the tree did not move**, which a hand-run rebase cannot tell you. Never
-rebase by hand; expect *duplicated* content in path-listed files, which is what
+verifies the tree did not move**, which a hand-run rebase cannot tell you. The
+rebase rewrites `dev/overlay`'s history, so publish it with
+`./dev/push-overlay.sh` (a `--force-with-lease` push) — never `git pull`
+`dev/overlay` after a rebase. Never rebase by hand; expect *duplicated* content
+in path-listed files, which is what
 the script's check is for (see the handoff notes). Note that "promote" is its own
 step and is **the user's to trigger** — see "Dev overlay & promotion" below
 before going near `dev/promote-apply.sh` or `dev/.promote-armed`. Never commit
@@ -88,8 +91,13 @@ which the user takes explicitly:
 ```sh
 ./dev/promote.sh           # plan only; no write path. Prints the next command.
 touch dev/.promote-armed   # the user arms the writer
-./dev/promote-apply.sh     # promotes, and consumes the key
+./dev/promote-apply.sh     # promotes, then rebases, verifies, and pushes
 ```
+
+`promote-apply.sh` runs the whole mechanical tail once armed: commit the
+stripped files on the feature branch, then `./dev/rebase.sh` (which verifies the
+tree), then `./dev/push-overlay.sh`. The arm key is the only decision; the rest
+is one command. `PROMOTE_SKIP_PUSH=1` stops it after the rebase.
 
 `promote.sh` requires a clean overlay tree, then, for every file that differs
 from the feature branch, it:
@@ -117,10 +125,12 @@ Two rules the stripping obeys, both learned the hard way:
 It writes the result into the feature-branch worktree and commits it there as one
 commit ("Promote feature work from dev/overlay"), leaves `dev/overlay`
 untouched, and refuses if `DEV-BEGIN`/`DEV-END` sentinels are unbalanced. Then
-put `dev/overlay` back on top — **via the script, not by hand**:
+`promote-apply.sh` puts `dev/overlay` back on top — **via the script, not by
+hand** — and publishes it:
 
 ```sh
-./dev/rebase.sh             # rebases onto the feature branch, then verifies
+./dev/rebase.sh        # rebases onto the feature branch, then verifies the tree
+./dev/push-overlay.sh  # --force-with-lease; NEVER `git pull` dev/overlay
 ```
 
 The rebase is the only step of the cycle that can change the tree without saying

@@ -56,12 +56,11 @@ touch dev/.promote-armed   # arm the writer
 ./dev/promote-apply.sh     # commits to the feature branch, then disarms itself
 ```
 
-The key file exists so promoting is an act a person does on purpose. Then put
-`dev/overlay` back on top of the feature branch:
-
-```sh
-./dev/rebase.sh             # rebases, then verifies the tree did not move
-```
+The key file exists so promoting is an act a person does on purpose.
+`promote-apply.sh` then runs the whole mechanical tail: it puts `dev/overlay`
+back on top (`dev/rebase.sh`, which verifies the tree did not move) and
+publishes both branches (the feature branch, then `dev/push-overlay.sh`).
+`PROMOTE_SKIP_PUSH=1` stops after the rebase.
 
 That verification is the point. A rebase can silently drop a commit or resolve
 an overlapping hunk the wrong way while printing "Successfully rebased" and
@@ -69,6 +68,9 @@ exiting 0 — it happened, and the only reason it was caught was a manual diff
 against the pre-rebase tip. The script takes that diff as its job, names any
 commit the rebase emptied or dropped, and tells you to `git rebase --abort`
 rather than `--continue` if a rebase stops.
+
+The rebase rewrites `dev/overlay`'s history, so its push is `--force-with-lease`
+(`dev/push-overlay.sh`) — never `git pull` `dev/overlay` after a rebase.
 
 See "Dev overlay & promotion" in the repo-root `AGENTS.md` for what counts as
 feature work and how the DEV-region stripping works.

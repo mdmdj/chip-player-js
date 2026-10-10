@@ -357,6 +357,10 @@ const flash = (ms = 150, color = '#00ff00') => {
 // without editing the shim.
 const runStep = (step, trace) => {
   const fire = (fn) => { try { fn(); } catch (e) { trace.mark(`ERROR ${step.label || ''}: ${e.message}`); } };
+  // Set when a guarded click refuses, so its label is not marked below: a step's
+  // label describes what it did, and a refused step that still marked its label
+  // would read as one that ran -- the same "green beat that did not happen" trap.
+  let playBlocked = false;
   if (step.open) fire(() => {
     dev.clickRow(step.open).then((r) => trace.mark(`opened ${r.name}${r.subtune != null ? ` #${r.subtune}` : ''}`))
       .catch((e) => trace.mark(`ERROR open ${e.message}`));
@@ -376,7 +380,8 @@ const runStep = (step, trace) => {
       (e) => trace.mark(`ERROR reveal: ${e.message}`));
   });
   if (step.play) fire(() => {
-    const r = dev.tryClick(step.play, step.onlyIf);
+    const r = dev.tryClick(step.play, step.onlyIf, step.minPlayedMs);
+    playBlocked = r.blocked;
     // A blocked click is marked, because a step that does nothing and a step that
     // did what it said look identical on screen -- the same trap as a selector
     // that matches nothing. The mark is also the clip's own record of why a beat
@@ -400,7 +405,8 @@ const runStep = (step, trace) => {
   // A `waitFor` step's label names the event being waited for, so it is emitted
   // when the condition is met (by the runner), not now -- otherwise the mark lands
   // at the start of the poll and the proof reads as if the event happened instantly.
-  if (step.label && !step.waitFor) trace.mark(step.label);
+  // A refused `play` is likewise not labelled: it did not happen.
+  if (step.label && !step.waitFor && !playBlocked) trace.mark(step.label);
 };
 
 /**
@@ -467,8 +473,16 @@ const dev = {
    * is precisely the "green verdict over a frame that does not show the claim"
    * failure this file keeps having to guard against. Skipping is honest and the
    * skip is recorded; navigating to the song that *is* playing would paper over it.
+   *
+   * `minPlayedMs` is a second, positional guard for a *"Next song"*-style advance:
+   * click only if the song playing now has been playing that long. The sequencer
+   * advances by itself when a short track ends, and a fixed-cadence Next then lands
+   * on the song that just started and cuts it off after a few hundred ms -- the
+   * "sounds like a glitch, not a preview" failure. Keying on the player's position
+   * (which resets on a load) makes the guard follow the auto-advance instead of
+   * racing it.
    */
-  tryClick(sel, guard) {
+  tryClick(sel, guard, minPlayedMs) {
     if (guard === 'song-folder-link') {
       const a = app();
       const song = a && a.sequencer && a.sequencer.currSongPath;
@@ -478,6 +492,18 @@ const dev = {
       const href = link ? decodeURIComponent(link.getAttribute('href') || '').split('?')[0] : null;
       if (!song || href !== `/browse/${song}`) {
         return { clicked: false, blocked: true, sel, why: 'the footer still links the previous song' };
+      }
+    }
+    if (minPlayedMs != null) {
+      const p = player();
+      const pos = p && typeof p.getPositionMs === 'function' ? p.getPositionMs() : null;
+      if (pos == null || pos < minPlayedMs) {
+        return {
+          clicked: false,
+          blocked: true,
+          sel,
+          why: `the current song has played ${pos == null ? 'no' : Math.round(pos)}ms, under the intended ${minPlayedMs}ms`,
+        };
       }
     }
     return { blocked: false, ...this.clickSelector(sel) };
@@ -872,6 +898,30 @@ const dev = {
         fromMs: Math.round(before),
         playing: q2 && typeof q2.isPlaying === 'function' ? q2.isPlaying() : null,
       };
+    }
+
+    // Start from the top. preload loads the song and seeks to 0, but a tool round
+    // trip (and preload's own settle) passes before the recording begins, so the
+    // engine has drifted a few hundred ms in by the flash. Re-zeroing here -- after
+    // every delay, immediately before the trace and the flash -- is what makes the
+    // published clip begin at 0 instead of mid-phrase. It is off for a `preRoll`
+    // clip (whose point is to start partway) and on for any preload clip unless a
+    // scenario asks otherwise; a share-link clip can opt in with `startAtZero`.
+    const startAtZero = spec.startAtZero ?? (!!preload && !preRoll);
+    if (startAtZero) {
+      const p0 = player();
+      if (p0 && typeof p0.seekMs === 'function') {
+        p0.seekMs(0);
+        // GME (and N64) seek incrementally: right after the call the position still
+        // reads the old value and catches down over a few frames, which would put a
+        // backward jump in the trace and trip a "never restarts" assertion. Wait
+        // (off camera, before the trace and the flash) for it to reach the top, with
+        // a bound so a stuck seek cannot hang the take.
+        const deadline = Date.now() + 600;
+        while (Date.now() < deadline && (p0.getPositionMs() == null || p0.getPositionMs() > 150)) {
+          await sleep(20);
+        }
+      }
     }
 
     const trace = startTrace(spec.intervalMs ?? 100);

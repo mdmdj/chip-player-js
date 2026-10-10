@@ -144,7 +144,7 @@ export const scenarios = [
     ready: true,
     title: 'A file with many songs is a folder',
     watch: [
-      'The row is marked <TUNES> with a count, not <DIR> — same list, different meaning.',
+      'The row is marked &lt;TUNES&gt; with a count, not &lt;DIR&gt;',
       'Clicking it navigates *into the file*, exactly like a directory.',
       'Two different song files, entered and left the same way, each playing a named sub-song.',
       'Each row is a real song from there on: the footer tracks the file path and names the sub-song it is playing, with no "Tune 8 of 28" nav label and no prev/next sub-tune widget; the share link is the same <code>/?play=…&amp;subtune=N</code> it has always been.',

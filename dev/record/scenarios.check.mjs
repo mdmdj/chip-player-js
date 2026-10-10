@@ -80,10 +80,13 @@ for (const s of scenarios) {
     }
   }
 
-  // Steps must be a forward-only timeline: the runner arms them with plain
-  // setTimeout, so an out-of-order atMs silently reorders the clip.
+  // Steps must be a forward-only timeline, and a `waitFor` step empties it: the
+  // runner re-bases each step's atMs on the moment the wait was met, so the steps
+  // after a wait are timed from that event, not from arm time, and their atMs
+  // legitimately restarts near zero.
   let last = -1;
   for (const st of s.steps || []) {
+    if (st.waitFor) { last = -1; continue; }
     const at = st.atMs || 0;
     if (at < last) fail(s.id, `steps out of order at ${at}ms (previous ${last}ms)`);
     last = at;

@@ -74,6 +74,9 @@ section h2 { font-size: 1.35rem; margin: 0 0 .5rem; }
 .summary code { background: var(--panel); padding: 0 .25em; border-radius: 3px; }
 /* Anchored headings sit under the sticky nav, so a deep link needs the offset. */
 .summary h4:target { scroll-margin-top: 4rem; }
+/* The demos anchor wraps the two change sections; a deep link into it must clear
+   the sticky nav exactly like an anchored heading does. */
+#demos { scroll-margin-top: 4rem; }
 
 /* Clip rows: video beside the prose. The column is 600px rather than something
    smaller on purpose: the clip is a straight x264 encode of the capture, so the
@@ -114,7 +117,9 @@ summary { cursor: pointer; font-size: .9rem; color: var(--accent); }
 .verdict td { padding: .18rem .5rem .18rem 0; border-bottom: 1px solid var(--border); }
 .verdict tr.ok td:last-child { color: var(--ok); }
 .verdict tr.bad td:last-child { color: var(--bad); }
-.marks-title { font-size: .8rem; color: var(--dim); margin: .8rem 0 .2rem; }
+/* The timing script now sits under the description, right after .watch, whose own
+   bottom margin supplies the gap above it. */
+.marks-title { font-size: .8rem; color: var(--dim); margin: 0 0 .2rem; }
 .marks { margin: 0; padding-left: 1.1rem; font-family: var(--mono); font-size: .8rem; color: var(--dim); }
 .src { font-family: var(--mono); font-size: .78rem; color: var(--dim); }
 

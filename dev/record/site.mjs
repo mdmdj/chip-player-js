@@ -7,13 +7,88 @@
 // rendering an empty <pre>.
 
 export const header = {
-  title: 'Sub-tunes as songs, and Repeat One that loops',
+  title: 'First Class Sub-Tunes and More Powerful Looping',
   pr: 'chip-player-js PR',
-  lede: `Two changes, each with a clip. <strong>A file that contains many songs browses
-    as a folder</strong>, and each sub-tune is an ordinary song from then on: favorite
-    it, search it, shuffle it, share it, chart it. <strong>Repeat One loops the region
-    the composer wrote</strong> wherever the engine knows where it is, and draws it on
-    the timeline. Formats with no loop region are covered too.`,
+    lede: `
+    <h2>Overview</h2>
+    This is a high level overview, there is a more detailed <a href="#summary">summary</a>, <a href="#demos">per-feature demos</a> and <a href="#snippets">code snippets</a> below.
+    <h3>Why?</h3>
+    Many chiptune formats have single files that contain multiple songs. In the current version, this creates a split where some files
+    need special UI to navigate and operate differently in many ways. <br>
+    The classic way of listening to looping chiptunes is obscured in a per-engine setting that is difficult to understand.<br>
+    This PR aims to make sub-tunes fully integrated with easy browsing, searching and looping across all formats.<br>
+    With these improvements Chip Player JS matches or even exceeds the usability and capability of other major music players like foobar2000.
+    The existing Brows and Player UI is augmented instead of expanded, reducing overall complexity to the user.
+
+    <h3>Each sub-tune is a first-class song</h3>
+    A file that contains sub-tunes browses like a folder
+    <p>
+    Sub-tunes now support:
+    <ul>
+    <li>Favorite</li>
+    <li>Search</li>
+    <li>Shuffle</li>
+    <li>Charts</li>
+    <li>Loops via Repeat One</li>
+    <li>Date Label (with improved parsing)</li>
+    </ul>
+    Share links are fully backward compatible.<br>
+    The favorites list is now sorted and shows paths (similar to search results) for clarity and ease of navigation.<br>
+    </p>
+
+    <h3>Repeat One Upgraded For Sub-Tunes and Seamless Loops</h3>
+    <p>
+    Formats with native loop regions loop seamlessly, on load where available
+    <ul>
+      <li>Slider Knob reflects the relative position across loops</li>
+      <li>MIDI piano roll is now populated across loop boundaries</li>
+      <li>Loop regions can optionally be displayed to the user</li>
+      </ul></li>
+    </ul>
+    </p>
+    <p>
+    Formats that loop via Indefinite Playback use it automatically
+      <ul>
+      <li>Applied optional GME-style ending detection to N64 and SID
+        <ul>
+          <li>Parameters are tunable, can be customized by the player.</li>
+          <li>Implented is its own module, can be reused by any new player.</li>
+        </ul>
+      </li>
+      <li>Slider Knob will park at the end of the Slider Bar</li>
+      <li>A "Looping" message has been added to clarify to the user</li>
+      </ul>
+    </p>
+    <p>
+    Seamless looping behavior is opt-in on certain players, by default the original Sequencer behavior applies.<br>
+    When Repeat One is not active, the Sequencer is fully in control.<br>
+    There is no incremental burden for new formats by default.<br>
+    The existing per-song Indefinite Playback setting has not changed.<br>
+    </p>
+    <h3>Catches</h3>
+    <h4>Database</h4>
+    <ul>
+    <li>The database will need to be migrated.</li>
+    <li>The catalog will need to be rebuilt.</li>
+    <li>New sub-tune metadata parsing may conflict with any undocumented metadata overlays.</li>
+    <li>Any undocumented metadata overlays may need to be re-applied matching the updated schema.</li>
+    </ul>
+
+    <h4>Chip Core</h4>
+    Need to rebuild the Chip Core:
+    <ul>
+    <li>There are new exports</li>
+    <li>There are changes to wrappers</li>
+    <li>There is a fix in vendored mdxmini</li>
+    </ul>
+
+    <strong>There may be unexpected differences in your build due to the sibling libraries not being version pinned.</strong>
+    <p>
+    <h4>Auth</h4>
+    This feature was developed using a mock user shim,
+    best effort was make to mock the user properly,
+    but it's possible unxepected issues will appear when using the real Firebase config.
+    `,
 };
 
 // The summary that opens the page: what the change is, and what a maintainer has
@@ -33,9 +108,9 @@ export const summary = {
         'A file that holds many songs (NSFE/NSF, SID, GBS, AY) browses as a <strong>song folder</strong>: a directory listing whose rows are its songs.',
         'Identity is <code>{path, sub-tune}</code>, defined once (<code>songRef</code>), so the row highlight, the now-playing song, a playlist and a share link cannot disagree.',
         'A share link keeps its format, <code>/?play=&lt;id&gt;&amp;subtune=N</code>, and lands inside the song folder with that sub-tune selected instead of on the containing directory.',
-        '<code>/shuffle</code> and <code>/random</code> return one row per playable song, not per file, so a 13-file directory shuffles all 352 of its songs.',
+        '<code>/shuffle</code> and <code>/random</code> return one row per playable song, not per file, so a directory containing multi-song files will shuffle all songs, including sub-tunes.',
         'Top Charts group by <code>(song_id, sub-tune)</code>, so one file can hold several ranks at once, each labelled with its own song.',
-        'The footer sub-tune widget (“Tune N of M”, prev/next) is gone; the sequencer owns navigation, so a sub-tune is another entry in the play context.',
+        'The footer sub-tune widget (“Tune N of M”, prev/next) has been removed bcause it is obsolete. Browse/Sequencer owns song-level navigation, so a sub-tune is just another entry in the play context.',
       ],
     },
     {
@@ -67,14 +142,13 @@ export const summary = {
       id: 'chip-core',
       title: 'Chip-core: the vendored wasm differs from production’s',
       body: [
-        'This branch’s wasm was built from the trees vendored in this repo, and <em>production</em> is built from different ones. Production’s shipped bundle exports <code>_xmp_seek_time_frame</code> and <code>_gme_disable_echo</code>; neither exists anywhere in the vendored trees, yet <code>master</code> lists both in its build script and calls both unguarded (<code>XMPPlayer.seekMs</code>, <code>GMEPlayer</code>’s <code>disableEcho</code>). The vendored trees cannot satisfy <code>master</code>’s own build, so the PR feature-detects both and works against either vintage of libxmp and GME. (<code>master</code> below means the source tree; <em>production</em> means the shipped bundle.)',
         'Read song length late in a song, not early: <code>getDurationMs()</code> reports short until the engine has worked out where the fade ends, then settles. Never compare two readings taken at different points in a song.',
         '<strong>Seven exports</strong> are added to <code>scripts/build-chip-core.js</code>: <code>_lvgm_get_cur_loop</code>, <code>_lvgm_get_fade_start_ms</code>, <code>_lvgm_get_loop_start_ms</code>, <code>_lvgm_get_loop_end_ms</code>, <code>_lvgm_set_loop_count</code>, <code>_mdx_get_loop_start_ms</code>, <code>_mdx_get_loop_length_ms</code>. They are plain getters and setters, and every call site feature-detects, so a core without them falls back to the blind-loop UI rather than breaking. (Production exports none of them; it ships no VGM loop-region feature.)',
-        '<strong>One engine change is load-bearing for sub-tunes.</strong> <code>libsidplayfp-wrapper.cpp</code> reloads the tune after selecting it. Without that, the wrapper reports the requested sub-tune while every one plays song 0; the full explanation is in the code section.',
+        '<strong>One engine change is crucial for sub-tunes.</strong> <code>libsidplayfp-wrapper.cpp</code> reloads the tune after selecting it. Without that, the wrapper reports the requested sub-tune while every one plays song 0; the full explanation is in the code section.',
         '<strong>The only vendored engine source in the diff is <code>mdxmini/</code></strong> (4 files):',
         '<ul><li>A fade that reaches zero now stops there. Before, it counted into negative numbers and could leave a song that never ended.</li><li>Position is counted in microseconds (<code>int64_t position_us</code>) instead of whole milliseconds per frame. The discarded remainder (up to a third of a frame) made the count run slow, so seeks overshot and could start a fade early. It is 64-bit because <code>long</code> is 32-bit under wasm and would wrap negative after about 35 minutes.</li></ul>',
         'Checked in-app on <code>G2MST6.MDX</code>: position tracks real time, seeks land within one frame, and it never goes negative. Every other vendored tree is build-only and absent from the PR.',
-        'Also absent on purpose: the engine build scripts, the GME OPN prune, <code>tinyplayer.c</code>, and the test harnesses. The two wrappers that changed (<code>libvgm-wrapper.cpp</code>, <code>libsidplayfp-wrapper.cpp</code>) carry only the loop getters and the SID reload. If your build differs, the loop policy is portable JS under <code>src/players/</code>; only the region getters are engine-specific.',
+        'The two wrappers that changed (<code>libvgm-wrapper.cpp</code>, <code>libsidplayfp-wrapper.cpp</code>) carry only the loop getters and the SID reload. If your build differs, the loop policy is portable JS under <code>src/players/</code>; only the region getters are engine-specific.',
       ],
     },
     {

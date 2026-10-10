@@ -708,6 +708,31 @@ Two fixes, both kept:
   preloaded path. A take of the wrong song is the one failure the page cannot
   detect by looking at it, so it is not optional.
 
+## Loaded inside the window, the song still drifts — re-zero at the flash
+
+Loading inside the window removes the *load* but not the *drift*. `preload()` and
+`run()` are separate `page.evaluate` calls, and preload's own settle is 400 ms, so
+by the time the flash paints the engine is already a few hundred ms in — measured
+at the first published frame: preload clips **466–557 ms**, and the two share-link
+clips (loaded by the mount handler, even earlier) **789 ms** and **1254 ms**. On a
+6 s track with tight margins, that is the opening phrase, gone.
+
+`startAtZero` fixes it: `run()` seeks the player to 0 *immediately before* the
+trace and the flash, after every round-trip delay. It defaults on for a `preload`
+clip and off for a `preRoll` one (whose point is to start partway); a share-link
+clip opts in by name. Measured after: **92–140 ms** at the first frame, with audio.
+
+Two traps sit in the way, both about *when* the seek lands:
+
+- **GME seeks incrementally.** Right after `seekMs(0)` the position still reads
+  the old value and catches down over a few frames, so the trace's first sample
+  was 417 and the next 139 — a backward jump that tripped `never-restarts` on
+  `gme-looping-driver`. The re-zero now waits (off camera, before the trace) for
+  the position to reach the top, bounded at 600 ms so a stuck seek cannot hang.
+- **The first trace sample is load-bearing.** A clip that asserts monotonic
+  position sees whatever the engine reported at t=0, so a re-zero that has not
+  settled reads as a rewind. Wait for the seek, then start the trace.
+
 ## Trim with filters, not with `-ss`
 
 The first mux put `-ss` *after* the inputs, which makes them output options, not
@@ -746,6 +771,39 @@ Related: the pinned `silenceDuration` is **-1** ("Insert Silence: None", the app
 own default), not 0. The base end detector is only armed when
 `silenceDuration >= 0`, so pinning 0 armed it and let a looping clip be ended by
 a silence heuristic instead of by the behaviour under test.
+
+- **An assertion that compares against a missing value passes for the wrong
+  reason.** `never-highlights-a-song-that-is-not-playing` read `loc !==
+  "/browse/" + path` with `path === null`, so a transient mount tick compared
+  against `"/browse/null"` and failed a correct take. It now requires `x.path` —
+  with no playing song there is nothing to compare.
+
+## A wait is a condition; the audience still needs a hold
+
+`waitFor` reaches an event exactly — loop N, a band appearing, a song ending —
+instead of guessing an `atMs`. But a condition fires the *instant* it is true, and
+a clip whose only content is the condition can end before it has shown anything:
+`blind-loop` and `gme-looping-driver` collapsed to ~2.8 s (28 samples, under the
+`audible` floor) when their fixed hold was replaced by the wait. Every converted
+clip keeps a short explicit hold after the event it waits for.
+
+Three more shapes from the same pass:
+
+- **A fixed-cadence Next races a short song.** On a list with 1 s sound effects the
+  sequencer auto-advances, and the scheduled Next then cuts off the song that just
+  started — "sounds like a glitch, not a preview". `minPlayedMs` on the step refuses
+  that advance; it reads the player's position, which resets on the auto-advance, so
+  it follows the new song instead of racing it. A refused click is marked `skipped …`
+  and **does not mark its own label**, so a beat that did not happen cannot be
+  counted as one that did.
+- **A wait that resolves in 0 ms is worth suspecting.** `favorite-subtune`'s "the
+  Favorites list shows Epitaph" fired on the *browse* page: `window.location` flips
+  to `/favorites` before the DOM swaps, and both pages share `.BrowseList-colName`.
+  A route change is not a render — wait on the destination page's own marker (here
+  the song-folder heading), not on the pathname.
+- **A `waitFor` mark belongs to the event, not the poll.** The step's label is
+  emitted when the condition is met, not when the poll starts; the first version
+  marked it at the seek, so the proof read as if the fold had happened instantly.
 
 ## A clip that claims a moment must be filmed at that moment
 

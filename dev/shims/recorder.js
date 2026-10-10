@@ -397,7 +397,38 @@ const runStep = (step, trace) => {
   });
   if (step.param) fire(() => app().handleParamChange(step.param[0], step.param[1]));
   if (step.eval) fire(() => { if (!step.eval()) trace.mark(`assert failed: ${step.label || step.eval}`); });
-  if (step.label) trace.mark(step.label);
+  // A `waitFor` step's label names the event being waited for, so it is emitted
+  // when the condition is met (by the runner), not now -- otherwise the mark lands
+  // at the start of the poll and the proof reads as if the event happened instantly.
+  if (step.label && !step.waitFor) trace.mark(step.label);
+};
+
+/**
+ * Wait until a scenario's `waitFor` predicate holds, then let the take continue.
+ *
+ * This is what a clip uses instead of guessing a fixed delay for an event whose
+ * exact timing moves run to run -- "wait until the head has folded back into the
+ * band" rather than "sleep 3.6s and hope the seek landed where it did last time".
+ *
+ * The predicate is a JS *expression over (s, p)* -- the same (s) the assertions
+ * read plus the live player -- and it is a string on purpose: the scenario crosses
+ * into the page through `page.evaluate`, which cannot carry a function, so a
+ * function here would arrive as `undefined` and the wait would silently pass on
+ * the first poll. `s` is snap(); `p` is the current player (may be null).
+ *
+ * Returns true if it was met, false on timeout; the caller marks a timeout so a
+ * clip that waited forever is visible in the proof rather than looking clean.
+ */
+const waitForCondition = async (expr, timeoutMs = 15000, intervalMs = 100) => {
+  const fn = new Function('s', 'p', `return (${expr});`);
+  const end = Date.now() + timeoutMs;
+  while (Date.now() < end) {
+    let ok = false;
+    try { ok = !!fn(snap(), player()); } catch { ok = false; }
+    if (ok) return true;
+    await sleep(intervalMs);
+  }
+  return false;
 };
 
 const dev = {
@@ -862,24 +893,53 @@ const dev = {
     trace.mark('clip start');
 
     const span = Math.max(...steps.map((st) => st.atMs || 0), 0);
+    // Steps run *sequentially*, not as independent setTimeouts, because a
+    // `waitFor` step has to hold everything after it until its condition is met.
+    // `base` is the reference for every `atMs`: it starts at arm time, so an
+    // ordinary clip's absolute timeline is unchanged, and a `waitFor` step moves
+    // it forward to the moment the condition held -- so the steps after a wait
+    // are timed from the event they waited for (the head folding back into the
+    // band, say), not from arm time.
+    const runSteps = async () => {
+      let base = Date.now();
+      for (const step of steps) {
+        if (dev._aborted) return false;
+        const delay = base + (step.atMs || 0) - Date.now();
+        if (delay > 0) await sleep(delay);
+        if (dev._aborted) return false;
+        runStep(step, trace);
+        if (step.waitFor) {
+          const startedAt = Date.now();
+          const met = await waitForCondition(step.waitFor, step.waitForTimeoutMs ?? 15000);
+          // A timeout is named in the trace rather than swallowed: a clip whose
+          // wait never came true would otherwise still finish and could still pass
+          // its assertions on whatever state it happened to be in.
+          if (!met) trace.mark(`WAIT TIMEOUT: ${step.waitFor}`);
+          // The label names the event, so it is marked now -- when the condition
+          // held -- with how long the wait took, and the next steps are timed from
+          // here (see `base` above).
+          if (step.label) trace.mark(`${step.label} [waited ${Date.now() - startedAt}ms]`);
+          base = Date.now();
+        }
+      }
+      return true;
+    };
+    const finalize = async () => {
+      if (!spec.assert) return;
+      // Wait after the last step rather than scheduling from `span` at arm time,
+      // because a `waitFor` can push the real end past `span`.
+      await sleep(spec.finishAfterMs ?? 600);
+      this.finish(spec.assert)
+        .then((r) => { dev._result = r; dev._finishing = false; })
+        .catch((e) => { dev._result = { error: String((e && e.message) || e) }; dev._finishing = false; });
+    };
     let armed = !until;
     const arm = () => {
       armed = true;
       clearInterval(dev._armTimer);
       trace.mark('armed');
-      steps.forEach((step) => setTimeout(() => runStep(step, trace), step.atMs || 0));
-      // Finish on a page-side timer rather than waiting for a tool call. The
-      // finalize-and-upload step is long and lands right where the tool call
-      // boundary is least reliable; doing it here means the agent's second call
-      // is a small read of an already-computed result. Everything is idempotent
-      // per run, so a dropped tool call costs nothing.
-      if (spec.assert) {
-        dev._finisher = setTimeout(() => {
-          this.finish(spec.assert)
-            .then((r) => { dev._result = r; dev._finishing = false; })
-            .catch((e) => { dev._result = { error: String((e && e.message) || e) }; dev._finishing = false; });
-        }, span + (spec.finishAfterMs ?? 600));
-      }
+      dev._aborted = false;
+      runSteps().then((ran) => { if (ran) finalize(); });
     };
     if (armed) arm(); else {
       // The gate is bounded and says so out loud. An open-ended poll is how a
@@ -930,6 +990,9 @@ const dev = {
     clearTimeout(dev._finisher);
     clearTimeout(dev._pending);
     dev._pending = null;
+    // Stops the sequential step runner, which may be parked inside a `waitFor`
+    // poll or an inter-step sleep; it checks this flag between steps.
+    dev._aborted = true;
     heartbeat.stop();
     dev._run = null;
     dev._finishing = false;

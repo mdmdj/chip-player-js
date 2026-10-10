@@ -314,6 +314,15 @@ Step kinds understood by `runStep()`: `open`, `nav`, `play`, `dbl`, `seek`,
 so a step that throws is recorded as a mark and fails the take rather than
 aborting it silently.
 
+A step may also carry **`waitFor`**: a JS *expression over `(s, p)`* (the final
+`snap()` shape plus the live player) that the runner polls until it is true. It
+is a string because the spec crosses into the page through `page.evaluate`,
+which cannot carry a function. The steps after a `waitFor` are timed from the
+moment it was met, not from arm time — so a clip writes "seek into the band,
+then wait until the head folds back, then wait 1 s" instead of guessing the
+fold's delay. `waitForTimeoutMs` bounds the wait (default 15 s) and a timeout is
+recorded as a `WAIT TIMEOUT` mark rather than silently continuing.
+
 `snap()` is also what the trace sampler records. **When an assertion on
 `tr.samples` needs a field, add it to the sampler** — an unsampled field reads as
 `undefined` and fails for the wrong reason.

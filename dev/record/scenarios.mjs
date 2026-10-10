@@ -47,6 +47,13 @@ const NSFE_DIR = 'nsfe';                                 // 13 multi-song files
 const HURRY = "arcade-capcom/Ghosts'N_Goblins_(Arcade)/16 Hurry Up!.vgz";
 const HURRY_DIR = "arcade-capcom/Ghosts'N_Goblins_(Arcade)";
 
+// loop-band and repeat-toggle-smooth both live in the Sonic Genesis VGZ set: a
+// long, cleanly marked loop, so the band is a stretch you can read (rather than
+// Hurry Up!'s 800 ms) and seeking *into* it is a watchable jump.
+const VGZ_GENESIS_DIR = 'vgz-genesis';
+const GREEN_HILL = 'vgz-genesis/Sega Genesis_Sonic the Hedgehog_02 - Green Hill Zone.vgz';
+const SONIC2_CHEMICAL = 'vgz-genesis/Sega Genesis_Sonic the Hedgehog 2_05 - Chemical Plant Zone.vgz';
+
 // The shuffle clip's timeline: play a song, open the folder it lives in, show the
 // row being played, move on. Repeated eight times, so it is generated rather than
 // written out -- the numbers below are the whole design, and a hand-copied eighth
@@ -390,16 +397,16 @@ export const scenarios = [
     ready: true,
     title: 'The loop region, drawn on the slider',
     watch: [
-      'The shaded band is the loop the composer wrote: intro 342 ms + one 800 ms loop.',
-      'With Repeat One on, the playhead cycles inside the band instead of running to the end.',
-      'Untick Show Loop Area and the band goes; the playhead keeps folding exactly as before.',
-      'Tick it again and the band is back — the setting is visual only, it never touched playback.',
+      'The shaded band is the loop the composer wrote: a 14.8 s intro then a 38.4 s loop — 0:53 to 1:31 of a 1:36 track.',
+      'With Repeat One on, the lead-in plays unfolded before the band is reached; once it is, the playhead cycles inside the band instead of running to the end.',
+      'Seek into the band at 1:28 and the head runs to the far edge and folds back to the band start (0:53), then climbs again — the same fold, reached by a jump.',
+      'Untick Show Loop Area and the band goes; the playhead keeps folding exactly as before. Tick it again and the band is back — the setting is visual only, it never touched playback.',
     ],
     before: 'master had no loop region at all: the slider was a plain progress bar and Repeat One stopped and reloaded the song from 0:00.',
     harness: 'dev/test-vgm-loops.js',
-    browse: `/browse/${HURRY_DIR}`,
-    fixture: HURRY,
-    preload: { dir: HURRY_DIR, name: '16 Hurry Up!.vgz' },
+    browse: `/browse/${VGZ_GENESIS_DIR}`,
+    fixture: GREEN_HILL,
+    preload: { dir: VGZ_GENESIS_DIR, name: 'Sega Genesis_Sonic the Hedgehog_02 - Green Hill Zone.vgz' },
     // Opens Settings so the checkbox is on screen for the toggle -- otherwise the
     // untick happens off-camera and the clip claims a control the viewer never sees
     // being clicked.
@@ -413,36 +420,59 @@ export const scenarios = [
     // click. Nothing in the panel scrolls; height is the only lever (780 clears it by
     // 18px, 840 by 78px -- the margin is for footers that grow with song metadata).
     viewport: { width: 900, height: 840 },
-    // Timing is deliberately unhurried: 2s of hold before each state change, so a
-    // viewer can register the band appearing, then disappearing, then reappearing,
-    // and connect each to the click that caused it.
+    // Two beats, both unhurried so a viewer can register the band appearing, then
+    // disappearing, then reappearing, and connect each to its click.
+    //
+    // The first beat toggles the band off and on while the song is still in its
+    // 14.8 s lead-in (unfolded); the second does it after the seek, while the head
+    // is folding. The seek to 1:28 lands inside the band near its far edge (91 599),
+    // so the fold is ~3.6 s away -- and it is a `waitFor`, not a guessed delay, so
+    // the take keeps its shape wherever the seek lands. The last marks then run off
+    // that event: off at +1 s, on at +1.5 s, and the folded display passes 0:56 at
+    // ~+2.9 s, which is where the take ends.
     steps: [
-      { atMs: 200, repeat: 'one', label: 'Repeat One ON' },
-      { atMs: 2200, label: 'head cycling inside the band' },
-      { atMs: 4200, play: '#showLoopArea', label: 'untick Show Loop Area' },
-      { atMs: 6200, label: 'band gone' },
-      { atMs: 8200, play: '#showLoopArea', label: 'tick Show Loop Area again' },
-      { atMs: 10200, label: 'band back, still folding' },
+      { atMs: 1000, repeat: 'one', label: 'Repeat One ON' },
+      { atMs: 2000, play: '#showLoopArea', label: 'untick Show Loop Area' },
+      { atMs: 3000, play: '#showLoopArea', label: 'tick Show Loop Area again' },
+      { atMs: 6500, seek: 88000, label: 'seek to 1:28 — inside the band, near its far edge' },
+      // The fold is the event, so wait for it: position keeps climbing past the
+      // band end while display falls back to the band start, which is the fold.
+      { atMs: 0, waitFor: 's.positionMs - s.displayMs > 1000', waitForTimeoutMs: 8000, label: 'looped — the head is back at the band start (0:53)' },
+      { atMs: 1000, play: '#showLoopArea', label: 'untick Show Loop Area' },
+      { atMs: 1500, play: '#showLoopArea', label: 'tick Show Loop Area again' },
+      { atMs: 2000, label: 'inside the band again, climbing' },
+      { atMs: 2900, label: 'display past 0:56' },
     ],
+    finishAfterMs: 200,
     until: 'playing',
     assert: [
       { name: 'band-known', test: 's.band && s.band.endMs > s.band.startMs' },
-      { name: 'band-is-intro-plus-one-loop', test: 's.band.startMs > 0 && s.band.endMs - s.band.startMs > 300' },
-      { name: 'engine-loop-count-rising', test: 'tr.samples.filter((x) => x.loop >= 1).length >= 10' },
+      // The engine's own region: intro 14799 + loop 38400 = 53199, +38400 = 91599.
+      { name: 'band-is-intro-plus-one-loop', test: 's.band && Math.abs(s.band.startMs - 53199) < 300 && Math.abs(s.band.endMs - 91599) < 300' },
+      { name: 'engine-loop-count-rising', test: 'tr.samples.filter((x) => x.loop >= 1).length >= 5' },
       // The band only applies once the engine has looped; before that the head
       // is showing the real lead-in (which is the point of #3 below).
-      { name: 'head-folds-into-band', test: 'tr.samples.filter((x) => x.loop >= 1).length >= 10 && tr.samples.filter((x) => x.loop >= 1).every((x) => x.d >= s.band.startMs - 40 && x.d <= s.band.endMs + 40)' },
+      { name: 'head-folds-into-band', test: 'tr.samples.filter((x) => x.loop >= 1).length >= 5 && tr.samples.filter((x) => x.loop >= 1).every((x) => x.d >= s.band.startMs - 40 && x.d <= s.band.endMs + 40)' },
       { name: 'lead-in-unfolded', test: 'tr.samples.filter((x) => x.loop === 0 && x.p < s.band.startMs).length >= 3 && tr.samples.filter((x) => x.loop === 0 && x.p < s.band.startMs).every((x) => x.d === x.p)' },
       { name: 'tempo-1x', test: 'Math.abs(s.tempo - 1) < 0.001' },
+      // The clip's actual claim about the seek: the head really did fold back to
+      // the band start. Read from the trace, not the mark: the maximum display is
+      // the far edge, and a later sample sits at the band start.
+      { name: 'seek-folded-back-to-band-start', test: '(() => { const ds = tr.samples.map((x) => x.d).filter((n) => typeof n === "number"); if (!(ds.length >= 40)) return false; const i = ds.indexOf(Math.max(...ds)); return i > 0 && ds.slice(i).some((d) => Math.abs(d - s.band.startMs) < 1500); })()' },
+      // ...and then the folded display climbed past 0:56, which is where the take
+      // ends. Tied to the fold (find the band start, look after it) so a take that
+      // never folded cannot pass on the 88-91 s it held before the fold.
+      { name: 'display-climbed-past-56s-after-fold', test: '(() => { const ds = tr.samples.map((x) => x.d).filter((n) => typeof n === "number"); if (!(ds.length >= 40)) return false; const f = ds.findIndex((d) => Math.abs(d - s.band.startMs) < 1500); return f >= 0 && ds.slice(f).some((d) => d >= 56000); })()' },
       // The merged Show Loop Area claim: the band was drawn, then not drawn, then
       // drawn again, and the head never stopped folding across any of it. A DOM
       // query alone cannot show "drawn, then hidden, then drawn" -- that needs the
-      // timeline -- so this is asserted over the trace, not the final state.
-      { name: 'band-toggled-off-then-on', test: 'tr.marks.length > 0 && tr.marks.some((m) => /untick Show Loop Area/.test(m.label)) && tr.marks.some((m) => /tick Show Loop Area again/.test(m.label))' },
-      { name: 'head-kept-folding-while-hidden', test: 'tr.samples.filter((x) => x.loop >= 1 && x.t > 4300 && x.t < 8100).length >= 10 && tr.samples.filter((x) => x.loop >= 1 && x.t > 4300 && x.t < 8100).every((x) => x.d >= s.band.startMs - 40 && x.d <= s.band.endMs + 40)' },
+      // timeline -- so this is asserted over the trace, not the final state. The
+      // *second* pair is the one that matters here: it flanks the fold.
+      { name: 'band-toggled-off-then-on', test: 'tr.marks.filter((m) => /untick Show Loop Area/.test(m.label)).length >= 2 && tr.marks.filter((m) => /tick Show Loop Area again/.test(m.label)).length >= 2' },
+      { name: 'head-kept-folding-while-hidden', test: '(() => { const u = tr.marks.filter((m) => /untick Show Loop Area/.test(m.label)); const t = tr.marks.filter((m) => /tick Show Loop Area again/.test(m.label)); if (u.length < 2 || t.length < 2) return false; const w = tr.samples.filter((x) => x.t > u[1].t - 80 && x.t < t[1].t); return w.length >= 2 && w.every((x) => x.loop >= 1 && x.d >= s.band.startMs - 40 && x.d <= s.band.endMs + 40); })()' },
       // And the band really was absent in that window: the sampler records whether
       // the band element is in the DOM on every tick.
-      { name: 'band-absent-while-unticked', test: 'tr.samples.filter((x) => x.t > 4400 && x.t < 8000 && x.hasBand === false).length >= 10' },
+      { name: 'band-absent-while-unticked', test: '(() => { const u = tr.marks.filter((m) => /untick Show Loop Area/.test(m.label)); const t = tr.marks.filter((m) => /tick Show Loop Area again/.test(m.label)); if (u.length < 2 || t.length < 2) return false; return tr.samples.filter((x) => x.t > u[1].t + 100 && x.t < t[1].t - 50 && x.hasBand === false).length >= 2; })()' },
       { name: 'band-present-again-at-end', test: '!!document.querySelector(".Slider-loop")' },
       // And the control that was clicked is genuinely on screen: topmost element at
       // the checkbox's own centre must be the checkbox. This is the assertion that
@@ -460,28 +490,54 @@ export const scenarios = [
     section: 'main',
     group: 'looping',
     ready: true,
-    title: 'Turning Repeat One on mid-song never moves the playhead',
+    title: 'Turning Repeat One on after the loop never moves the playhead',
     watch: [
-      'The toggle happens while the song is playing normally.',
-      'The head keeps moving forward through the lead-in; only the loop boundary folds it back.',
+      'Repeat One is off: the song plays from 0:00 and the shaded band is the loop the composer wrote — 1:02 to 1:51 of a 1:55 track.',
+      'Seek to 1:45.6, inside the band near its end, and let it play on into the fade that follows the last loop — still with Repeat One off.',
+      'Turn Repeat One on <em>after</em> the loop region, mid-fade. The playhead does not jump: the display keeps tracking the real position instead of folding back into the band.',
+      'The song plays out to its end and the file restarts from 0:00 — the Sequencer’s Repeat One, reached without a mid-song jump.',
     ],
-    before: 'Repeat One was a stop-and-reload: the song restarted from 0:00 with a gap.',
+    before: 'Repeat One was a stop-and-reload: turning it on mid-song restarted the song from 0:00 with a gap.',
     harness: 'dev/test-vgm-loops.js',
-    browse: `/browse/${HURRY_DIR}`,
-    fixture: HURRY,
-    preload: { dir: HURRY_DIR, name: '16 Hurry Up!.vgz' },
+    browse: `/browse/${VGZ_GENESIS_DIR}`,
+    fixture: SONIC2_CHEMICAL,
+    preload: { dir: VGZ_GENESIS_DIR, name: 'Sega Genesis_Sonic the Hedgehog 2_05 - Chemical Plant Zone.vgz' },
+    // The opposite direction from loop-band: here Repeat One is turned on *after*
+    // the loop region, while libvgm is already fading the last pass out. The
+    // engine has nowhere to jump back to (the pass is over and the fade has
+    // begun), so it plays the tail to the song's end; the Sequencer then replays
+    // the file, which is what reaches 0:03 a second time. Every beat is a
+    // `waitFor`, so the take does not depend on where the seek lands or how long
+    // the fade runs.
     steps: [
-      { atMs: 2500, repeat: 'one', label: 'Repeat One ON' },
-      { atMs: 5000, label: 'still playing' },
+      { atMs: 0, waitFor: 's.displayMs >= 3000', label: 'playing from 0:00, Repeat One off' },
+      { atMs: 0, seek: 105600, label: 'seek to 1:45.6 — inside the band, near its end' },
+      { atMs: 0, waitFor: 's.positionMs > s.band.endMs', label: 'past the loop region — the fade is running' },
+      { atMs: 0, repeat: 'one', label: 'Repeat One ON — after the loop region' },
+      { atMs: 0, waitFor: 's.positionMs < 1000', label: 'song ended — the file restarts from 0:00' },
+      { atMs: 0, waitFor: 's.displayMs >= 3000', label: 'playing from 0:03 again' },
     ],
+    finishAfterMs: 300,
     until: 'playing',
     assert: [
-      { name: 'no-backward-jump-before-first-loop', test: 'tr.samples.length >= 30 && tr.samples.slice(0, 20).every((x, i, a) => i === 0 || x.d >= a[i - 1].d - 30)' },
-      { name: 'position-kept-advancing', test: 'tr.samples[tr.samples.length - 1].p > tr.samples[0].p + 3000' },
+      { name: 'band-is-intro-plus-one-loop', test: 's.band && Math.abs(s.band.startMs - 62908) < 300 && Math.abs(s.band.endMs - 111091) < 300' },
+      { name: 'repeat-was-off-at-the-start', test: 'tr.samples.length >= 10 && tr.samples.slice(0, 20).every((x) => x.looping === false)' },
       { name: 'looping-after-toggle', test: 's.looping === true' },
+      // The toggle happened *after* the loop region -- that is the whole point.
+      { name: 'toggled-after-the-loop-region', test: 'tr.samples.length >= 40 && s.band && tr.samples.some((x) => x.looping === true && x.p > s.band.endMs)' },
+      // The claim: at the moment Repeat One goes on, the transport does not jump
+      // backward. The display is continuous across the toggle mark.
+      { name: 'no-backward-jump-at-the-toggle', test: 'tr.samples.length >= 40 && (() => { const t = tr.marks.find((m) => /^Repeat One ON/.test(m.label)); if (!t) return false; const w = tr.samples.filter((x) => x.t > t.t - 400 && x.t < t.t + 400).map((x) => x.d).filter((n) => typeof n === "number"); if (w.length < 3) return false; for (let i = 1; i < w.length; i++) if (w[i] < w[i-1] - 60) return false; return true; })()' },
+      // ...and it did not fold the head back into the band either: after the
+      // toggle the display kept tracking the position through the fade.
+      { name: 'display-rode-the-tail-not-the-band', test: '(() => { if (tr.samples.length < 40) return false; const t = tr.marks.find((m) => /^Repeat One ON/.test(m.label)); if (!t || !s.band) return false; const w = tr.samples.filter((x) => x.t > t.t + 100 && x.t < t.t + 3000); return w.length >= 5 && w.every((x) => x.d > s.band.endMs - 500); })()' },
+      // The song ended and the same file restarted from the top, then played to 0:03.
+      { name: 'song-ended-and-restarted', test: '(() => { if (tr.samples.length < 40) return false; const ps = tr.samples.map((x) => x.p); for (let i = 1; i < ps.length; i++) if (ps[i-1] > 100000 && ps[i] < 5000) return true; return false; })()' },
+      { name: 'restarted-file-played-to-3s', test: 'tr.samples.length >= 40 && (() => { const ps = tr.samples.map((x) => x.p); let idx = -1; for (let i = 1; i < ps.length; i++) if (ps[i-1] > 100000 && ps[i] < 5000) { idx = i; break; } return idx >= 0 && ps.slice(idx).some((p) => p >= 3000); })()' },
+      { name: 'same-song-restarted', test: 'tr.samples.length >= 10 && tr.samples.slice(-10).every((x) => decodeURIComponent(x.path || "").indexOf("Chemical Plant Zone") >= 0)' },
       // The audio is half the claim on this page, and none of the assertions above can
       // tell a playing engine from a silent one: every one of them reads the transport.
-      { name: 'audible', test: '(() => { const r = tr.samples.map((x) => x.rms).filter((n) => n != null); if (!(r.length >= 35)) return false; return Math.max(...r) > 0.02; })()' },
+      { name: 'audible', test: '(() => { const r = tr.samples.map((x) => x.rms).filter((n) => n != null); if (!(r.length >= 70)) return false; return Math.max(...r) > 0.02; })()' },
     ],
   },
 
@@ -690,11 +746,10 @@ export const scenarios = [
     ready: true,
     title: 'MDX — the engine loops, and the band is exact',
     watch: [
-      'mdxmini repeats the song’s own built-in loop, so the music is continuous — there is no reload and no gap.',
-      'The band comes from the engine’s own loop points, not a guess: 1:09 to 1:44 of a 1:47 track.',
-      'Past the far edge the head folds back to the start of the band, which is where the music is actually repeating — watch the position keep climbing while the playhead returns.',
+      'mdxmini repeats the song’s own built-in loop like VGM, so the music is continuous — there is no reload and no gap.',
+      'The calculation of the song duration is also now more precise.',
     ],
-    before: 'master stopped at the end of the song, or looped the whole file, with nothing on the slider.',
+    before: 'master faded out and returned to the start',
     harness: 'dev/test-mdx-loops.js',
     browse: '/browse/mdx',
     fixture: 'mdx/G2MST6.MDX',

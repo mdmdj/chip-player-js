@@ -27,6 +27,10 @@ body {
 header, nav, section, footer { max-width: 68rem; margin: 0 auto; }
 
 header { padding: 3rem 0 1rem; }
+/* The nav is sticky at the very top, so every anchor scroll has to stop below it
+   rather than under it. One rule on the scroll container covers all of them: the
+   section headings, the header, and the summary's Look Out For blocks. */
+html { scroll-padding-top: 4.5rem; }
 h1 { font-size: 2rem; line-height: 1.2; margin: 0 0 .75rem; letter-spacing: -.01em; }
 .lede { max-width: 46rem; color: var(--ink); }
 .lede strong { color: var(--accent); }
@@ -34,13 +38,30 @@ h1 { font-size: 2rem; line-height: 1.2; margin: 0 0 .75rem; letter-spacing: -.01
 
 nav {
   position: sticky; top: 0; z-index: 5;
-  display: flex; gap: 1.25rem; flex-wrap: wrap;
+  display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center;
+  column-gap: clamp(.5rem, 1.5vw, 1.75rem); row-gap: .4rem;
   padding: .75rem 0; margin-bottom: 1rem;
   background: color-mix(in srgb, var(--bg) 88%, transparent);
   border-bottom: 1px solid var(--border);
 }
-nav a { color: var(--accent); text-decoration: none; font-size: .95rem; }
+nav a { color: var(--accent); text-decoration: none; font-size: .95rem; white-space: nowrap; }
 nav a:hover { text-decoration: underline; }
+
+/* The demo links share one "Demos" sub-head, so the word is said once rather than
+   prefixed onto every link. The border is what makes them read as one group
+   instead of three more peers; the label sits inside it, dim and small, as a
+   heading over its links rather than a destination of its own. */
+.nav-group {
+  display: flex; align-items: center; flex-wrap: wrap;
+  gap: .3rem 1.5rem;
+  padding: .35rem .95rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+.nav-group-label {
+  font-size: .72rem; font-weight: 600; text-transform: uppercase;
+  letter-spacing: .08em; color: var(--dim);
+}
 
 section { padding: 2rem 0; border-top: 1px solid var(--border); }
 section h2 { font-size: 1.35rem; margin: 0 0 .5rem; }
@@ -72,11 +93,16 @@ section h2 { font-size: 1.35rem; margin: 0 0 .5rem; }
 .summary li { margin: .4rem 0; }
 .summary p { max-width: 62rem; margin: .5rem 0; }
 .summary code { background: var(--panel); padding: 0 .25em; border-radius: 3px; }
-/* Anchored headings sit under the sticky nav, so a deep link needs the offset. */
-.summary h4:target { scroll-margin-top: 4rem; }
-/* The demos anchor wraps the two change sections; a deep link into it must clear
-   the sticky nav exactly like an anchored heading does. */
-#demos { scroll-margin-top: 4rem; }
+
+/* The two change sections are demos, so the word is said once -- in a heading over
+   them, mirroring the nav group -- instead of prefixed onto each section title.
+   The wrapper is itself a section, so it takes the rule that separates Demos from
+   the summary above; the first inner section drops its own rule (the heading
+   introduces it, not a line) while the second keeps the one that divides the
+   groups. The wrapper's heading is a size up from the sections it covers, so the
+   hierarchy reads without nesting two same-sized headings. */
+#demos > h2 { font-size: 1.55rem; }
+.demo-group > section:first-of-type { border-top: 0; }
 
 /* Clip rows: video beside the prose. The column is 600px rather than something
    smaller on purpose: the clip is a straight x264 encode of the capture, so the
@@ -161,7 +187,7 @@ summary { cursor: pointer; font-size: .9rem; color: var(--accent); }
 }
 code { font-family: var(--mono); }
 
-/* Mechanism subheadings inside "Per format and per variant". The count sits on the
+/* Mechanism subheadings inside "Variants". The count sits on the
    title because the useful thing about a group is how much of it there is, and a
    reader scanning the section is comparing sizes as much as reading titles. */
 .group-title {
@@ -195,7 +221,7 @@ section#deep > .group-title:first-of-type { margin-top: .6rem; }
      `currentColor`, so the glyph belongs to the heading it sits in.
    - The `-webkit-` prefix is not in the app's CSS, and is here because the failure
      without it is quiet rather than loud: an unsupported `mask-image` leaves an
-     empty inline-block, so the heading would read "Standardized to  One" with a gap
+     empty inline-block, so the heading would read "One Loops Any Song" with a gap
      where the word was, and nothing would look broken enough to notice.
 
    Sized in em rather than px so it tracks the h2 and the nav link it is also used

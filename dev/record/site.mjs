@@ -82,7 +82,8 @@ export const header = {
     <li>There is a fix in vendored mdxmini</li>
     </ul>
 
-    <strong>There may be unexpected differences in your build due to the sibling libraries not being version pinned.</strong>
+    <strong>There may be unexpected differences in your build due to the sibling libraries not being version pinned.<br>
+    ⚠Specifically, seeking N64 miniusf files has glitchy audio in my version and I'm not sure how it's fixed on your side.</strong>
     <p>
     <h4>Auth</h4>
     This feature was developed using a mock user shim,
@@ -199,8 +200,8 @@ export const prose = {
     before: '<code>master</code> charted <em>files</em>. One NSF was one row however many tunes it held; play counts belonged to the file, and the only sub-tune the charts could name was the one the app happened to start on.',
   },
   'repeat-toggle-smooth': {
-    title: 'Turning Repeat One on mid-song is jump-free',
-    before: '<code>master</code> restarted the song from 0:00 with a gap in the audio.',
+    title: 'Turning Repeat One on after the loop region never jumps the playhead',
+    before: '<code>master</code> restarted the song from 0:00 with a gap. Here Repeat One is turned on after the loop region, mid-fade, and the head never jumps backward: the song plays out to its end and the file restarts.',
   },
   'repeat-leave-fade': {
     title: 'Turning it off plays the song out',
@@ -212,7 +213,7 @@ export const prose = {
   },
   'mdx-native': {
     title: 'MDX: exact loop points from the engine',
-    before: '<code>master</code> stopped and reloaded, cutting the song at the loop boundary.',
+    before: '<code>master</code> faded out and reloaded, not looping smoothly.',
   },
   'midi-cc102': {
     title: 'MIDI: loop markers become a loop',

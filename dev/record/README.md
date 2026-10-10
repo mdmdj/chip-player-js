@@ -475,7 +475,7 @@ which reads as a flicker rather than as "this song is highlighted in its folder"
 is 1100 ms now, and the play hold went 1500 → 1700 ms. That is the whole of the
 "too fast" fix — 35 s of take instead of 27 s, ~13 MB instead of ~10 MB.
 
-**Looping Improvements, Standardized to One** (`group: 'looping'`) — one Repeat One
+**⟲One Loops Any Song** (`group: 'looping'`) — one Repeat One
 for every format, loop region on the timeline, no jump at the toggle.
 
 | id | feature | fixture | script | verdict must show |
@@ -635,12 +635,12 @@ literal `&lt;em&gt;files&lt;/em&gt;`. Ids, labels, marks and verdict *details* �
 only values that could carry anything unexpected — are still escaped.
 
 One piece of app iconography is borrowed: the Repeat One heading says
-"Standardized to ⟲ One", where ⟲ is the app's own `src/images/repeat.png` inlined as a
+"⟲One Loops Any Song", where ⟲ is the app's own `src/images/repeat.png` inlined as a
 data URI (200 bytes) by `build-site.mjs`, drawn as a CSS **mask** so it takes the
 heading's colour, and sized in `em` so the same span works in the nav link. It is
 `role="img" aria-label="Repeat"` rather than decoration, because there the glyph *is*
 the word: without it the heading, the nav link, the page outline and find-in-page all
-say "Standardized to One" (checked over CDP against the AX tree). An unknown
+say "One Loops Any Song" (checked over CDP against the AX tree). An unknown
 `{{glyph:…}}` name throws rather than rendering, because the quiet failure is a
 heading with a gap in it.
 

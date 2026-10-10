@@ -596,10 +596,9 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
 >   concluded otherwise by grepping only `vgmplayer.cpp` and missing the
 >   increment in `vgmplayer_cmdhandler.cpp`; that also invalidated a 48-fork
 >   scan. When auditing loop state, grep the *whole* player dir, not one file.)
-> - **The Repeat One matrix numbers are stale.** The frozen core reports
->   `intro_length=76, loop_length=29867` (band [29943, 59810]) for
->   `16 Hurry Up!.vgz`; AGENTS.md's matrix records A=342/B=800. Re-measure before
->   trusting the matrix.
+> - **The matrix's A=342/B=800 for `16 Hurry Up!.vgz` is confirmed on the current
+>   build** (the `vgm-native` clip asserts band `[1142, 1942]`); an earlier frozen
+>   artifact reported different numbers, so re-measure if the core changes.
 >
 > - **The loop getters' speed factor is the open risk.** `lvgm_get_loop_*_ms` and
 >   `lvgm_get_fade_start_ms` multiply `Tick2Second` by `GetPlaybackSpeed()`, which
@@ -740,24 +739,21 @@ selectSong only marks the `SidTune`'s current song, so without the reload the
 engine keeps playing song 0 while `sid_get_subtune()` reports the requested
 index (every sub-tune sounds identical).
 
-### libvgm version — the 2026-09 pin attempt, resolved by the 2026-10-08 build
+### libvgm version and sourcing
 
 We build the sibling `../libvgm` (ValleyBell). The wrapper carries no
 libvgm-version compat of its own any more — the `DEVID_OKIM*`/`PLAYTIME_*`
 defines were removed on 2026-10-08, and the wrapper is now `master` plus the loop
 functions.
 
-History worth keeping: in 2026-09 we tried moving from the then-vendored stale
-tree (`91b6542`) to upstream HEAD (`c8b998b`) and **reverted** — it compiled, but
-`PlayerA::LoadFile` left `GetPlayer()` null so VGM rendered silence, and the
-post-link `wasm-opt` step failed a binaryen validation (Arch's `emscripten` ships
-its own `wasm-opt`, `extra/binaryen` is older, and the un-optimized wasm is valid
-and only ~600 KB larger, so no package fixes it).
-
-That same commit builds and **renders VGM** on 2026-10-08, so the `GetPlayer()`
-null drift did not reproduce; treat the old "HEAD is broken" note as unverified.
-(`parentIdx` was added upstream at 2026-01-21, `57585ea`, if a different pin is
-ever needed.) See `dev/UPSTREAMING_PLAN.md`.
+Two build-env pitfalls from that migration: the post-link `wasm-opt` step can fail
+binaryen validation (Arch's `emscripten` ships its own `wasm-opt`, `extra/binaryen`
+is older; the un-optimized wasm is valid and only ~600 KB larger, so no package
+fixes it), and an upstream pin move was once reverted on a `GetPlayer()` null drift
+that did **not** reproduce on 2026-10-08 (that commit builds and renders VGM) —
+treat the old "upstream HEAD is broken" note as unverified. (`parentIdx` was added
+upstream 2026-01-21, `57585ea`, if a different pin is needed.) See
+`dev/UPSTREAMING_PLAN.md`.
 
 ### Dev environment gotcha
 
@@ -1164,61 +1160,23 @@ checks no longer work. Compare a live context to a stored one with
   `PLAYTIME_TIME_PBK` is set); the vendored tree before `c8b998b` did not. Do not
   multiply by speed in `lvgm_get_position_ms` — that double-counts a tree that
   already scales.
-- **Provenance hole (2026-10-08) — superseded by the sibling build the same day; kept as history.** The running core did **not** match
-  the documented reproducible artifact: `src/chip-core.wasm` is `3108c47a…`
-  / 1,913,268 B vs the frozen `94c17c93…` / 1,912,960 B. So "byte-for-byte
-  reproducible (verified 2026-10-02)" does not currently hold.
-  `chip-core.wasm.buildinfo.json` cannot settle it: `build-info.js` derives `tree`
-  from `git rev-parse HEAD:<dir>` (committed state) and `source: "in-repo"` is the
-  build script reporting on itself; the recorded build ran under node **v26.8.2**,
-  not the pinned 24.21.0. Verified independently: no sibling clones exist
-  (`../libvgm` absent then, only `../libsidplayfp`), so `normalizeInput` *could not*
-  be preferring a sibling; and the in-repo `libvgm` worktree was == HEAD with
-  `vgmplayer.cpp` blob `591511bf` (the recorded upstream `91b6542`). (Both siblings
-  exist now; this describes the state before the 2026-10-08 migration.)
-  **The rebuild above is what settles it** — if the jump reproduces, provenance is
-  moot for this bug; if it vanishes, the running core was never the in-repo tree and
-  the source-level explanation is wrong.
-- **AGENTS.md build sections corrected (2026-10-08).** The libvgm-version section
-  (formerly "libvgm pin") and the "Building the real chip-core" mechanics described
-  the pre-migration build
-  (in-repo trees, the `../` fallback, the wrapper compat); both were rewritten for
-  the sibling build. If you find another line still claiming the engines are
-  vendored, it is stale — the four trees were deleted on 2026-10-08.
-- **Changelog:** if `dev/record/site.mjs`'s chip-core section still has the "One
-  measurement caveat" entry (VGM position wall-clock / the head jumps on speed),
-  delete it — position is song-time.
-- **Committed on `dev/overlay` (2026-10-08):** `3098475e8` (the `server/index.js`
-  chart exclusion), then `730adec90` (engine vendoring → sibling build),
-  `9c7489b44` (upstreaming plan) and `b645bbd9f` (libvgm-wrapper `parentIdx`
-  restore + compat removal). Those and everything after them are committed;
-  `git status` is clean and both branches are pushed to `origin`.
-- **Comment review + EndDetector, promoted (2026-10-09).** A pass over the
-  comments the feature/loop work added: dev-process leakage dropped where it was
-  not a recurring-trap warning (`4bf7cbbb0`), loop comments trimmed to their
-  invariants (`fef5c7bff`), and wrong long-standing notes corrected
-  (`isPlayingIndefinitely`, the OPL3 bank guard, the GD3 block). The SID/N64 tail
-  detector became a shared `src/players/EndDetector.js` (`70e686487`,
-  `d058ec3da`, `1c2484d02`; dev tuning lives in the module and the Settings panel
-  keys off `player.endDetector`); `Player.isBlindLoop()` replaced the footer's
-  copy of the rule (`3d9e5fd06`); the media-session position state mirrors the
-  transport and uses `Infinity` for a blind loop (`926cda50d`, `a436bd25e`,
-  `a2e70cab0`); MUS is no longer treated as multi-song (`039255dca`); the
-  NSFe/GBS spec links are master's again plus mirrors (`c5673210c`, `4bf3bd724`);
-  `parseGBS` regained its signature-guard `return {}` (`055405a70`) and
-  `cleanString` now maps a bare placeholder (`?`/`<?>`/`???`) to empty so the
-  catalog binds NULL (`282bcfa36`). Promoted as `5c641c240`, overlay rebased, both
-  pushed. Catalog rebuilt clean (6787 files / 87 multi-song / 1140 sub-tunes /
-  0 bare placeholders).
-  - Promote tooling hardened here: `promote-plan.sh` falls back to a
-    `@babel/core` JSX parse when `node --check` fails; `promote-apply.sh` folds
-    the rebase + publish tail; `dev/push-overlay.sh` does the
-    `--force-with-lease` push.
-  - Left deliberately: `build-music.js` schema lines 195-196 keep the trailing
-    whitespace of the `music_fts` block above them; `parseSID`'s "for now" hedge.
-  - Considered and not done: dropping the promote rebase (the 2026-10-09
-    discussion) to remove the history rewrite/force-push. Not needed for
-    correctness, but it is the one lever if the rehash ever costs real time.
+- **The four vendored engine trees (`libvgm/`, `libxmp/`, `fluidlite/`,
+  `game-music-emu/`) were deleted 2026-10-08; the build uses sibling clones.**
+  Any line still claiming they are vendored is stale.
+- **EndDetector and comment corrections.** The SID/N64 tail detector is a shared
+  `src/players/EndDetector.js`; dev tuning lives in the module and the Settings
+  panel keys off `player.endDetector`. `Player.isBlindLoop()` replaced the footer's
+  copy of the rule; the media-session position state mirrors the transport and uses
+  `Infinity` for a blind loop; MUS is single-song. `parseGBS` keeps its
+  signature-guard `return {}` and `cleanString` maps a bare placeholder
+  (`?`/`<?>`/`???`) to empty so the catalog binds NULL.
+  - Promote tooling: `promote-plan.sh` falls back to a `@babel/core` JSX parse when
+    `node --check` fails; `promote-apply.sh` folds the rebase + publish tail;
+    `dev/push-overlay.sh` does the `--force-with-lease` push.
+  - Left deliberately (do not "fix"): `build-music.js` schema lines 195-196 keep
+    the trailing whitespace of the `music_fts` block above them; `parseSID`'s "for
+    now" hedge. Dropping the promote rebase was considered and not done -- it would
+    remove the history rewrite/force-push but is not needed for correctness.
 - **Measurement hygiene, learned the hard way here:** (1) the Speed setting is
   **persisted per user** — a leftover `tempo=2` from a prior session made an MDX run
   report 2.0 song-ms/wall-ms at "1x" and read as a defect; always read the engine's
@@ -1307,144 +1265,41 @@ checks no longer work. Compare a live context to a stored one with
   none are routed to parsers that matter); real `.mus` is always single-song
   (`MUS.cpp: m_songs = 1`), so nothing to test there; `sgc`/`sap` stay compiled
   but unrouted,   `hes`/`kss` pruned + unrouted.
-- **Rebase done (2026-10-02); the trees are in sync.** `dev/overlay` was rebased
-  onto `feature/subtunes-as-first-class` (67 commits replayed, 4 dropped as
-  already-promoted), and `promote.sh` now reports **"Nothing to promote"** — that
-  is the healthy steady state after a promote. Two lessons, both costing a full
-  redo:
-  - **`-X ours` in a rebase resolves toward the *upstream*, not your branch** —
-    the opposite of what it means in a merge. My first attempt with `-X ours`
-    silently stripped every DEV region (`Settings.js`, `UserProvider.js`,
-    `N64Player.js`, `SIDPlayer.js`) and left `VGMPlayer.js` with a duplicate
-    `applyLoopCount` referencing an undefined `wasLooping`. `-X theirs` is what
-    keeps overlay content. The feature branch's *hand-carried* fixes must still be
-    checked by hand afterwards: `-X theirs` dropped `cache1Hour`'s dev skip
-    (`server/index.js`) and a `parseAY` hunk, both restored in "Re-apply two
-    deltas the rebase clobbered".
-  - **Verify a rebase by tree, not by "it completed":** snapshot the old tip on a
-    scratch branch first, then require `git diff <old-tip> HEAD` to be empty
-    (mine was, after the fixup). That diff is the whole proof that no DEV region
-    or vendored fix was lost — it is what caught the `-X ours` damage. **It is
-    `dev/rebase.sh`'s job now** (see "Dev overlay & promotion"), so the habit is
-    a script; on 2026-10-07 that same diff caught a *successful* rebase that had
-    dropped a commit and reverted `server/database.js`, which is what prompted
-    writing it.
-  - **Expect *duplicated* content after promote-then-rebase, not just lost
-    content (2026-10-03).** The promote writes *stripped* content onto the feature
-    branch and skips path-listed files entirely, so those files keep whatever an
-    *older* promote (or the branch split) left there. Replaying the overlay
-    commits that touch them can then land on top of content the base already
-    has. Seen once: `scripts/build-chip-core.js` (path-listed, so the promote
-    left the feature copy alone) ended up listing `_mdx_get_loop_start_ms` and
-    `_mdx_get_loop_length_ms` **twice** in `EXPORTED_FUNCTIONS`. Same mechanism
-    would duplicate a DEV region's contents or a vendored hunk. Harmless there
-    (Emscripten exports a name once), and the feature branch was never affected
-    (1 occurrence, promote skipped it) — but it is residue, and the tree diff is
-    the only thing that finds it: the rebase exited 0 with no conflicts and
-    10f640889 dropped cleanly as "already upstream". **So treat a non-empty
-    tree diff after a rebase as a real finding to diagnose, not as noise to
-    re-run away** — read it, fix the duplicate back to the pre-rebase content
-    (`508023685`), and only then require the diff to be empty.
-- **Bug verification (2026-10-02) — two confirmed, one dead, one masked.** A sweep
-  of the feature diff for defects *we caused* produced ~25 candidates; root-value
-  verification settled four, and the rest were judged not worth the risk of
-  fixing blind. Still to do: Stages 2-4 below.
-  - **WITHDRAWN 2026-10-02 (was "CONFIRMED, catalog-scale"): the N64/SID
-    end-detector trip gate does *not* collapse.** The claim rested on
-    `getDurationMs()` being 0 for a file with no `time=`/`length=` tag. It is
-    not: `lazyusf2-wrapper.cpp` substitutes the config defaults
-    (`tag_song_ms ? : cfg_deflength`, `tag_fade_ms ? : cfg_deffade`), so
-    `n64_get_duration_ms()` only returns 0 *before* initialization. Measured
-    in-app on the purpose-built untagged rips: `sparse00/01/02/03.miniusf` all
-    report **durationMs 171000, trip gate 165000**. SID is safe for the same
-    reason (`subtuneDurations` falls back to `DEFAULT_SONG_LENGTH_MS`, 150 s);
-    its gate could only collapse on an HVSC entry of `0:00`. Pinned by
-    `dev/test-end-detector.js`. The *shape* of the hazard is still worth
-    remembering: the gate is `Math.max(0, durationMs - windowSec*1000)`, so a
-    track genuinely shorter than the 6 s window trips nearly ungated (a
-    documented caveat, covered by the `detectSongEnd` toggle) — and if anyone
-    ever makes the gate nullable, remember `getPositionMs() >= null` coerces to
-    `>= 0`, so the call site needs its own null check too.
-  - **CONFIRMED regression we introduced:** `mdxmini.h`'s `long position_us` is
-    4 bytes in this wasm32/ILP32 build (no `MEMORY64` in `build-chip-core.js`), so
-    it overflows at 2147.5 s = **35.8 min**; the old `int position_ms` had
-    596.5 h (24.8 days) of range. A ~400x range cut bought 1 ms of seek
-    accuracy. On wrap: negative position, head jumps to the start, and
-    `mdx_set_position_ms`'s `seek_to_ms < position_ms` backward-seek test stops
-    firing. Reachable by leaving any looping MDX on Repeat One for 36 min. One
-    word: `long` → `double`.
-  - **DEAD (do not "fix"):** `XMPPlayer._loopCount` appears not to reset on
-    `loadData`, but `Sequencer.playSong:231` calls
-    `setLooping(repeat === REPEAT_ONE)` on every load, and with repeat already
-    off that hits the third branch (`XMPPlayer.js:289`) which sets it to 1. It
-    self-heals before `loadData` runs.
-  - **MASKED:** `lvgm_get_cur_loop` lacks the `GetPlayer()` null guard its three
-    siblings have, so a pre-first-load toggle sends `UINT32(-1)` → JS
-    `Math.max(2, 4294967296)` → wasm truncation → `0` = loop forever. Real
-    defect, but the precondition is "no file loaded" (nothing to loop) and the
-    next `loadData` → `resolveParamValues` → `setParameter('indefinitePlayback',
-    false)` → `SetLoopCount(2)` resets it. Masked by call ordering, not design;
-    worth the 1-line guard, not worth describing as a hang. Now pinned by an
-    `xfail` in `dev/test-v2m-loops.js`'s sibling `dev/test-vgm-loops.js` (the
-    fake models the export's `UINT32` truncation, so the consequence is visible).
-  - **Not fixed on purpose:** the remaining ~20 candidates were either cosmetic,
-    guarded behind a zero-width window in this catalog, or required speculative
-    defensive code. Full list is in this session's transcript, not here.
-  - **CONFIRMED in-app (2026-10-02, B4): the VGM fade outlives loop-forever.**
-    Reproduced with the real core on `19 1st Place Name Registration.vgz`:
-    with Repeat One on at `curLoop` 2, switching the *Indefinite Playback
-    setting* off ends the song ~3.5s of song time later (position 66608 ->
-    426, i.e. it restarts). Cause confirmed in the vendored tree:
-    `PlayerA::SetLoopCount()` only sets `_config.loopCount` and never clears
-    `_fadeSmplStart` (`playera.cpp:196`); `lvgm_set_indefinite_playback(false)`
-    latches `FadeOut()` (`playera.cpp:438`) *before* `applyLoopCount` restores
-    0. Only `Seek()` clears it. Pinned by the `xfail` in
-    `dev/test-vgm-loops.js`. Fixing it is an engine-behavior call — see the
-    open question in the handoff notes.
-  - **FIXED (2026-10-02): MDX lacked VGM's fade-tail capture.**
-    Enabling Repeat One while MDX's fade was already running folded the head
-    back into the band instead of riding the tail (measured display 105515 ->
-    71340, one 34.6s loop, on `catalog/mdx/G2MST6.MDX`).
-    `MDXPlayer` now ports `VGMPlayer.syncFadeTailCapture`: the fade start is
-    captured in `setLooping` before the pass count changes (mdxmini latches
-    `fade_out` and only reinit clears it, so a running fade keeps running —
-    the song still ends, which is correct), `getDisplayPositionMs` prefers the
-    captured tail, and a seek or the next load drops it. Verified in-app:
-    display 105600 -> 105982 across the toggle, fade still ends the song. Now a
-    real check in `dev/test-mdx-loops.js` (promoted to the feature branch as
-    `078431d4c`).
-  - **WITHDRAWN 2026-10-02: the MDX `long position_us` overflow is unreachable.**
-    It needs 35.8 min of one looping MDX, which is real but needs a long soak;
-    not re-verified in this session, and nothing in the harness touches it.
-  - **Stages still to run, in the whole app via `__cpDev`:** B6 (force it with
-    `delete window.ChipPlayer.chipCore._lvgm_get_cur_loop` rather than waiting
-    for a stale engine); B7/B8/B9 (synthesize 5-second MIDI files with the
-    exact shape: SMF format 2 carrying CC102/103, a lone CC111 near the end, and
-    >=2 note-less post-loop events); B10 (the `UserProvider` optimistic-favorite
-    *failure* path isn't token-guarded, so a late rejection reverts a different
-    song's favorite); B11 — **not ours, and the mechanism was misdiagnosed
-    here**: a bare `%` in a filename throws `URIError`, but in
+- **Rebase pitfalls (script-enforced; never rebase by hand).** `-X ours` in a
+  rebase resolves toward the *upstream*, the opposite of a merge, and silently
+  strips DEV regions — the scripts use `-X theirs`. Verify a rebase by *tree*,
+  not by "it completed" (`dev/rebase.sh` does). And expect *duplicated* content,
+  not just lost content: the promote skips path-listed files, so an older
+  promote's content can survive and get doubled by a replayed commit (seen once:
+  two copies of `_mdx_get_loop_start_ms` in `scripts/build-chip-core.js`); a
+  non-empty tree diff is a real finding to read, not noise to re-run away.
+- **Diagnosed defects from the feature-diff sweep (root-value verified; the rest
+  were cosmetic or behind a zero-width window in this catalog).** Still true:
+  - **DEAD (do not "fix"):** `XMPPlayer._loopCount` looks unreset on `loadData`,
+    but `Sequencer.playSong` calls `setLooping(...)` on every load, which
+    self-heals it before `loadData` runs.
+  - **MASKED:** `lvgm_get_cur_loop` lacks the `GetPlayer()` null guard its
+    siblings have, so a pre-first-load toggle computes loop-forever; reset by the
+    next `loadData`. Pinned by an `xfail` in `dev/test-vgm-loops.js`.
+  - **Known engine limit:** the VGM fade outlives `SetLoopCount(0)` (only `Seek()`
+    clears `_fadeSmplStart`), so switching *Indefinite Playback* off while
+    looping ends the song after the fade — pinned by an `xfail`.
+  - **End-detector caveat:** the trip gate is `max(0, durationMs - windowSec*1000)`,
+    so a track shorter than the window trips nearly ungated (covered by the
+    `detectSongEnd` toggle). If the gate is ever made nullable, the call site needs
+    its own null check — `getPositionMs() >= null` coerces to `>= 0`.
+  - **Latent, not ours:** a bare `%` in a filename throws in
     `MIDIPlayer.metadataFromFilepath`'s unguarded `decodeURIComponent`
-    (`MIDIPlayer.js:265`, Matt's, `e4e926832d` 2022, present in `master`), so
-    the song is unplayable on load — not in the startup browse URL, which goes
-    through `fetchDirectory`'s `encodeURIComponent` and is fine. Reachable in
-    prod today by clicking such a file in the browser; fixture
-    `catalog/midi/.../100% Pure Love.mid`. Our per-segment encoding fixes in
-    `util.getUrlFromFilepath`/`getMetadataUrlForFilepath` cover the other call
-    sites; this is the one that is left.
-  - **Super-speed playback is feasible and needs no tracked-file changes:** audio
-    is driven by a legacy `ScriptProcessorNode` on the main thread
-    (`App.js:190`, `playerNode.onaudioprocess` — the worklet is an 11-line no-op
-    stub), and `this.playerNode` is on the App instance = `window.ChipPlayer`. So
-    a devtools-only `__cpDev.superSpeed(k)` can save+null `onaudioprocess` and
-    call `player.processAudio(chans)` in a time-budgeted loop: identical call
-    sequence, buffer size and sample rate, only wall-clock density changes.
-    (Do *not* touch the sample rate handed to the players — song-time-per-buffer
-    is `bufferSize / rate`, so a higher rate is *slower*, and the practical
-    ceiling is 48000/8000 ~6x before engines misbehave.) Validate first by
-    asserting the engine's own `getPositionMs()`/`GetCurLoop()` agree at matched
-    song positions at 1x and 16x. Note that most Stage 1-4 items do **not**
-    need it once you assert the root value instead of the emergent behaviour.
+    (`MIDIPlayer.js:265`, present in `master`), so such a file is unplayable
+    (fixture `catalog/midi/.../100% Pure Love.mid`); our per-segment encoding
+    covers the other call sites.
+  - **Open (not fixed on purpose):** the `UserProvider` optimistic-favorite
+    *failure* path is not token-guarded, so a late rejection can revert a
+    different song's favorite. Judged not worth speculative defensive code blind.
+  - **Speeding a take up is available** as a devtools-only technique (drive
+    `player.processAudio` in a time-budgeted loop; do *not* raise the sample rate —
+    song-time-per-buffer is `bufferSize / rate`). Unneeded once an assertion checks
+    the root value rather than the emergent behaviour.
 - **Testing is deliberately NOT in the PR.** The dev harnesses stay in `dev/`
     (excluded by `dev/promote-paths.txt`) and are version-controlled on
     `dev/overlay`, so they persist without being shipped. Rationale: the repo has
@@ -1455,100 +1310,44 @@ checks no longer work. Compare a live context to a stored one with
     written while the maintenance cost lands on Matt afterwards. Offer it, don't
     impose it. This was decided explicitly — do not re-litigate without new
     information.
-- **Handoff state (2026-09, read this):**
-  - **Looping is now the top priority** and is treated as **feature** work (part
-    of completing the sub-tunes feature), not an overlay extra. The VGM Repeat
-    One baseline is implemented and the full toggle matrix is verified; see
-    "Repeat One / looping model" and the test matrix. This session fixed five
-    interaction bugs on `dev/overlay`: indefinite playback ended early under
-    Skip Silence (`469a8c78a`), the head folded into the band with repeat off
-    (`0b8d76781`) or when repeat was enabled mid-fade (`082b83cb2`), the
-     Off→All no-op toggle re-derived the loop count and jumped (`96683ba3e`),
-     and leaving a deep repeat cut the song instead of playing the fade
-     (`08e3bc86b`). GME was probed in-app and has no loop regions in this
-     catalog (whole-track restart already complies). **MDX is now seamless too**
-     (native loop + exact band; see "MDX (mdxmini)"), and **MIDI is now seamless
-     too** (JS event-loop wrap + shared band; see the per-format table),
-     **XMP is now seamless too** (native loop count + learned band), leaving
-     V2M alone on stop + reload.
-     - **OPEN (2026-10-06): V2M's reported duration does not match the engine.**
-       `V2MPlayer.getDurationMs()` reports 63000 for
-       `v2m/apollo dvd copy 4.5.4kg.v2m` while the engine keeps rendering past that,
-       so the slider reserves a 63 s box and the head parks at the end for a song that
-       has not finished — i.e. the format gets the *blind-loop* look it should not
-       have. Found while recording the changelog page: the clip was 5.7 s and the
-       reported song 63 s, so it could not show its own claim either (the "reload"
-       mark labelled an event that never happened on screen). Root cause not yet
-       established — `V2MPlayer` has no loop API at all (no `setLooping` override), so
-       this looks like a length/frame-count conversion rather than loop bookkeeping,
-       but that is a guess and needs measuring first: does the engine's own frame
-       count disagree with `getDurationMs`, or does the position simply not stop
-       advancing? Until then the V2M clip is `ready: false` and off the page
-       (`dev/record/scenarios.mjs`, TODO(unpublish)), and the page's "default loop"
-       group shows `sequencer-default-loop` instead — a MIDI file with no CC
-       102/103/110/111 in its byte stream, so no band can exist and the reload is
-       purely Sequencer-level. **Do not treat V2M as the worked example for
-       stop+reload while this is open.**
-     GME/MDX/`durationExtended`/
-     `getLoopBandMs` all feed the shared `Player` hooks; keep engine policy in
-     the engine's own player class.
-  - **Overlay/promote system** is in place but **WIP**: `dev/promote.sh` +
-    `dev/promote-paths.txt` + `DEV-BEGIN/DEV-END` regions. See "Dev overlay &
-    promotion" for the mechanism and the **Known gaps** (a few shared files are
-    still path-listed and should become regions).
-  - **The libvgm pin move was attempted and reverted in 2026-09** (runtime drift +
-    `wasm-opt`), then done on 2026-10-08: the build now uses the sibling `../libvgm`
-    clone and VGM renders. See "libvgm version" above.
-  - **Branches pushed to `origin`**: `master`, `dev/overlay`,
-    `feature/subtunes-as-first-class`. Worktrees: main = `dev/overlay`, sibling
-    `chip-player-js-feature/` = feature. `backup/master-pre-upstream-catchup`
-    holds `49ee4cde8`, our master before the 2026-10-07 upstream catch-up.
-  - **All three branches caught up to upstream (2026-10-07).** `master` is a
-    fast-forward to `dba9e5f8e` (23 commits, 2026-09-26 → 10-04); the feature
-    branch carries it as a **merge** commit, not a rebase, so the 25 sub-tune
-    commits keep their identity; `dev/overlay` was rebased on top via
-    `dev/rebase.sh`. `git diff master..feature/subtunes-as-first-class` is
-    41 files and contains no dev tooling or vendored engine. Two follow-ups
-    from that merge are recorded above: the parser-file split, and the
-    `'Game Boy'` label correction.
-  - **A catalog rebuild is a prerequisite for booting the server after a merge
-    that adds a column to a query.** `server/index.js` selects `m.contributor`
-    (upstream's 2026-10-04 `ce552d2f9`), but that column is created by
-    `scripts/build-music.js`, not by the server. On a catalog built before the
-    merge the server dies at require time with a bare
-    `SqliteError: no such column: m.contributor`, which reads like a code bug
-    rather than a missing migration. Run `node scripts/build-music.js -n` after
-    any merge that changes the schema.
-  - **Dev shims are untracked-stage, not tracked patches** (no more
-    `*.dev-backup` / `--revert` for auth/UserProvider). `dev/apply.sh` /
-    `dev/remove.sh` manage them; `git status` stays clean after apply.
-  - Both branches are pushed to `origin` and the trees are in sync: `dev/overlay`
-    differs from `feature/subtunes-as-first-class` by DEV regions only, and
-    `dev/promote.sh` reports "Nothing to promote" — the healthy state after a
-    promote. Do not run it as a per-change ritual (see "Dev overlay &
-    promotion"). The rebase half of the cycle is `dev/rebase.sh`, which verifies
-    the tree; do not rebase by hand.
-- **Remote dev access (LAN/WSL/Tailscale):** fixed, dev tooling only (not the
-  feature). Two root causes:
-  - `scripts/start.js` built its own minimal `WebpackDevServer` options and
-    silently ignored the whole `devServer` block in
-    `config/webpack.config.dev.js`, so `allowedHosts: 'all'` never applied and
-    the WS `Host`/`Origin` check rejected remote clients (`Invalid Host/Origin
-    header`, reconnect loop). It now spreads `config.devServer`. This also makes
-    the block's `hot: false` effective (HMR off, full live reload) and enables
-    its middleware. The stale `.wasm` middleware had to be removed because it
-    served from `public/` and 404'd the emitted `static/js/chip-core.*.wasm`;
-    webpack-dev-middleware already serves it as `application/wasm`.
-  - `src/config/index.js` hardcoded `http://localhost:8080` for the dev API,
-    catalog, and soundfonts, so a remote browser called its own localhost
-    (`ERR_CONNECTION_REFUSED`). It now uses `window.location.hostname`
-    (falling back to `localhost` in Node). Restart `npm run dev` after changing
-    either file.
-- **Test audio on a remote machine:** start `npm run dev`, then browse the
-  remote host on :8080 (the Express server proxies to WDS :3000). Verified via
-  the T3 preview at `mms-1:8080`: API/wasm/catalog/soundfont requests 200, WS
-  opens, and a clicked song plays. The `/preview` route needs skia-canvas;
-  everything else is fine over Tailscale.
+- **Looping is done across GME/VGM/MDX/MIDI/XMP, with SID/N64 free-run + tail
+  restart; V2M is the one format left on stop + reload.** Engine policy lives in
+  each player class and feeds the shared `Player` hooks; see "Repeat One /
+  looping model" for the per-format table. One open issue:
+  - **OPEN: V2M's reported duration does not match the engine.**
+    `V2MPlayer.getDurationMs()` reports 63000 for `v2m/apollo dvd copy 4.5.4kg.v2m`
+    while the engine renders past it, so the slider reserves a bogus box and the
+    head parks early — the wrong "blind loop" look. Root cause not established.
+    Until then `v2m-tier3` is `ready:false` and off the page, and the page's
+    default-loop group uses `sequencer-default-loop` instead. **Do not treat V2M
+    as the worked example for stop + reload while this is open.**
+- **Branch state:** all three branches are pushed to `origin`; the feature branch
+  carries upstream as a *merge* (not a rebase, so the sub-tune commits keep their
+  identity) and `git diff master..feature/subtunes-as-first-class` is feature-only
+  (41 files, no dev tooling or vendored engine). `dev/overlay` differs from it by
+  DEV regions only; `dev/promote.sh` reports "Nothing to promote" (the healthy
+  state — do not run it per change). `dev/rebase.sh` verifies the tree; never
+  rebase by hand.
+- **A catalog rebuild is a prerequisite for booting the server after a merge that
+  adds a column a query reads.** `server/index.js` selects `m.contributor`,
+  created by `scripts/build-music.js`, not the server; an old catalog dies at
+  require time with `SqliteError: no such column: m.contributor`, which reads
+  like a code bug. Run `node scripts/build-music.js -n` after any
+  schema-changing merge.
+- **Dev shims are untracked-stage, not tracked patches.** `dev/apply.sh` /
+  `dev/remove.sh` manage them; `git status` stays clean after apply.
+- **Remote dev access (LAN/WSL/Tailscale) — dev-only, not the feature.** Two
+  fixed root causes: `scripts/start.js` built its own minimal `WebpackDevServer`
+  options and ignored the `devServer` block in `config/webpack.config.dev.js`, so
+  `allowedHosts: 'all'` never applied and the WS `Host`/`Origin` check rejected
+  remote clients (reconnect loop); it now spreads `config.devServer`, which also
+  makes the block's `hot: false` effective and enables its middleware (the stale
+  `.wasm` middleware had to go — it served from `public/` and 404'd the emitted
+  `static/js/chip-core.*.wasm`). And `src/config/index.js` hardcoded
+  `http://localhost:8080` for the dev API/catalog/soundfonts, so a remote browser
+  called its own localhost; it now uses `window.location.hostname`. **Restart
+  `npm run dev` after changing either file.** Browse the remote host on :8080 (the
+  Express server proxies to WDS :3000); the `/preview` route needs skia-canvas.
 - **Verified playing:** NSF/NSFE/SPC/GBS/AY (GME), VGM/VGZ/GYM/S98/DRO (libvgm,
   including YM2612 on the default GPGX core), TG16/Game Boy/Neo Geo/Capcom/Konami VGZs,
   MOD/S3M/XM/IT (libxmp-lite), N64 `.miniusf`, V2M, MDX, MIDI (fluidlite + a
@@ -1582,241 +1381,50 @@ checks no longer work. Compare a live context to a stored one with
    (matching the repo, which has no test runner or CI). If Matt wants a durable
    suite, the same harnesses could move to a tracked `test/` dir and run via
    `node --test` with no new deps.
-3. **Changelog page with video examples.** *Tooling built 2026-10-05; **16/16 clips
-   recorded, passing and published** (8 across two top-level sections, 8 per-format),
-   after a curation pass merged four clips away. The two sections are the two classes
-   of change — `subtunes` (songfolder, favorite-subtune, shuffle-subtunes,
-   charts-subtunes) and `looping` (loop-band, repeat-toggle-smooth, repeat-leave-fade,
-   blind-loop) — because they are separate pieces of work that are not even about the
-   same thing.* `dev/record/`
-   holds the whole pipeline: a clip registry
-   (`scenarios.mjs`, **17 scenarios of which 16 publish** — `v2m-tier3` is
-   `ready: false` and withheld pending the V2M duration bug above; validated by
-   `scenarios.check.mjs` and wired into `dev/run-tests.sh`), the page-side
-   recorder shim
-   (`dev/shims/recorder.js` → `src/chip-player-record.js`, `window.__cpRec`),
-   the flash/mux scripts, and a generator that emits a self-contained `site/`
-   (relative URLs only, no framework) to upload to a web server and link from the
-   PR. Start at `dev/record/README.md`, and read `dev/record/FINDINGS.md`
-   *before* changing the recorder — it records the measured gotchas, several of
-   them counter-intuitive and several of them about the *pipeline*, not the app.
-   The ones that shape everything else:
-   - **Video comes from Playwright, not the host tab recorder.** The host's
-     recorder captures at 1x CSS px and upscales (soft), declares a variable
-     `r_frame_rate` that ffmpeg's default CFR output resamples away (60 real
-     frames → 5, i.e. a slideshow), and loses takes over 50 MiB in transfer.
-     `dev/record/shoot.mjs` drives Playwright instead: viewport 720x720 at
-     `deviceScaleFactor` 2 with **`recordVideo.size` left unset** (setting it
-     pads the frame and shrinks the app to ~57% of the picture), giving 720x720 at
-     a constant 25 fps, DPR-correct, written straight to disk. It needs the
-     `--no-save` playwright install — see the npm trap in "Dev environment".
-   - **Audio still comes from the page**, not the capture: an in-page
-     `MediaStreamAudioDestinationNode` off `ChipPlayer.gainNode`, muxed with the
-     video. Playwright's `recordVideo` is silent and this host has no audio
-     device at all, so nothing else is available (this also kills
-     `canvas.captureStream()` / `getDisplayMedia` as options — a DOM app has no
-     canvas, and the preview tab exposes no `mediaDevices`).
-   - **The sync mark is green and detected by hue, not luma.** Playwright starts
-     recording *before* navigation, so every clip begins on a blank page; a white
-     mark was indistinguishable from that page load, `find-flash.sh` locked onto
-     the load, and clips were published ~3.5 s out of sync with their own audio
-     **while every assertion still passed**. Green (bright, both chroma channels
-     low) is unique in this app by construction.
-   - `-fps_mode passthrough` in `mux.sh` is mandatory for a VFR input, the trim
-     must start a frame *past* the mark, and `shoot.mjs` asserts the capture is
-     exactly the viewport so the padding failure can't return silently.
-   - `preview_evaluate` still fails intermittently **at the transport level** when
-     previewing; retry, and read `__cpRec._run` / `__cpRec.result()` to see
-     whether a "failed" call landed.
-   - **All 14 clips are recorded, passing and published** (6 main, 8 per-format).
-     Four were *removed on purpose* rather than fixed, because they were redundant
-     with `songfolder` or with `loop-band`: `subtune-is-a-song`, `labels`,
-     `share-link` and `show-loop-area`. Their claims were folded into those two
-     clips' `watch` bullets and `before` lines, so nothing was lost — the page is
-     shorter and every clip earns its place.
-   - **A clip has to show the event its own text names.** The curation pass found
-     three clips whose `watch` bullets claimed more than their footage showed, and
-     the fix is always the same: measure the moment, then script up to it.
-     `mdx-native` claimed "the band is exact" while reaching 5% of its song with
-     **zero** display-folds — MDX uses the base two-pass band, so the head only
-     folds after `intro + 2*loop`, and a take from the beginning never arrives;
-     it now seeks to 101000 first and records 51 folds, the first landing 123 ms
-     from the band start. `n64-indefinite` claimed "instead of reloading every
-     cycle" at 2% of its song. `vgm-native` had one bullet and quoted no numbers.
-     Related: `repeat-leave-fade` asserted only `durationExtended` — *a flag
-     saying the tail was scheduled* — when its claim is an amplitude one, so a
-     hard cut (what master did) would have passed; it now reads the envelope
-     (0.140 → 0.000 over ~4.8 s, libvgm's 4 s fade plus its 0.5 s of silence).
-   - **Every clip asserts audibility.** Nine predate the RMS tap on the app's gain
-     node, and every one of their assertions read the transport — which is exactly
-     what a *silent* engine does too, so each would have published a moving
-     playhead and no sound. Each now has an `audible` assertion on the trace's
-     per-tick `rms`, with a length floor per clip so it cannot pass on a partial
-     trace. `repeat-leave-fade` has none by that name and does not need one: its
-     two envelope assertions are strictly stronger.
-   - **Two seams exist for a clip whose seek or song-end does not suit a take.**
-     `preRoll` seeks *before* the trace, audio recorder and flash — for N64/USF,
-     whose seek renders forward and takes ~9 s (measured landing within 0.5–2 s
-     of the ask, but **not repeatable between runs**, so those scenarios assert
-     behaviour rather than a fixed position). `finishAfterMs` shortens the run
-     past the last step, for a clip whose song ends mid-take: the default 600 ms
-     was catching the sequencer's *restart*, which is both the wrong sound and the
-     wrong thing for an envelope assertion to measure.
-   - **The page's per-format section is grouped by mechanism, not format**: native
-     loops at load / indefinite playback looping / learned loops / the default
-     (repeat the whole song). Runs cheapest-to-dearest so the section ends on the
-     fallback, and the last group is framed as *the default a new format inherits
-     for free* — `Sequencer.advanceSong` never advances `currIdx` under
-     `REPEAT_ONE`, so whole-file replay is what every player inherits with no
-     engine override. Each clip names a `group`; `scenarios.check.mjs` rejects an
-     unknown one, because a typo'd group silently drops a recorded, passing clip
-     out of the page.
-   - **The green-verdict trap, four times over.** The single most valuable lesson
-     from the curation pass, and every instance shipped a *passing* clip that
-     did not do the thing it claimed:
-     1. `button[title*="avorite"]` — `FavoriteButton` renders no `title`, so the
-        selector **matched nothing** and nothing was favourited. Then unscoped
-        `button.FavoriteButton` clicked the **first row's heart** (Prelude) while
-        the clip claimed Epitaph. Then `a[href="/favorites"]` **never matched**
-        either, because the nav link spreads the search params and the href is
-        `/favorites?r=<cache-buster>` — the take never left `/browse`. All three
-        passed, because "Epitaph", the folder name and `subtune=1` are on the
-        browse page too. **A selector that matches nothing cannot fail an
-        assertion**, so an assertion has to name the page it is about.
-     2. `Show Loop Area` was clicked while **behind the footer**
-        (`elementFromPoint` at its centre returned a transport button). A synthetic
-        click fires the React handler regardless, so the band assertions were green
-        over a click no viewer could make. `loop-band` now records at 900x840 and
-        asserts the checkbox is genuinely the topmost element at its own centre.
-     3. `document.body.textContent` searches for a song title pass on any page,
-        because the **footer** keeps showing the playing song — scope assertions to
-        `.BrowseList` (or to the trace), never to `body`.
-     4. The fourth instance, in `shuffle-subtunes` (2026-10-08), is the same shape
-        reached from the other side: the assertion asked "is the playing row
-        highlighted", and in a **virtualized** list that is true of a row rendered
-        but scrolled out of the box — ~33 of up to 73 rows exist. The first recorded
-        take passed 8/8 verdicts while **three of its eight song folders showed no
-        highlight at all**, and the reveal step that was supposed to scroll it into
-        view was a silent no-op. Three fixes, all of which the take alone would not
-        have surfaced: assert **visibility** (the sampler grew `hlInView`), **record
-        what the reveal did** as a trace mark (`reveal: row 25 -> 194px`, or
-        `no-op (…)` — a reveal that found nothing looks exactly like one that
-        worked), and make it **retry** while the listing is in flight. Two further
-        measured findings are in `dev/record/README.md` §7a: the row index must come
-        from the **sequencer's** ref, not `player.getSubtune()` (they disagree on ~2
-        in 14 nsfe songs, because GME reports the post-`plst` track), and
-        `list.scrollToRow` is a **no-op** on this WindowScroller/List pair where a
-        direct `scrollTop` write works 10/10. The same clip then found the
-        *click* variant: a shuffled directory is full of one-second sound effects, so
-        the song can end before the step runs, leaving the footer's path link
-        belonging to the song it replaced — the click navigated to that song's folder
-        and the frame contradicted the clip. `tryClick(sel, 'song-folder-link')`
-        refuses the click instead, and the refusal is **marked**, so a skipped beat
-        is visible in the proof instead of looking like one that worked.
-     The general form: **assert on the artefact, not on the state you manipulated**,
-     and when the claim is "the viewer sees X happen", assert X is *visible* — and
-     when a step is supposed to *make* it visible, assert that the step ran.
-   - **A clip's fixture must support its own claim.** Three fixtures were replaced
-     after measuring rather than after reading: a ~1.3 s test tone that *ends* for a
-     clip about a driver that loops internally (GME reports `play_length` 101000 ms
-     for `nsfe/Akumajou Densetsu (VRC6).nsfe` sub-tune 3, seek to `play_length -
-     1000`); HVSC's real listed lengths, which arrive over HTTP at load
-     (`sid/Bionic_Commando.sid` sub-tune 2 is genuinely `0:03`, and the trip gate
-     `durationMs − 6000` is therefore 0 — open from the start); and a SID restart
-     whose first sampling window ended *exactly* at the restart, which made a
-     working mechanism look like it left the engine silent. Sampling windows must
-     outlast the event being demonstrated.
-   - **Lengths are not in the catalog.** `subtune.length_ms` is NULL for NSF/NSFE
-     and SID; GME parses `play_length` at load, SID fetches `/api/hvsc?sidHash=`
-     over HTTP and falls back to 150 s. Any clip asserting "past the reported
-     length" has to read the number the *player* used — `dev/record/probe.mjs`
-     exists for exactly this (`seek`/`watch`/`calls`/`restart` modes, and it taps
-     the app's own gain node so a seek into a silent tail cannot pass as music).
-   - **The page must be served with Range support.** `python3 -m http.server` has no
-     Range support, so `video.seekable` came back empty (`0.00-0.00`), clips showed
-     a first frame that would not play, and the same file played standalone — which
-     reads exactly like a broken encode. `dev/record/serve.mjs` is `express.static`
-     (already a repo dependency).
-   - **The intermittent stalls are fixed but NOT explained — do not repeat the
-     explanation.** The user reports playback is now consistent; the change set was
-     `preload="none"` + posters + explicit `width`/`height` +
-     `Cache-Control: max-age=3600`, and **which part fixed it is unknown**. The
-     story I wrote first — 14 simultaneous preloads queueing behind the browser's
-     six-connection-per-host limit — is **refuted**: `vidqueue.mjs` replays the old
-     `preload="metadata"` page and the deepest clip plays fine even clicked 0.5 s
-     after load, and `vidrange.mjs` shows `Range`+`If-Range` answered `206` under
-     both cache policies. Keep the changes anyway, on their own merits: 0 MB on
-     load is right for a page, `express.static`'s `max-age=0` re-fetched everything
-     every visit, and a `preload="none"` element needs a poster and explicit
-     dimensions or the box collapses. But the causal story was written *after* the
-     fix and survived no test — the user's "35 MB is about a second on a LAN, and
-     clicking play should make it load" was a better argument than all of it. Full
-     correction in `dev/record/FINDINGS.md`.
-   - `recordVideo.size` must be **exactly the viewport**, and past 800px the default
-     silently rescales: 900x720 unset gives an 800x640 frame (0.889x, softening the
-     glyph edges dsf exists to protect). Also measured: `deviceScaleFactor` buys
-     supersampled antialiasing, **not** a bigger frame — output is CSS resolution,
-     so dsf must be held constant when comparing framings. Clips capture 900x720;
-     a scenario may ask for more via `viewport` (loop-band needs 840 for the reason
-     above).
-   - Batch run lessons worth carrying: a scenario's `until` gate must never wait
-     for its own first step (an `open` that starts playback deadlocks a
-     `until: 'playing'` gate); a multi-tune file's row in its parent's listing is a
-     **song folder**, so `clickRow` navigates instead of playing and a preload
-     waits forever; `clickRow` cannot find `..` (App.js unshifts it client-side, so
-     it is not in any listing) — the shim special-cases it by exact text; the
-     **Favorites page is virtualized** (measured 33 rows in the DOM with the nsfe
-     group scrolled out of frame), so a clip that demonstrates favouriting sets
-     `clearFavorites: true` and must not rely on accumulated dev-user state — and
-     note that clearing has to go through `handleToggleFavorite`, because `faves` is
-     seeded from `localStorage`, so a server-only clear leaves the client believing
-     the favourites still exist and the next heart click *removes* instead of adds;
-     opening a sub-tune leaves the browse route (its href is
-     `/?play=…&subtune=N`), so showing two directories needs the new
-     `__cpRec.navigate()` step; the trace sampler must record every field the
-     registered assertions read; and a virtualized listing is not a stable
-     assertion target — prefer trace marks over live DOM.
-   Worth capturing in the clips, per the original note: a song folder expanding
-   into sub-songs, the time-slider loop band, Repeat One toggling without a jump,
-   and per-sub-tune favouriting. The page deliberately says *feature-only* — no
-   master build, no A/B recording — with each clip's "Before:" line describing
-   what master did instead, and every clip publishing the numbers that verify its
-   claim. The page is hosted **separately** from the site (decision 1 in
-   `dev/record/README.md`), not added to `public/`.
-   - **Page weight is no longer the constraint; per-clip duration is governed by a
-     120 s cap and a 200 MB upload-dir budget** (`scenarios.check.mjs`). Raised
-     2026-10-06 from 9 s → 20 → 30 → 35 → 120 s across this session, because the
-     clips are `preload="none"` with posters: a reader fetches nothing until they
-     click, so a heavy page costs them nothing they did not ask for. Current weight
-     **59 MB of 200 MB** across 30 media files, reported on every check. Note the
-     per-clip *duration* cap is now a guard against a scenario that silently waits on
-     something that never happens, not a size proxy — it used to be the latter, which
-     is why it was raised five times. Longest clips are now `xmp-learned-band`
-     (32.5 s) and `midi-cc102` (29.6 s), and both are long *for watchability* rather
-     than because the behaviour needs the time: `xmp-learned-band` holds 10.5 s of
-     music before its seek and ~7.7 s of loop after the wrap, and the same behaviour
-     proved in 22 s was hard to follow. `loop-band` is no longer the longest
-     (10.3 s); its assertions are still VGM-specific (`curLoop`, intro 342 / loop
-     800) while MDX is now a viable fixture for the same claim (its checkbox is not
-     occluded; its band starts at 69 s, so it would need a seek).
-   - **Build and re-record are both selective, which is what makes the polish phase
-     workable** (2026-10-06). A prose or CSS edit costs ~90 ms:
-     `build-site.mjs` caches the only two video-derived facts (dimensions, poster
-     frame) on the clip's size+mtime+seek time, verified to reproduce `index.html`
-     and all 14 jpgs byte-for-byte against a cold build with the cache and posters
-     deleted — so the cache skips work rather than degrading it. `shoot.mjs` takes
-     named repeatable `--clip <id>` args, resolves every id *before* recording (a
-     typo in the last position must not cost a 15 s take), and does not stop at the
-     first failure: `shoot: 13/14 passed`, then the failed ids. A bare
-     `shoot.mjs` is an error rather than an implicit full re-shoot; `--all` is the
-     explicit way to ask for that.
-   - **Playback delivery: the Range bug is established; the stall fix is confirmed
-     only in outcome** (2026-10-05). Both bugs were invisible to file-level checks:
-     `ffprobe` called every clip valid, every codec was `probably` playable, and
-     14/14 played in automation. Keep in mind for any future page that the *page's
-     requests* are a separate artefact from the files, and that "I changed it and it
-     works" is not the same claim as "I know why it works" — see the correction
-     above and in `FINDINGS.md`.
+3. **Changelog page with video examples.** *Built; **16/16 clips recorded, passing and
+   published** (8 main, 8 per-format).* `dev/record/` holds the pipeline: the clip
+   registry (`scenarios.mjs`, **17 scenarios of which 16 publish** — `v2m-tier3` is
+   `ready:false` pending the V2M duration bug; validated by `scenarios.check.mjs` and
+   wired into `dev/run-tests.sh`), the page-side shim
+   (`dev/shims/recorder.js` → `src/chip-player-record.js`, `window.__cpRec`), the
+   flash/mux scripts, and a generator emitting a self-contained `site/` (relative
+   URLs only) to host **separately** and link from the PR.
+   - **Commands:** `node dev/record/shoot.mjs --clip <id> [--clip <id>…]` records
+     (selective; `--all` for a full re-shoot), `node dev/record/build-site.mjs`
+     rebuilds the page, and `dev/record/serve.mjs` serves it with Range support. Both
+     the shoot and the build are selective and cached — a prose-only rebuild is
+     ~0.1 s, and a typo'd id is refused *before* any take runs.
+   - **The measured gotchas are in `dev/record/FINDINGS.md` — read it before changing
+     the recorder.** The load-bearing ones: video is Playwright, not the host tab
+     recorder; audio is mirrored off `ChipPlayer.gainNode` (the capture is silent and
+     this host has no audio device); the sync mark is green-and-hue, not white (a
+     white mark locked onto the page load and desynced every clip while the verdicts
+     stayed green); `recordVideo.size` must equal the viewport; trim with
+     `trim`/`atrim`, not `-ss`; serve with Range; `preload="none"` + posters. The
+     original playback stalls are fixed but their **cause is not established** — do
+     not repeat the "14 simultaneous preloads queue" story, which is refuted there.
+   - **The green-verdict trap** (the most valuable lesson): a *passing* clip that did
+     not do what it claimed, four times — a selector that matches nothing, an
+     occluded control a synthetic click fires regardless, a `body` text search the
+     footer satisfies, and a highlight that is rendered but scrolled out of view. The
+     general form: **assert on the artefact, not on the state you manipulated**, and
+     assert the viewer *sees* it (and that any step meant to reveal it actually ran).
+   - **Fixtures and assertions are design, not plumbing.** A fixture must support its
+     own claim (measure it: `dev/record/probe.mjs`), every clip asserts audibility
+     because a moving transport is exactly what a silent engine does too, and
+     `scenarios.check.mjs` warns about a trace assertion that can pass vacuously.
+   - **Design decisions:** the page is *feature-only* (no master build / A-B; each
+     clip's "Before:" line describes master); the per-format section is ordered by
+     **mechanism**, not format, and each clip names a `group` (an unknown one is
+     rejected, since a typo'd group silently drops a recorded clip from the page);
+     per-clip duration cap 120 s and a 200 MB upload budget, both guards against a
+     scenario waiting on something that never happens (page weight stopped being the
+     constraint once clips were `preload="none"` with posters).
+   - **The recorder's extra step arguments** (`dev/shims/recorder.js`): `waitFor` (a
+     string predicate; the steps after it are timed from when it was met),
+     `minPlayedMs` (refuse a "Next" unless the current song has played that long),
+     and `startAtZero` (re-seek to 0 at the flash; default on for `preload`, off for
+     `preRoll`, opt-in for a share link). See `dev/record/README.md` §4/§5.
 4. Known unsupported formats (don't add to `FORMATS` without a player/parser):
    plain `.usf` sets (only `.miniusf` is supported), PSF/PSX (`psflib` is reused
    only by the USF loader; no PSX core), and PSM (`libxmp-lite` = it/mod/s3m/xm;
@@ -2341,7 +1949,7 @@ Testing gotchas learned the hard way:
   `learnLoopFromOrder` therefore looks "never called" while running fine. Sample
   player fields (`_lastPos`, `_orderFirstSeen`) instead of patching.
 
-### Pitfalls that cost real time on 2026-10-03 (read before engine work)
+### Pitfalls that cost real time (read before engine work)
 
 The recurring theme was **asserting engine/version behaviour from reading source
 instead of measuring it**, and three separate conclusions were overturned that

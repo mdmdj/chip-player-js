@@ -54,6 +54,11 @@ const VGZ_GENESIS_DIR = 'vgz-genesis';
 const GREEN_HILL = 'vgz-genesis/Sega Genesis_Sonic the Hedgehog_02 - Green Hill Zone.vgz';
 const SONIC2_CHEMICAL = 'vgz-genesis/Sega Genesis_Sonic the Hedgehog 2_05 - Chemical Plant Zone.vgz';
 
+// repeat-leave-fade's fixture: a short, clean VGM loop (intro 93, loop 870), so
+// "leave after three loops" is ~2.7 s and the whole take still fits under 8 s.
+const HEARTBEAT = 'neogeo/Samurai_Shodown_(Neo_Geo)/23 Heartbeat (Shiro Tokisada Amakusa 1).vgz';
+const HEARTBEAT_DIR = 'neogeo/Samurai_Shodown_(Neo_Geo)';
+
 // The shuffle clip's timeline: play a song, open the folder it lives in, show the
 // row being played, move on. Repeated eight times, so it is generated rather than
 // written out -- the numbers below are the whole design, and a hand-copied eighth
@@ -96,7 +101,11 @@ const shuffleSubtuneWalk = (() => {
     steps.push({ atMs: at, reveal: true, label: `song ${i}: the row being played` });
     if (i === SHUFFLE_SONGS) break;
     at += REVEAL;
-    steps.push({ atMs: at, play: '.AppFooter button[title="Next"]', label: 'next song' });
+    // A one-second sound effect in this directory can end and auto-advance before the
+    // cadence reaches this beat, and the fixed Next would then cut off the song that
+    // just started. `minPlayedMs: PLAY` refuses that advance (recorded as a skip); the
+    // guard reads the player's position, which resets on the auto-advance.
+    steps.push({ atMs: at, play: '.AppFooter button[title="Next"]', minPlayedMs: PLAY, label: 'next song' });
     at += NEXT;
   }
   return steps;
@@ -136,7 +145,13 @@ const chartsSubtuneWalk = (() => {
     at += CHART_HOLD;
     if (i === CHARTS_SONGS) break;
     at += 250;
-    steps.push({ atMs: at, play: '.AppFooter button[title="Next"]', label: 'next song' });
+    // The chart draws short sub-songs (SID/GBS), and the sequencer advances by itself
+    // when one ends. A fixed-cadence Next would then land on the song that just
+    // started and cut it off after a few hundred ms. `minPlayedMs: PLAY` refuses that
+    // advance -- recorded as a skip, so the proof names the missing beat -- and the
+    // guard reads the player's position, which resets on the auto-advance, so it
+    // follows the new song instead of racing it.
+    steps.push({ atMs: at, play: '.AppFooter button[title="Next"]', minPlayedMs: PLAY, label: 'next song' });
     at += NEXT;
   }
   return steps;
@@ -223,7 +238,9 @@ export const scenarios = [
       // `button[title*="avorite"]`, matched nothing at all: FavoriteButton renders no
       // title attribute. Two dead selectors, two different wrong clips, both green.)
       { atMs: 1800, play: '.AppFooter button.FavoriteButton', label: 'click the heart' },
-      { atMs: 2800, label: 'heart filled in' },
+      // The heart flips once the POST lands and the context re-fetches, so wait for
+      // the filled state rather than guess a delay after the click.
+      { atMs: 0, waitFor: 's.fav === true', label: 'heart filled in' },
       // `^=` not `=`: the nav link is to={{ pathname: '/favorites', ...search }},
       // and `search` carries the driver's ?r=<cache-buster>, so the rendered href
       // is "/favorites?r=...". An exact-match selector silently matched nothing, the
@@ -232,8 +249,12 @@ export const scenarios = [
       // subtune=1 are all on the *browse* page too. Same class as the dead
       // `button[title*="avorite"]`: a selector that matches nothing cannot fail an
       // assertion, so the assertions have to name the page they are about.
-      { atMs: 3400, play: 'a[href^="/favorites"]', label: 'open Favorites' },
-      { atMs: 5400, label: 'listed on the Favorites page' },
+      { atMs: 900, play: 'a[href^="/favorites"]', label: 'open Favorites' },
+      // The row appears once the Favorites fetch lands, so wait for it rather than
+      // time it. Scoped to the list column, as the assertions are.
+      { atMs: 0, waitFor: 'window.location.pathname.indexOf("/favorites") === 0 && Array.from(document.querySelectorAll(".BrowseList-colName a")).some((a) => /Akumajou Densetsu/.test(a.textContent))', label: 'listed on the Favorites page' },
+      // Hold on the list so the row is readable, and so the take clears the audible floor.
+      { atMs: 1200, label: 'under the song folder heading' },
     ],
     // No gate: this scenario's first step is the open that starts playback, so
     // `until: 'playing'` deadlocks (the gate waits for the step it blocks). The
@@ -322,20 +343,27 @@ export const scenarios = [
       // is *not* the playing song's folder. That is the frame a short sound effect
       // used to produce -- the click landing on the previous song's folder -- and it
       // is the exact shape of a green take that does not show its own claim, so it
-      // is now forbidden outright rather than counted.
-      { name: 'never-highlights-a-song-that-is-not-playing', test: '(() => { if (!(tr.samples.length >= 200)) return false; return !tr.samples.some((x) => x.hl && x.hlInView && x.loc !== "/browse/" + x.path); })()' },
+      // is now forbidden outright rather than counted. `x.path` is required: with no
+      // playing song there is nothing to compare the page against, and the comparison
+      // already read `loc !== "/browse/null"` on a transient mount tick, which is a
+      // frame that makes no claim rather than a wrong folder.
+      { name: 'never-highlights-a-song-that-is-not-playing', test: '(() => { if (!(tr.samples.length >= 200)) return false; return !tr.samples.some((x) => x.path && x.hl && x.hlInView && x.loc !== "/browse/" + x.path); })()' },
       // The Next clicks landed. Only a real advance changes (path, subtune), so a
       // take whose Next buttons matched nothing still shows one song and fails the
-      // count above; this names the mechanism instead of only its consequence.
-      { name: 'next-was-clicked-repeatedly', test: 'tr.marks.filter((m) => /^next song$/.test(m.label)).length >= 5' },
+      // count above; this names the mechanism instead of only its consequence. Four
+      // rather than five of the seven, because a short song that auto-advanced makes
+      // its Next deliberate-skip, and the distinct-song claim above is the strong one.
+      { name: 'next-was-clicked-repeatedly', test: 'tr.marks.filter((m) => /^next song$/.test(m.label)).length >= 4' },
       // The frame supports the claim at the end: a highlighted row inside the scroll
       // container's box, rather than one that exists but is rendered off-screen --
       // same reasoning as loop-band's "checkbox-was-really-clickable". The fallback
       // is for the last song having been *skipped*, which leaves the previous song's
       // folder on screen with nothing highlighted; that is a legitimate state now
-      // that the skip is deliberate, and the clip's own marks say so. Capped at three
-      // so a take where nothing was shown cannot pass on the fallback alone.
-      { name: 'ends-on-a-song-folder-showing-the-playing-song', test: '(() => { if (!(tr.samples.length >= 200)) return false; const row = document.querySelector(".Song-now-playing"); const sc = document.querySelector(".App-main-content-area"); if (row && sc) { const b = row.getBoundingClientRect(); const c = sc.getBoundingClientRect(); if (b.top >= c.top - 1 && b.bottom <= c.bottom + 1 && b.height > 0) return true; } const skips = tr.marks.filter((m) => /^skipped /.test(m.label)).length; return skips >= 1 && skips <= 3; })()' },
+      // that the skip is deliberate, and the clip's own marks say so. Counted only
+      // for the *folder-link* guard (a Next that was refused leaves the folder beat on
+      // screen, so it cannot produce this state), and capped at three so a take where
+      // nothing was shown cannot pass on the fallback alone.
+      { name: 'ends-on-a-song-folder-showing-the-playing-song', test: '(() => { if (!(tr.samples.length >= 200)) return false; const row = document.querySelector(".Song-now-playing"); const sc = document.querySelector(".App-main-content-area"); if (row && sc) { const b = row.getBoundingClientRect(); const c = sc.getBoundingClientRect(); if (b.top >= c.top - 1 && b.bottom <= c.bottom + 1 && b.height > 0) return true; } const skips = tr.marks.filter((m) => /^skipped /.test(m.label) && /footer still links/.test(m.label)).length; return skips >= 1 && skips <= 3; })()' },
       // Every assertion above reads the transport or the DOM, neither of which can
       // tell a playing engine from a silent one. 40 audible 100ms ticks is ~4s of
       // music, well under the ~12s this take plays, so it cannot pass on one song.
@@ -385,7 +413,13 @@ export const scenarios = [
       // tall and only about 20 fit, so a row can be highlighted while the picture
       // shows nothing but other songs.
       { name: 'chart-highlight-was-on-screen', test: '(() => { const n = tr.samples.filter((x) => x.hl && x.hlInView && x.loc === "/top").length; return tr.samples.length >= 200 && n >= 15; })()' },
-      { name: 'next-was-clicked-repeatedly', test: 'tr.marks.filter((m) => /^next song$/.test(m.label)).length >= 7' },
+      // A take can refuse some Next clicks -- the guard is deliberate, and the chart
+      // draws short sub-songs that auto-advance. So the mechanism assertion counts
+      // only the clicks that happened (a refused one is marked `skipped …` and no
+      // longer marks its label), and the stronger claim is the walk reaching many
+      // distinct songs, which auto-advance alone could also do.
+      { name: 'advanced-through-many-songs', test: '(() => { if (!(tr.samples.length >= 200)) return false; const seen = new Set(tr.samples.filter((x) => x.path).map((x) => x.path + ":" + x.sub)); return seen.size >= 6; })()' },
+      { name: 'next-was-clicked-repeatedly', test: 'tr.marks.filter((m) => /^next song$/.test(m.label)).length >= 5' },
       { name: 'audible', test: '(() => { const r = tr.samples.map((x) => x.rms).filter((n) => n != null); if (!(r.length >= 200)) return false; return r.filter((n) => n > 0.02).length >= 40; })()' },
     ],
   },
@@ -548,61 +582,52 @@ export const scenarios = [
     ready: true,
     title: 'Turning Repeat One off plays the rest of the song',
     watch: [
-      'After six loops the toggle is turned off — deep enough that a naive implementation would cut the song instantly.',
+      'After three loops the toggle is turned off — deep enough that a naive implementation would cut the song instantly.',
       'The volume falls away over four seconds rather than stopping: this is libvgm’s own fade, which the wrapper configures at 4 s.',
       'Only when the fade has run out does the song end. The playhead rides the tail the whole way.',
     ],
     before: 'master left Repeat One by stopping the song; a deep repeat ended instantly with no fade.',
     harness: 'dev/test-vgm-loops.js',
-    browse: `/browse/${HURRY_DIR}`,
-    fixture: HURRY,
-    preload: { dir: HURRY_DIR, name: '16 Hurry Up!.vgz' },
-    // Timings measured off the recorded envelope, not estimated. Leaving at 5 s, the
-    // recorded level falls 0.144 -> 0.000 over the next ~4.8 s (libvgm's configured
-    // 4 s fade plus its 0.5 s of trailing silence), and the sequencer then restarts
-    // the file: position 10356 -> 278 at ~10.3 s, because the context is one song and
-    // a finished song advances to it. So the last mark sits before the restart -- the
-    // clip is about the fade, and a restarted song is a different clip.
+    browse: `/browse/${HEARTBEAT_DIR}`,
+    fixture: HEARTBEAT,
+    preload: { dir: HEARTBEAT_DIR, name: '23 Heartbeat (Shiro Tokisada Amakusa 1).vgz' },
+    // This file: intro 93, loop 870, so band [963, 1833] and duration 6333 (intro +
+    // 2 loops + the 4 s fade + 0.5 s silence). Repeat One is left at loop 3 (the
+    // `waitFor`), ~2.7 s in: the current pass finishes ~0.87 s later, libvgm fades
+    // the next 4 s, then 0.5 s of silence, then the sequencer restarts the file.
+    // Measured with a 150 ms sampler: off at 2.70 s (curLoop 3), the fade runs from
+    // ~3.57 s to ~7.57 s, and the position drops (restart) at ~8.11 s -- so the last
+    // mark and `finishAfterMs` sit inside that silence, and the restart's own audio
+    // never lands in a clip that is about the fade.
     steps: [
       { atMs: 100, repeat: 'one', label: 'Repeat One ON' },
-      { atMs: 5000, repeat: 'off', label: 'Repeat One OFF — from loop 6' },
-      { atMs: 6600, label: 'the pass finishes, the fade begins' },
-      { atMs: 8500, label: 'fading out — still playing' },
-      // The fade reaches silence at ~9.6 s and the sequencer restarts the file at ~10.1 s
-      // (position 10448 -> 92). The recording runs to the last step plus
-      // `finishAfterMs`, so the span has to end *inside* the silence or the restart's
-      // own audio lands in the clip and the envelope assertions measure the new song
-      // instead of the fade. Measured, not guessed: level 0.00009 at 9.5 s, 0 from
-      // 9.6 s, back to 0.097 by 10.4 s. 9500 + 600ms of finish = 10.1 s of trace,
-      // which is the last sample before the restart.
-      // The fade reaches silence at ~9.6 s and the sequencer restarts the file at ~10.1 s
-      // (position 10448 -> 92). The recording runs to the last step plus
-      // `finishAfterMs`, so the span has to end *inside* the silence or the restart's
-      // own audio lands in the clip and the envelope assertions measure the new song
-      // instead of the fade. Measured, not guessed: level 0.00009 at 9.5 s, 0 from
-      // 9.6 s, back to 0.097 by 10.4 s.
-      { atMs: 9500, label: 'silence: the fade ran out, the song ended' },
+      // Leave exactly at the third loop, not at a wall-clock time: the loop is
+      // 870 ms, so the toggle would otherwise drift in and out of "deep".
+      { atMs: 0, waitFor: 's.curLoop >= 3', label: '3 loops in' },
+      { atMs: 0, repeat: 'off', label: 'Repeat One OFF — from loop 3' },
+      { atMs: 900, label: 'the pass finishes, the fade begins' },
+      { atMs: 3000, label: 'fading out — still playing' },
+      { atMs: 4900, label: 'silence: the fade ran out, the song ended' },
     ],
-    // Cut the recording 100 ms after the last step rather than the default 600 ms.
-    // At 600 ms the trace ran to 10.2 s and caught the restart's first buffer, which
-    // is both the wrong sound for a clip about a fade and the wrong thing for the
-    // envelope assertions to measure. finishAfterMs is the seam for exactly this --
-    // a take that must not run past its own last event.
-    finishAfterMs: 100,
+    // End the take inside the silence (which runs ~off+4870 to ~off+5410 ms) rather
+    // than at the default 600 ms, which would catch the restart's first buffer --
+    // the wrong sound for a clip about a fade, and the wrong thing for the envelope
+    // assertions to measure. finishAfterMs is the seam for exactly this.
+    finishAfterMs: 150,
     until: 'playing',
     assert: [
       { name: 'left-looping', test: 's.looping === false' },
       // Read from the trace, NOT from s: durationExtended is cleared when the
       // sequencer restarts the file, so the final snapshot says false even though
       // the flag was correctly set for the whole fade. The evidence is the envelope.
-      { name: 'fade-tail-played', test: '(() => { const t = tr.samples.filter((x) => x.t > 5100); return t.length >= 40 && t.some((x) => x.p > 9000); })()' },
+      { name: 'fade-tail-played', test: '(() => { const off = tr.marks.find((m) => /Repeat One OFF/.test(m.label)); if (!off) return false; const t = tr.samples.filter((x) => x.t > off.t + 900); return t.length >= 30 && t.some((x) => x.p > 7000); })()' },
       // "The fade plays out, and only then does the song end" is an *amplitude*
       // claim, and durationExtended is only a flag saying the tail was scheduled.
       // So read the envelope: it has to decline, and be near silence at the end.
       // A hard cut -- what master did -- fails here.
       {
         name: 'volume-faded-out-rather-than-cut',
-        test: '(() => { const r = tr.samples.filter((x) => x.t > 5100).map((x) => x.rms).filter((n) => n != null); if (!(r.length >= 40)) return false; const max = Math.max(...r); return max > 0.05 && r[r.length - 1] < 0.02; })()',
+        test: '(() => { const off = tr.marks.find((m) => /Repeat One OFF/.test(m.label)); if (!off) return false; const r = tr.samples.filter((x) => x.t > off.t + 900).map((x) => x.rms).filter((n) => n != null); if (!(r.length >= 30)) return false; const max = Math.max(...r); return max > 0.03 && r[r.length - 1] < 0.02; })()',
       },
       // ...and it must be a decline, not one quiet sample: check the level keeps
       // falling across the stretch rather than dropping straight to zero. Sampled
@@ -610,7 +635,7 @@ export const scenarios = [
       // attack -- which is loud, and would make the fade look like it did nothing.
       {
         name: 'fade-is-gradual',
-        test: '(() => { const r = tr.samples.filter((x) => x.t > 5100 && x.p > 1000).map((x) => x.rms).filter((n) => n != null); if (!(r.length >= 30)) return false; const hi = Math.max(...r.slice(0, 12)); const lo = Math.min(...r.slice(-12)); return hi > 0.02 && lo < hi * 0.5; })()',
+        test: '(() => { const off = tr.marks.find((m) => /Repeat One OFF/.test(m.label)); if (!off) return false; const r = tr.samples.filter((x) => x.t > off.t + 900 && x.p > 500).map((x) => x.rms).filter((n) => n != null); if (!(r.length >= 20)) return false; const hi = Math.max(...r.slice(0, 12)); const lo = Math.min(...r.slice(-12)); return hi > 0.02 && lo < hi * 0.5; })()',
       },
     ],
   },
@@ -642,7 +667,14 @@ export const scenarios = [
       // (within ~325 ms), and the audio afterwards is at full level (RMS 0.099 mean
       // vs 0.093 playing from 0:00), so this is the music and not a silent tail.
       { atMs: 900, seek: 100000, label: 'seek to 1s before the reported length' },
-      { atMs: 4200, label: 'head parked, duration reads Looping' },
+      // The claim is "position past the reported length", so wait for it rather than
+      // guess: the same seek lands ~325 ms short of the length on one run and past
+      // it on another (see the measurement above), so a fixed mark is the difference
+      // between showing the parked head and showing a stopped engine.
+      { atMs: 0, waitFor: 's.positionMs >= s.durationMs', label: 'head parked, duration reads Looping' },
+      // Hold so the parked head and the "Looping" label are watchable, and the take
+      // is long enough for the audible floor.
+      { atMs: 3000, label: 'still parked — the elapsed time keeps climbing' },
     ],
     until: 'playing',
     assert: [
@@ -672,18 +704,17 @@ export const scenarios = [
     browse: `/browse/${HURRY_DIR}`,
     fixture: HURRY,
     preload: { dir: HURRY_DIR, name: '16 Hurry Up!.vgz' },
-    // Timings are measured off the recorded proof, not estimated: curLoop first
-    // reaches 1 at 800 ms, 2 at 1600, 3 at 2400, 4 at 3200 and 5 at 4000 — one every
-    // 800 ms, which is the loop length. The marks name the same numbers the proof
-    // reports, so a reader can check one against the other. Held past the last one
-    // because the point is a counter that keeps climbing.
+    // Each mark is a `waitFor` on the engine's own counter, so it lands exactly when
+    // that loop happens instead of restating the 800 ms loop length as four
+    // hand-timed offsets. curLoop first reaches 1 at 800 ms, one every loop after,
+    // and the proof's curLoop-reached-5 names the same number the last mark does.
     steps: [
       { atMs: 200, repeat: 'one', label: 'Repeat One ON' },
-      { atMs: 1000, label: 'loop 1 — 0.8 s in, still the same engine' },
-      { atMs: 2000, label: 'loop 2' },
-      { atMs: 3000, label: 'loop 3' },
-      { atMs: 4500, label: 'loop 5 — and still climbing, nothing reloaded' },
-      { atMs: 6000, label: 'the music never stopped' },
+      { atMs: 0, waitFor: 's.curLoop >= 1', label: 'loop 1 — still the same engine' },
+      { atMs: 0, waitFor: 's.curLoop >= 2', label: 'loop 2' },
+      { atMs: 0, waitFor: 's.curLoop >= 3', label: 'loop 3' },
+      { atMs: 0, waitFor: 's.curLoop >= 5', label: 'loop 5 — and still climbing, nothing reloaded' },
+      { atMs: 600, label: 'the music never stopped' },
     ],
     until: 'playing',
     assert: [
@@ -723,7 +754,9 @@ export const scenarios = [
       { atMs: 100, repeat: 'one', label: 'Repeat One ON' },
       // play_length is 101000 ms (see blind-loop for the measurement).
       { atMs: 900, seek: 100000, label: 'one second before the reported length' },
-      { atMs: 4600, label: 'past it, still rendering' },
+      { atMs: 0, waitFor: 's.positionMs >= s.durationMs', label: 'past it, still rendering' },
+      // Hold so the climbing position is watchable and the audible floor is met.
+      { atMs: 3000, label: 'still rendering — nothing reloaded' },
     ],
     until: 'playing',
     assert: [
@@ -759,16 +792,16 @@ export const scenarios = [
     // there (the previous version of this clip reached 5% of the song and folded 0
     // times, which is why its "the band is exact" claim had nothing on screen).
     // Measured with a 100 ms sampler: seek 101000 lands at 101330, and the first fold
-    // follows ~2.5 s later with the display returning to 69239, i.e. the band start of
-    // 69206. That equality is the "exact" claim, and asserted-below is what proves it.
+    // follows when the position crosses the band end (103809) and the display returns
+    // to the band start (69239 ≈ 69206). That equality is the "exact" claim; the fold
+    // is a `waitFor`, so the mark lands on it wherever the seek actually settles.
     steps: [
       { atMs: 200, repeat: 'one', label: 'Repeat One ON' },
       { atMs: 1500, label: 'playing — the band is on the slider, the head has not folded yet' },
       { atMs: 1800, seek: 101000, label: 'seek to just before the far edge' },
-      // ~4.3 s: the head crosses 103809 and returns to the band start.
-      { atMs: 4600, label: 'head folds back to 1:09 — the engine’s loop, not a reload' },
-      // Held well past it, so the folding is watchable rather than a single frame.
-      { atMs: 9000, label: 'still folding while the position keeps climbing' },
+      { atMs: 0, waitFor: 's.positionMs - s.displayMs > 1000', label: 'head folds back to 1:09 — the engine’s loop, not a reload' },
+      // Held past it, so the folding is watchable rather than a single frame.
+      { atMs: 3000, label: 'still folding while the position keeps climbing' },
     ],
     until: 'playing',
     assert: [
@@ -813,6 +846,9 @@ export const scenarios = [
     // the URL API, so the `r=` cache-buster does not fold itself into the song id
     // (which is what concatenating `?play=<id>?r=…` did).
     browse: '/?play=0yQ5qCD3',
+    // A share-link clip loads from the mount handler, so it drifts in before the
+    // flash too; opt it in to the same re-zero (see run() in the shim).
+    startAtZero: true,
     fixture: 'Nintendo 64 (SoundFont MIDI)/Mario Kart 64/03 - 3 Raceways, Wario Stadium.mid',
     // No preload: the `?play=` handler has already loaded the song and mounted its
     // SoundFont by the time the gate opens, and a preload would click a row this
@@ -821,11 +857,11 @@ export const scenarios = [
       { atMs: 300, repeat: 'one', label: 'Repeat One ON' },
       { atMs: 7300, seek: 68000, label: 'seek to 1:08 — before the marked region' },
       { atMs: 15300, seek: 135000, label: 'seek to 2:15 — inside the marked region' },
-      // The wrap lands on the band end (144125 ms) and returns to the band start
-      // (72062 ms), measured 143359 -> 72295: 9.1 s after the seek, so this mark
-      // sits just past the boundary rather than exactly on it.
-      { atMs: 24600, label: 'looped — back to the top of the region' },
-      { atMs: 28600, label: 'still looping in the region' },
+      // The wrap is the event, so wait for it rather than time it: the measured gap
+      // was ~9.1 s (143359 -> 72295), but it moves with where the seek lands. 80000
+      // is just above the band start (72062).
+      { atMs: 0, waitFor: 's.positionMs < 80000', label: 'looped — back to the top of the region' },
+      { atMs: 2000, label: 'still looping in the region' },
     ],
     // Gate on the SoundFont, not on `playing`. The MIDI player mounts the file's
     // own sf2 asynchronously, so the two became true on the same tick here — but
@@ -871,8 +907,9 @@ export const scenarios = [
     preload: { dir: 'mods', name: 'TECHTRIS.MOD' },
     // This file's numbers, measured for this take (and on record in AGENTS.md):
     // duration 80700, the 11->1 backward jump, intro_length 3940, band
-    // [3940, 80700]. The clip does not discover the learning point, it is scheduled
-    // around it -- the jump is a property of the file, not something to poll for.
+    // [3940, 80700]. The band is *learned* -- getLoopBandMs() is null until the
+    // jump -- so the "band learned" mark is a `waitFor` on the band appearing, which
+    // is exactly the promise of the clip, rather than a fixed 23.8 s.
     //
     // Learning needs two things, and this script supplies both cheaply:
     //   1. the loop START visited linearly, so its first-visit time is recorded
@@ -899,14 +936,13 @@ export const scenarios = [
       // the first stretch is there to be heard, not just to prime `seen`. Order 1
       // (the loop start) is recorded at 3940 ms, so there is 6.5 s of margin.
       { atMs: 10500, seek: 68000, label: 'seek into the last stretch' },
-      // The seek lands at ~68040, so the wrap at 80700 is 12.66 s later, i.e. take
-      // time ~23.3 s. Marked with room to spare: the landing point moves a few tens
-      // of ms between runs (68000-68080 measured) and a mark is a fixed time, not a
-      // condition.
-      { atMs: 23800, label: 'band learned at the backward order jump (11 → 1)' },
+      // The band becomes known only when the engine jumps back an order (~12.7 s
+      // after the seek), so wait for it: the seek's landing point moves a few tens
+      // of ms between runs (68000-68080 measured), which a fixed mark cannot absorb.
+      { atMs: 0, waitFor: 's.band && s.band.endMs > s.band.startMs', label: 'band learned at the backward order jump (11 → 1)' },
       // ~7.7 s of the loop afterwards, so the band is on screen long enough to read
       // and the music is audibly still going when the clip ends.
-      { atMs: 31500, label: 'still looping, now with the band drawn' },
+      { atMs: 7700, label: 'still looping, now with the band drawn' },
     ],
     until: 'playing',
     assert: [
@@ -962,15 +998,14 @@ export const scenarios = [
     preload: { dir: 'sid/Bionic_Commando.sid', name: 'Tune 3', subtune: 2 },
     steps: [
       { atMs: 100, repeat: 'one', label: 'Repeat One ON' },
-      // Measured with dev/record/probe.mjs. HVSC lists this sub-tune at 0:03, so the
-      // trip gate (listed length minus one 6 s window) is already open at 0:00. The
-      // tune's audio ends at ~4.5 s, the detector then needs a full quiet+static
-      // window, and the restart lands at ~10 s; the cycle repeats every ~10.4 s. A
-      // 13 s take is the shortest that shows the restart *and* the music resuming --
-      // an earlier 6 s take simply ended before the event it is about, which is how
-      // this clip came to assert a 30 s position on a 5 s take.
-      { atMs: 10600, label: 'the tail went quiet and still' },
-      { atMs: 13000, label: 'restarted from the top' },
+      // The tune keeps playing past the length HVSC lists for it (0:03), then the
+      // detector's quiet+static window elapses and it restarts. Both are events, so
+      // both are `waitFor`s: snap cannot see the audio level, so the *restart* is
+      // the observable. The marks move a little run to run; the conditions absorb it.
+      { atMs: 0, waitFor: 's.positionMs >= s.durationMs', label: 'free-running past the length it claims (0:03)' },
+      { atMs: 0, waitFor: 's.positionMs < 500', label: 'restarted from the top' },
+      // Hold past the restart so the music resuming is watchable, as before.
+      { atMs: 2500, label: 'music back from the top' },
     ],
     until: 'playing',
     assert: [
@@ -1014,13 +1049,13 @@ export const scenarios = [
     steps: [
       { atMs: 200, repeat: 'one', label: 'Repeat One ON' },
       { atMs: 2000, label: 'playing from partway through' },
-      // The length is 114000 and the pre-roll leaves the position near the top of the
-      // song, so the crossing lands in the first second or two. Marked well past it.
-      // Span sized from the pre-roll's landing, not guessed: it settled at 104659 and
-      // the assertion wants to clear 114000 + 2000, so 15 s of take is needed and 8 s
-      // was ~3 s short (measured -- that take peaked at 113645).
-      { atMs: 4000, label: 'past the reported 1:54, still rendering' },
-      { atMs: 15000, label: 'still climbing — no reload' },
+      // The length is 114000 and the pre-roll leaves the position partway in. The
+      // crossing is the event, so wait for it: the pre-roll's landing is explicitly
+      // not repeatable (92260 or 112995 across runs), so a fixed mark cannot size
+      // itself from it.
+      { atMs: 0, waitFor: 's.positionMs >= s.durationMs + 2000', label: 'past the reported 1:54, still rendering' },
+      // Held past the crossing so "no reload" has time to be seen.
+      { atMs: 4000, label: 'still climbing — no reload' },
     ],
     until: 'playing',
     assert: [
@@ -1105,19 +1140,17 @@ export const scenarios = [
     before: 'identical to master: where a format offers no loop region, nothing here changes.',
     harness: 'dev/test-midi-loops.js',
     browse: '/?play=xLCmKSWf',
+    // Share-link clip: re-zero before the flash so it starts from 0 (see run()).
+    startAtZero: true,
     fixture: 'midi/DOOM/Game MIDI_Doom (PC∕DOS, 1993)_02 - At Doom\'s Gate (E1M1).mid',
     // No preload: the share link loads the song in App's mount handler, and a
     // preload would click a row this clip is deliberately not using.
     //
-    // Timings are the song-time values read off the player, and this file plays at
-    // 1:1 -- measured over a 12 s window: 11981 ms of song in 12000 ms of wall clock,
-    // a rate of 0.9984. So each number below is both the position and the clock,
-    // which is why the same integers appear on both sides of every comment.
-    //
-    // (An earlier draft measured a 1.53x rate and mis-timed the whole clip. It came
-    // from starting a stopwatch after the share link had already autoplayed ~2.4 s, so
-    // "4500 ms later" was really 6920 ms of position. A long window, and a start
-    // position near zero, are what make a rate trustworthy.)
+    // The file plays at 1:1 (measured over a 12 s window: 11981 ms of song in
+    // 12000 ms of wall clock), so the numbers line up on both sides -- but the
+    // boundary moves with tempo, so it is not scheduled. Seek near the end, then
+    // wait for the position to drop to 0 (the Sequencer's reload) and for the second
+    // pass to reach 0:04.5.
     //
     // Measured with a 40 ms sampler on this timeline:
     //   seek 90000  -> lands at 90139, leaving 4177 ms of song to the engine's end
@@ -1127,11 +1160,8 @@ export const scenarios = [
       { atMs: 300, repeat: 'one', label: 'Repeat One ON' },
       { atMs: 4500, label: 'playing from 0 — no band on the slider' },
       { atMs: 5000, seek: 90000, label: 'seek to 1:30, near the end' },
-      // The engine ends 4177 ms after the seek and the reload lands at 4676, so the
-      // boundary is ~10.2 s. A fixed time rather than a condition, because the
-      // boundary moves with tempo.
-      { atMs: 10200, label: 'song ended — the Sequencer started it again' },
-      { atMs: 14700, label: 'same file, playing on from the top' },
+      { atMs: 0, waitFor: 's.positionMs < 1000', label: 'song ended — the Sequencer started it again' },
+      { atMs: 0, waitFor: 's.displayMs >= 4500', label: 'same file, playing on from the top' },
     ],
     // Gate on 'playing', NOT 'fileSoundfont' as midi-cc102 does. This file has no
     // soundfont of its own -- its catalog row carries none, so MIDIPlayer leaves the

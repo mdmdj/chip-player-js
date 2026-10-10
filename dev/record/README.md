@@ -43,7 +43,7 @@ the command line — which is the whole point of a selective re-shoot:
 | `--headed` | show the browser |
 
 There is **no default to all**: no clip ids at all is an error, because a bare
-`shoot.mjs` that quietly recorded 14 clips would be a 3.5-minute surprise. A bad id
+`shoot.mjs` that quietly recorded 17 clips would be a 3.5-minute surprise. A bad id
 is refused *before* any take runs, and every error lists the valid ids — a typo in
 the last position should not cost the 15 s take that preceded it. `--all` combined
 with `--clip` is rejected rather than silently resolved, and duplicate ids are
@@ -51,7 +51,7 @@ collapsed.
 
 A failed clip does not stop the batch. Each take gets a fresh browser context, so
 one red verdict leaves nothing behind for the next clip to trip over, and the run
-ends with `shoot: 13/14 passed` plus the failed ids and exit 1.
+ends with `shoot: 16/17 passed` plus the failed ids and exit 1.
 
 Both halves are **selective**, because in the polish phase nearly every change
 touches one clip or one sentence rather than all of them:
@@ -69,7 +69,7 @@ recording fewer clips rather than recording them faster — hence naming them.
 
 Recording was always per-clip (each take starts its own browser, so takes are
 independent). The page build was **not**: it re-derived both
-video-derived facts for all 14 clips on every run — an `ffprobe` per clip and a
+video-derived facts for all 16 clips on every run — an `ffprobe` per clip and a
 poster frame per clip, 1.6 s and 4.2 s — so a one-word prose fix cost 5.5 s, 95 %
 of it spent re-deriving posters that could not have changed. Both are now cached
 on the clip's identity, which makes a prose-only rebuild a 59× no-op.
@@ -82,7 +82,7 @@ Cache rules, since a stale poster is the failure mode worth being careful about:
   scenario's marks re-frames its poster rather than leaving the old frame.
 - **Byte-identical output.** A cached poster is exactly the one a re-encode would
   produce, and dimensions come from the same cached `ffprobe`. Verified: warm build
-  over unchanged inputs reproduces `index.html` and all 14 jpgs byte-for-byte
+  over unchanged inputs reproduces `index.html` and all 16 jpgs byte-for-byte
   against a cold build with the cache and posters deleted.
 - A **deleted** poster is re-framed even under `--text-only`. The flags suppress
   avoidable work; a missing poster is damage, not a cost decision, and
@@ -155,7 +155,7 @@ node dev/record/build-site.mjs
 `--clip` keeps the registry list and the command line in sync, and it means the
 run shows which takes it did. A red verdict leaves the remaining takes alone
 (fresh browser context per clip), so the summary is the only thing to read:
-`shoot: 13/14 passed`.
+`shoot: 16/17 passed`.
 
 ### Curation pass (2026-10-05): 18 clips → 14, all green
 
@@ -323,6 +323,15 @@ then wait until the head folds back, then wait 1 s" instead of guessing the
 fold's delay. `waitForTimeoutMs` bounds the wait (default 15 s) and a timeout is
 recorded as a `WAIT TIMEOUT` mark rather than silently continuing.
 
+A `play` step may carry **`minPlayedMs`**: the click is refused unless the song
+playing *now* has been playing at least that long. It exists for a fixed-cadence
+"Next song" beat on a list that contains short tracks: the sequencer advances by
+itself when one ends, and the next scheduled Next then cuts off the song that
+just started. The guard reads the player's position (which resets on the
+auto-advance), so it follows the new song rather than racing it. A refused click
+is marked `skipped …` and its own label is not marked, so the missing beat is
+visible in the proof.
+
 `snap()` is also what the trace sampler records. **When an assertion on
 `tr.samples` needs a field, add it to the sampler** — an unsampled field reads as
 `undefined` and fails for the wrong reason.
@@ -342,7 +351,11 @@ that must not be improvised. It:
    waits for `.BrowseList-row` and `window.__cpRec`,
 4. `__cpRec.pinDefaults(<settings>)`, settles ~700 ms, then `__cpRec.run(<spec>)`:
    the page loads the fixture *inside* the recorded window, paints the sync mark,
-   arms the steps and drives them on its own timers,
+   arms the steps and drives them on its own timers. **`startAtZero`** (default true
+   for a `preload` clip, opt-in for a share-link one, off for a `preRoll` one) seeks
+   the player to 0 immediately before the trace and the flash — preload's own seek
+   happens too early to survive the tool round trip, so without this the clip begins
+   a few hundred ms into the song,
 5. closes the context, which flushes the video to disk,
 6. asserts the capture is exactly 720x720 (framing regression check),
 7. `dev/record/find-flash.sh <video>` → `dev/record/mux.sh <video> <audio> site/clips/<id>.mp4 "$flash" <audioStartToFlashMs>`,
@@ -480,9 +493,9 @@ for every format, loop region on the timeline, no jump at the toggle.
 
 | id | feature | fixture | script | verdict must show |
 | -- | ------- | ------- | ------ | ----------------- |
-| `loop-band` | The shaded band on the slider, head folding inside it, and Settings → "Show Loop Area" toggling it without touching playback | `arcade-capcom/Ghosts'N_Goblins_(Arcade)/16 Hurry Up!.vgz` | Repeat One, untick the band, tick it again | `band = {start,end}` ms from `getLoopBandMs()`; `displayMs` inside the band across ≥2 loops; band absent from the DOM for a stretch and back at the end; the checkbox was genuinely clickable (topmost element at its own centre) |
-| `repeat-toggle-smooth` | Enabling Repeat One mid-song: head continuous, no jump | same | play 6 s, toggle One | `displayMs` monotonic across the toggle (±1 tick) |
-| `repeat-leave-fade` | Leaving a deep repeat plays the current pass + full fade, then ends | same | loop deep, toggle off | position keeps advancing; song ends after the fade; `durationExtended` set |
+| `loop-band` | The shaded band on the slider, head folding inside it, and Settings → "Show Loop Area" toggling it without touching playback | `vgz-genesis/Sega Genesis_Sonic the Hedgehog_02 - Green Hill Zone.vgz` | Repeat One, seek into the band at 1:28, untick the band, tick it again | `band = {start,end}` ms from `getLoopBandMs()` (`[53199, 91599]`); the display folds back to the band start after the seek and climbs past 0:56; band absent from the DOM while unticked and back at the end; the checkbox was genuinely clickable (topmost element at its own centre) |
+| `repeat-toggle-smooth` | Enabling Repeat One *after* the loop region: head continuous, no jump | `vgz-genesis/Sega Genesis_Sonic the Hedgehog 2_05 - Chemical Plant Zone.vgz` | play to 0:03, seek to 1:45.6, toggle One after the band end (mid-fade) | toggled after the band end; `displayMs` monotonic across the toggle and never folds back into the band; the song plays out, the file restarts, and 0:03 comes round again |
+| `repeat-leave-fade` | Leaving a deep repeat plays the current pass + full fade, then ends | `neogeo/Samurai_Shodown_(Neo_Geo)/23 Heartbeat (Shiro Tokisada Amakusa 1).vgz` | Repeat One, leave at loop 3 (`waitFor` on `curLoop`) | position reaches deep into the tail; a gradual level decline (max 0.057 → 0.000) ending near silence; the take ends inside the silence, before the restart |
 | `blind-loop` | No known region: head parks at the end, label reads `↻ Looping` | `nsfe/Akumajou Densetsu (VRC6).nsfe` sub-tune 3 (`play_length` 101000 ms) | Repeat One, seek to `play_length − 1000` | `isPlayingIndefinitely()` true, band null, `positionMs >= durationMs`, `Looping` in the DOM |
 
 Three notes on `shuffle-subtunes`, all of them learned by measuring:
@@ -538,7 +551,7 @@ from the first frame.
 
 | id | engine / variant | fixture | verdict must show |
 | -- | ---------------- | ------- | ----------------- |
-| `vgm-native` | VGM/VGZ, libvgm loop count | `arcade-capcom/…/16 Hurry Up!.vgz` | `curLoop` climbs (measured 1→8), head cycling in band `[1142, 1942]` |
+| `vgm-native` | VGM/VGZ, libvgm loop count | `arcade-capcom/…/16 Hurry Up!.vgz` | `curLoop` climbs (`waitFor` on 1→5), head cycling in band `[1142, 1942]` |
 | `mdx-native` | MDX native loop; band from mdxmini's own loop points | `mdx/G2MST6.MDX` | band `[69206, 103809]`; the head folds back to the band start after the far edge |
 | `midi-cc102` | MIDI CC 102/103 region (N64), opened from a share link | `…/Mario Kart 64/03 - 3 Raceways, Wario Stadium.mid` | band `[72062, 144125]`, the file's own SoundFont mounted, position wraps to the band start |
 
@@ -607,9 +620,9 @@ FINDINGS.md before repeating any story about it.
 - **Serve with Range support** (established). Without it `video.seekable` is empty
   and clips show a first frame that will not play. `serve.mjs` is `express.static`.
 - **`preload="none"`, with a poster per clip and explicit `width`/`height`**
-  (correct on its merits, causal role unknown). `preload="metadata"` pulls all 14
+  (correct on its merits, causal role unknown). `preload="metadata"` pulls all 16
   clips on page load — measured **35 MB** — which is the wrong default for a page.
-  `preload="none"` measures 0 MB on load and all 14 clips still play. Posters are
+  `preload="none"` measures 0 MB on load and all 16 clips still play. Posters are
   generated at build time; `width`/`height` are needed because a `preload="none"`
   element has no intrinsic size until it is played.
 
@@ -654,12 +667,12 @@ before any content work.
 | M0 | Fixture manifest | every path in §7 exists; committed as data; no catalog rebuild | done |
 | M1 | Recorder design proven | one clip recorded end to end **with audio**, muxed and trimmed to the mark. Also: pick the framing. | **done** — `loop-band`, verdict green. Framing settled by measurement: Playwright, **900×720 CSS px at dsf 2**, `recordVideo.size` set to exactly the viewport → 900×720 at a constant 25 fps, DPR-correct. Widened from 720×720 on 2026-10-05 because the browse list truncated item names at 239 px (419 px at 900). The host tab recorder was rejected (1× capture upscaled 1.5×, VFR, 50 MiB transfer loss). |
 | M2 | Shim additions | `__cpRec` staged by `dev/apply.sh`; `pinDefaults()` provably neutralises the stale `tempo: 2`; generic loop fields in `snap()` | **done** — `dev/shims/recorder.js`; pins both the localStorage and server copies; see FINDINGS.md for the three bugs it took |
-| M3 | Registry + validator | every clip in `scenarios.mjs`; `scenarios.check.mjs` fails on a missing fixture, duplicate id, dead harness, assertion-free scenario or vacuous quantifier; wired into `dev/run-tests.sh` | **done** — 14 clips, validator green |
+| M3 | Registry + validator | every clip in `scenarios.mjs`; `scenarios.check.mjs` fails on a missing fixture, duplicate id, dead harness, assertion-free scenario or vacuous quantifier; wired into `dev/run-tests.sh` | **done** — 17 clips, validator green |
 | M4 | Main sections | one clip per user-visible change, in two top-level sections by class of change, recorded, muxed, verified | **done, 8 clips** — `subtunes` 4: `songfolder`, `favorite-subtune`, `shuffle-subtunes`, `charts-subtunes`; `looping` 4: `loop-band`, `repeat-toggle-smooth`, `repeat-leave-fade`, `blind-loop`. Curated down from 10: `subtune-is-a-song`, `labels`, `share-link` and `show-loop-area` were merged into the clips they duplicated (see "Curation pass") |
 | M5 | In-depth section | one clip per Repeat One mechanism, grouped by mechanism rather than format (§7b) | **done, 8 published of 9 registered** — `native` 3: `vgm-native`, `mdx-native`, `midi-cc102`; `indefinite` 3: `gme-looping-driver`, `sid-tail-restart`, `n64-indefinite`; `learned` 1: `xmp-learned-band`; `floor` 1: `sequencer-default-loop`. `v2m-tier3` is `ready: false` and withheld pending the V2M duration bug (AGENTS.md). Every clip asserts audibility, and every one was rebuilt where its text claimed more than its footage showed |
 | M6 | Page | `build-site.mjs` emits `site/`; prose per clip; relative URLs only | **done** — `dev/record/build-site.mjs` + `site.mjs` + `site.css`; 7 snippets with build-time line ranges; 0 external requests; `preload="none"` + generated posters; `./dev/record/serve.sh` (now `serve.mjs`, express — a range-less server, or a preload that pulls 35 MB before you click, makes clips unplayable; see FINDINGS.md) |
 | M7 | PR hand-off | decide with the maintainer whether anything of the page belongs in the PR (probably not) | not started |
-| M8 | Page plays reliably | every clip starts on click, first try, in a real browser | **done** — two delivery bugs found and fixed (Range support, `preload`), both invisible to file-level checks; confirmed by the user after headless automation passed 14/14 |
+| M8 | Page plays reliably | every clip starts on click, first try, in a real browser | **done** — two delivery bugs found and fixed (Range support, `preload`), both invisible to file-level checks; confirmed by the user after headless automation passed 16/16 |
 
 ## 11. Risks
 

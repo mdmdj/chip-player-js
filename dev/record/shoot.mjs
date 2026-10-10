@@ -192,6 +192,11 @@ const viewportFor = (scenario) => scenario.viewport || VIEWPORT;
 async function shootOne(scenario) {
   const viewport = viewportFor(scenario);
   const span = Math.max(...scenario.steps.map((s) => s.atMs || 0), 0);
+  // A `waitFor` step holds the take past its own `atMs`, so budget each one's timeout
+  // into the poll deadline below -- otherwise a clip whose waits dominate its span
+  // (xmp-learned-band waits ~24 s after a 10.5 s seek) is declared "never finished"
+  // while it is still running.
+  const waitBudget = scenario.steps.reduce((a, s) => a + (s.waitFor ? (s.waitForTimeoutMs ?? 15000) : 0), 0);
   const shotDir = fs.mkdtempSync(path.join(WORK, 'shot-'));
   const browser = await chromium.launch({ headless: !headed, args: ['--autoplay-policy=no-user-gesture-required'] });
   try {
@@ -234,6 +239,9 @@ async function shootOne(scenario) {
       // Seeked before the recording starts; see preRoll in the shim. Kept out of the
       // steps array so it can never be scheduled inside the recorded window.
       preRoll: scenario.preRoll || null,
+      // Re-zero immediately before the flash so the clip starts at 0; defaults to
+      // true for a preload clip, false for a preRoll one. See run() in the shim.
+      startAtZero: scenario.startAtZero,
       steps: scenario.steps,
       until: scenario.until || null,
       intervalMs: 100,
@@ -247,7 +255,7 @@ async function shootOne(scenario) {
 
     // run() finishes on a page-side timer; poll for its verdict.
     let result = null;
-    const deadline = Date.now() + span + 30000;
+    const deadline = Date.now() + span + waitBudget + 30000;
     while (Date.now() < deadline) {
       result = await page.evaluate(() => window.__cpRec.result());
       if (result && !result.pending) break;

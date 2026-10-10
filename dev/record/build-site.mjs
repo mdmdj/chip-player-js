@@ -365,18 +365,18 @@ function clipHtml({ s, proof, failed, mp4 }) {
           <ul class="watch">
             ${bullets}
           </ul>
-          <div class="numbers">${nums}</div>
+          <p class="marks-title">In this clip:</p>
+          <ul class="marks">
+              ${marks}
+          </ul>
           <details>
-            <summary>proof${failed.length ? ' — FAILED' : ''}</summary>
+            <summary>test details${failed.length ? ' — FAILED' : ''}</summary>
+            <div class="numbers">${nums}</div>
             <table class="verdict">
               <tbody>
               ${checks}
               </tbody>
             </table>
-            <p class="marks-title">what the clip did, on its own clock</p>
-            <ul class="marks">
-                ${marks}
-            </ul>
             <p class="src"><span class="clip-id">clip id: <code>${esc(s.id)}</code></span> · fixture: <code>${esc(fixtureLabel(s))}</code>${s.harness ? ` · harness: <code>${esc(s.harness)}</code>` : ''}</p>
             <p class="src">recorded with <code>node dev/record/shoot.mjs --clip ${esc(s.id)}</code></p>
           </details>
@@ -422,7 +422,7 @@ const MAIN_GROUPS = [
   {
     key: 'subtunes',
     anchor: 'subtunes',
-    title: 'Sub-tunes as Songs',
+    title: 'Demos - Sub-tunes as Songs',
     note: 'A file that contains many songs browses as a folder of songs, and each is an ordinary song from there on: favourited, searched, shuffled, shared, charted. The footer sub-tune widget is gone.',
   },
   {
@@ -434,7 +434,7 @@ const MAIN_GROUPS = [
     // No space before "One" on purpose: the glyph box is 1em tall against ~0.72em
     // caps, so it already carries more vertical air than a word would, and the gap
     // read as a word space rather than as part of the mark.
-    title: 'Looping, Standardized on {{glyph:repeat}}One',
+    title: 'Demos - Looping, Standardized on {{glyph:repeat}}One',
     note: 'One Repeat One for every format. It loops the region the composer wrote where the engine exposes it, does not move the transport when toggled, and draws the region on the timeline.',
   },
 ];
@@ -495,7 +495,7 @@ ${g.clips.map(clipHtml).join('\n')}`).join('\n\n');
 // heading over two subheadings.
 const mainSectionsHtml = mainByGroup.map((g) => `  <section id="${esc(g.anchor)}">
     <h2>${withGlyphs(g.title)}</h2>
-    <p class="section-note">${g.note} ${count(g.clips.length, 'clip', 'clips')}, each with its own audio; every claim under it is checked by the numbers in its <em>proof</em> block.</p>
+    <p class="section-note">${g.note} ${count(g.clips.length, 'clip', 'clips')}</p>
 ${g.clips.map(clipHtml).join('\n')}
   </section>`).join('\n\n');
 
@@ -515,7 +515,6 @@ ${c.points.map((p) => `        <li>${p}</li>`).join('\n')}
     </div>
     <div class="summary-block">
       <h3>What To Look Out For</h3>
-      <p class="summary-lede">Nothing here is a caveat about the code; it is what to know <em>before</em> you deploy, and none of it shows in a recording.</p>
 ${summary.lookout.map((b) => `      <h4 id="${esc(b.id)}">${b.title}</h4>
 ${b.body.map((p) => /^\s*<(ul|ol|table|h[1-6])\b/i.test(p) ? `      ${p}` : `      <p>${p}</p>`).join('\n')}`).join('\n')}
     </div>
@@ -534,20 +533,22 @@ const html = `<!DOCTYPE html>
   <header>
     <h1>${esc(header.title)}</h1>
     <p class="lede">${header.lede}</p>
-    <p class="meta">${esc(header.pr)} · recorded from the feature branch, not from <code>master</code></p>
+    <p class="meta">${esc(header.pr)}</p>
   </header>
 
   <nav>
     <a href="#summary">Summary</a>
 ${MAIN_GROUPS.filter((g) => mainByGroup.some((m) => m.key === g.key)).map((g) => `    <a href="#${esc(g.anchor)}">${withGlyphs(g.title)}</a>`).join('\n')}
-    <a href="#deep">Per format</a>
-    <a href="#snippets">Code</a>
+    <a href="#deep">Demos - Per format</a>
+    <a href="#snippets">Code Snippets</a>
     <a href="#limits">Limits</a>
   </nav>
 
 ${summaryHtml}
 
+  <div id="demos">
 ${mainSectionsHtml}
+  </div>
 
   <section id="deep">
     <h2>Per format and per variant</h2>

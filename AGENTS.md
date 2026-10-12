@@ -1237,9 +1237,15 @@ checks no longer work. Compare a live context to a stored one with
   a `local/` prefix that `Sequencer.playSong` special-cases. They have no
   `song_id`, so there is still no `/metadata`, no favorites and no share links —
   but the sub-tune count/labels are read from the file's **own header**, so a
-  dropped multi-song file (NSF/NSFE/SID/GBS/AY) expands into one row per
-  sub-tune: play, next and shuffle cover every sub-tune like a catalog song
-  folder, and rows show the format's label or "Tune N". This replaces the old
+  dropped multi-song file (NSF/NSFE/SID/GBS/AY) is shown as a virtual folder
+  header (name + `<TUNES>` + count) with its sub-tunes listed beneath, each
+  showing the format's label or "Tune N". Play, next and shuffle cover every
+  sub-tune like a catalog song folder, and the delete button lives on the header
+  (once per file, not per sub-tune). Two gotchas learned here: local paths are
+  stored **verbatim**, so a basename must not go through `decodeURIComponent`
+  (a bare `%`, e.g. `..._100% Pure Love.mid`, throws and aborts the whole
+  listing update); and only multi-song extensions are read at all, so a large
+  `.spc`/`.miniusf` is never loaded just to be listed. This replaces the old
   "every local file plays sub-tune 0, no listing" behavior. The shared parser is
   one canonical, dependency-free module (`scripts/subtune-headers.js`); the
   client loads it with a dynamic `import()` (`src/localFilesSubtunes.js`, its own

@@ -26,11 +26,12 @@ scripts/build-chip-core.js
 scripts/build-libsidplayfp.sh
 # Which engine sources a build linked from. Personal dev tooling: it exists to
 # stop a stray ../ clone silently swapping an engine, and Matt builds his own
-# way, so neither the reader nor the webpack stamp belongs in the PR. src/index.js
-# carries the matching assignment inside a DEV region (it must strip too, since
-# this config does not DefinePlugin it).
+# way, so the reader does not belong in the PR. config/webpack.config.common.js
+# is NOT listed: its build-info DefinePlugin now lives in a DEV region, so the
+# file promotes (with the ModuleScopePlugin + scripts/ relaxation the client's
+# lazy sub-tune header module needs). That de-listing shrank the overlay-only
+# list by one and removed a hand-carry.
 scripts/build-info.js
-config/webpack.config.common.js
 src/tinyplayer.c
 game-music-emu/**
 libvgm/**

@@ -869,30 +869,23 @@ class App extends React.Component {
     // list, so take the player's own current SongRef rather than prevRefs[currIdx].
     const currRef = isCurrent ? this.sequencer.getCurrSongRef() : null;
 
-    const listing = [];
+    const rows = [];
     const refs = [];
     for (const item of files) {
-      // Local paths are stored verbatim (not URL-encoded), so take the basename
-      // as-is: decodeURIComponent here would throw on a name with a bare "%".
-      const base = item.path.split('/').pop();
+      const base = decodeURIComponent(item.path.split('/').pop());
       const subtunes = (byPath && byPath.get(item.path)) || [];
       if (subtunes.length > 1) {
-        const children = subtunes.map(st => {
-          const ctxIdx = refs.length;
+        for (const st of subtunes) {
+          rows.push({ ...item, subtune: st.subtune, name: `${base} — ${subtuneLabel(st.subtune, st.title)}` });
           refs.push(songRef(item.path, st.subtune));
-          return { subtune: st.subtune, name: subtuneLabel(st.subtune, st.title), ctxIdx };
-        });
-        listing.push({ ...item, name: base, type: 'folder', children });
+        }
       } else {
-        const ctxIdx = refs.length;
+        rows.push({ ...item, subtune: 0, name: base });
         refs.push(songRef(item.path, 0));
-        listing.push({ ...item, name: base, type: 'file', subtune: 0, ctxIdx });
       }
     }
     this.playContexts['local'] = refs;
-    // The listing and the loading state land together, so there is no render in
-    // between where the panel is neither loading nor populated.
-    this.setState({ localFiles: listing, loadingLocalFiles: false });
+    this.setState({ localFiles: rows });
 
     // Keep the transport on the same song across the index shift the expansion
     // causes (sub-tune 0 of a file is still sub-tune 0 after expanding).

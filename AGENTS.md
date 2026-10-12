@@ -1303,11 +1303,17 @@ checks no longer work. Compare a live context to a stored one with
     so a track shorter than the window trips nearly ungated (covered by the
     `detectSongEnd` toggle). If the gate is ever made nullable, the call site needs
     its own null check — `getPositionMs() >= null` coerces to `>= 0`.
-  - **Latent, not ours:** a bare `%` in a filename throws in
-    `MIDIPlayer.metadataFromFilepath`'s unguarded `decodeURIComponent`
-    (`MIDIPlayer.js:265`, present in `master`), so such a file is unplayable
-    (fixture `catalog/midi/.../100% Pure Love.mid`); our per-segment encoding
-    covers the other call sites.
+  - **FIXED (2026-10-12): a bare `%` in a filename.** `MIDIPlayer.metadataFromFilepath`
+    called `decodeURIComponent` unguarded (`MIDIPlayer.js:265`, from `master`), so a
+    file like `..._100% Pure Love.mid` threw `URIError` and could not play. It now
+    decodes defensively (falls back to the raw path); the Local Files view takes
+    basenames verbatim (that path is stored raw, so it must not decode at all). This is
+    a **`master` bug fixed for real, and it un-breaks catalog songs in prod** — not just
+    local files: https://chiptune.app/?q=100+pure+love returns a song that cannot play
+    there today. The `local-files` clip exercises it (the bare-`%` file is added and
+    played on camera).
+    **Changelog TODO (user asked, not done): add a line/snippet calling this out as a
+    prod fix**, since the page currently frames it only as a local-files detail.
   - **Open (not fixed on purpose):** the `UserProvider` optimistic-favorite
     *failure* path is not token-guarded, so a late rejection can revert a
     different song's favorite. Judged not worth speculative defensive code blind.

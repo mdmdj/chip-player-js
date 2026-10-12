@@ -1345,10 +1345,17 @@ checks no longer work. Compare a live context to a stored one with
 - **Branch state:** all three branches are pushed to `origin`; the feature branch
   carries upstream as a *merge* (not a rebase, so the sub-tune commits keep their
   identity) and `git diff master..feature/subtunes-as-first-class` is feature-only
-  (41 files, no dev tooling or vendored engine). `dev/overlay` differs from it by
+  (47 files, no dev tooling or vendored engine). `dev/overlay` differs from it by
   DEV regions only; `dev/promote.sh` reports "Nothing to promote" (the healthy
   state — do not run it per change). `dev/rebase.sh` verifies the tree; never
   rebase by hand.
+  - **2026-10-12 promotion (user-armed).** Landed with the tree verified unchanged:
+    the review-round fixes (MIDI loop rebasing + band-end wrap; MDX/SID/N64/MIDI
+    seek and state guards; `/search` de-dup by `(file, sub-tune)`), local-file
+    sub-tunes (`scripts/subtune-headers.js`, `src/localFilesSubtunes.js`, the Local
+    Files folder UI, `readAll` sorted by path), and the `%`-filename MIDI fix. The
+    `local-files` changelog clip and the `percent-filename` snippet are dev-only and
+    stayed on the overlay. Feature head `145749e45`, overlay `f599d8482`.
 - **A catalog rebuild is a prerequisite for booting the server after a merge that
   adds a column a query reads.** `server/index.js` selects `m.contributor`,
   created by `scripts/build-music.js`, not the server; an old catalog dies at

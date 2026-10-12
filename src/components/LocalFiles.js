@@ -109,23 +109,19 @@ function LocalFiles(props) {
                   return (
                     <React.Fragment key={href}>
                       <div className="BrowseList-row LocalFiles-folder">
-                        <button className='Trash-button' title='Delete' onClick={handleDelete} data-href={href}>
-                          <span className='inline-icon icon-trash'/>
-                        </button>
                         <div className="BrowseList-colName">
                           <span className='inline-icon dim-icon icon-folder'/>
                           <span className='DirectoryLink-dim' title={item.name}>{item.name}</span>
                         </div>
+                        <button className='Trash-button' title='Delete' onClick={handleDelete} data-href={href}>
+                          <span className='inline-icon icon-trash'/>
+                        </button>
                       </div>
                       {item.children.map((child) => {
                         const childPlaying = isCurrentContext && currIdx === child.ctxIdx;
                         return (
                           <div key={`${href}#${child.subtune}`}
                                className={`BrowseList-row LocalFiles-subtune${childPlaying ? ' Song-now-playing' : ''}`}>
-                            {/* Same width as the header's trash button, so names line up. */}
-                            <button className='Trash-button' tabIndex={-1} aria-hidden='true' style={{ visibility: 'hidden' }}>
-                              <span className='inline-icon icon-trash'/>
-                            </button>
                             <div className="BrowseList-colName">
                               <a onClick={onSongClick(href, playContext, child.ctxIdx)} href={href}>{child.name}</a>
                             </div>
@@ -135,6 +131,10 @@ function LocalFiles(props) {
                             <div className="BrowseList-colSize">
                               {bytes(item.size, { unitSeparator: ' ' })}
                             </div>
+                            {/* Reserve the delete column so the size stays aligned. */}
+                            <button className='Trash-button' tabIndex={-1} aria-hidden='true' style={{ visibility: 'hidden' }}>
+                              <span className='inline-icon icon-trash'/>
+                            </button>
                           </div>
                         );
                       })}
@@ -144,9 +144,6 @@ function LocalFiles(props) {
                 const isPlaying = isCurrentContext && currIdx === item.ctxIdx;
                 return (
                   <div key={`${href}#${item.subtune || 0}`} className={isPlaying ? 'Song-now-playing BrowseList-row' : 'BrowseList-row'}>
-                    <button className='Trash-button' title='Delete' onClick={handleDelete} data-href={href}>
-                      <span className='inline-icon icon-trash'/>
-                    </button>
                     <div className="BrowseList-colName">
                       <a onClick={onSongClick(href, playContext, item.ctxIdx)} href={href}>{item.name}</a>
                     </div>

@@ -480,6 +480,8 @@ body,#root {
 .BrowseList-colSize { text-align: right; text-transform: uppercase; white-space: nowrap; min-width: calc(var(--charW1) * 10); }
 .BrowseList-colRank { width: calc(var(--charW1) * 4); min-width: calc(var(--charW1) * 4); text-align: right; margin-right: var(--charW1); color: var(--neutral2); flex-shrink: 0; font-variant-numeric: tabular-nums; }
 .BrowseList-colPlays { text-align: right; margin-left: var(--charW1); margin-right: var(--charW1); white-space: nowrap; color: var(--neutral2); flex-shrink: 0; font-variant-numeric: tabular-nums; }
+/* Local Files: a multi-song file's sub-tune rows sit under its header row. */
+.LocalFiles-subtune .BrowseList-colName { padding-left: calc(var(--charW1) * 2); }
 
 .TopCharts-tabs { display: flex; gap: var(--charW1); }
 .TopCharts-section { margin-bottom: var(--charH); }

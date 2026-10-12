@@ -199,6 +199,10 @@ export const prose = {
     title: 'Each sub-tune gets its own chart rank',
     before: '<code>master</code> charted <em>files</em>. One NSF was one row however many tunes it held; play counts belonged to the file, and the only sub-tune the charts could name was the one the app happened to start on.',
   },
+  'local-files': {
+    title: 'Local files are songs too',
+    before: '<code>master</code> could add local files, but every one played its first tune and nothing else: a multi-song NSF or SID dropped in from disk had no folder and no sub-tune list.',
+  },
   'repeat-toggle-smooth': {
     title: 'Turning Repeat One on after the loop region never jumps the playhead',
     before: '<code>master</code> restarted the song from 0:00 with a gap. Here Repeat One is turned on after the loop region, mid-fade, and the head never jumps backward: the song plays out to its end and the file restarts.',
@@ -305,7 +309,7 @@ export const snippets = [
   {
     id: 'parser-parity',
     title: 'NSFE sub-tunes are resolved the way the emulator does',
-    file: 'scripts/metadata-parsers.js',
+    file: 'scripts/subtune-headers.js',
     from: /^  \/\/ Mirror game-music-emu's Nsfe_Info:/,
     to: /^  \}/,
     expect: 'usePlaylist',

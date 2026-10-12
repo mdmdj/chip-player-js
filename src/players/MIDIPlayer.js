@@ -262,7 +262,15 @@ export default class MIDIPlayer extends Player {
   }
 
   metadataFromFilepath(filepath) {
-    filepath = decodeURIComponent(filepath); // unescape, %25 -> %
+    // Some callers pass an escaped path (unescape, %25 -> %), but a local file
+    // path is stored raw and may contain a bare '%' (e.g. "..._100% Pure Love.mid"),
+    // for which decodeURIComponent throws. Decode defensively and fall back to
+    // the path as-is.
+    try {
+      filepath = decodeURIComponent(filepath);
+    } catch (e) {
+      // Not valid percent-encoding; use the raw path.
+    }
     const parts = filepath.split('/');
     const len = parts.length;
     const meta = {};

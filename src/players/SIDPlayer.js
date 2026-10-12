@@ -264,7 +264,20 @@ export default class SIDPlayer extends Player {
   }
 
   seekMs(seekMs) {
+    // Drop quiet time accumulated before the seek, so pre-seek audio cannot
+    // trip the Repeat One tail restart before the new position has produced a
+    // full window (EndDetector's contract: reset on load / seek / sub-tune).
+    this.resetEndDetector();
     this.muteAudioDuringCall(this.audioNode, () => this.core._sid_set_position_ms(seekMs));
+  }
+
+  // Bumping the generation invalidates an in-flight loadData: a newer song
+  // owns the core now, and a format switch reaches here (suspend) rather than
+  // this player's loadData, so the generation check inside loadData alone
+  // would let a superseded SID resume over the new song.
+  suspend() {
+    super.suspend();
+    this.loadGeneration++;
   }
 
   stop() {

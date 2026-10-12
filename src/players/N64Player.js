@@ -126,6 +126,15 @@ export default class N64Player extends Player {
       return;
     }
 
+    // A long seek timeslices through intermediate positions; those fragments
+    // are not the requested audio, so stay silent until it reaches the target.
+    if (this.seekTargetMs != null) {
+      for (let ch = 0; ch < channels.length; ch++) {
+        channels[ch].fill(0);
+      }
+      return;
+    }
+
     let samplesWritten = this.core._n64_render_audio(this.buffer, this.bufferSize);
     if (samplesWritten <= 0) {
       this.handleSongEnd();

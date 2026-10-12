@@ -34,6 +34,7 @@ import {
   unlockAudioContext
 } from '../util';
 import LocalFilesManager from '../LocalFilesManager';
+import { describeLocalSubtunes } from '../localFilesSubtunes';
 import Sequencer, { NUM_REPEAT_MODES, NUM_SHUFFLE_MODES, REPEAT_OFF, SHUFFLE_OFF } from '../Sequencer';
 
 import GMEPlayer from '../players/GMEPlayer';
@@ -72,6 +73,8 @@ class App extends React.Component {
     this.contentAreaRef = React.createRef();
     this.listRef = React.createRef(); // react-virtualized List component ref
     this.playContexts = {};
+    // Guards updateLocalFiles against out-of-order sub-tune parses.
+    this.localFilesGeneration = 0;
     this.midiPlayer = null; // Need a reference to MIDIPlayer to handle SoundFont loading.
     window.ChipPlayer = this;
 
@@ -801,12 +804,64 @@ class App extends React.Component {
     return link;
   }
 
-  updateLocalFiles() {
+  async updateLocalFiles() {
     const localFiles = this.localFilesManager.readAll();
     // Convert timestamp 1704067200 to ISO date 2024-01-01
     localFiles.forEach(item => item.mtime = new Date(item.mtime * 1000).toISOString().split('T')[0]);
-    this.playContexts['local'] = localFiles.map(item => songRef(item.path));
-    this.setState({ localFiles });
+    const generation = ++this.localFilesGeneration;
+    // Sub-tune counts come from the file headers, parsed by a lazily-loaded,
+    // cached module (see ../localFilesSubtunes). On any failure we fall back to
+    // one row per file, i.e. the old behavior.
+    let byPath = null;
+    try {
+      byPath = await describeLocalSubtunes(localFiles, p => this.localFilesManager.read(p));
+    } catch (e) {
+      console.warn('Local file sub-tunes unavailable:', e && e.message);
+    }
+    if (generation !== this.localFilesGeneration) return; // a newer update won
+    this.applyLocalFiles(localFiles, byPath);
+  }
+
+  // Expand each local file into one playable row per sub-tune (single-song files
+  // stay one row), so a local multi-song file plays, shuffles and advances like
+  // a catalog song folder. Labels come from the file's own header.
+  applyLocalFiles(files, byPath) {
+    const prevRefs = this.playContexts['local'] || [];
+    const isCurrent = this.sequencer && songRefListsEqual(this.sequencer.getCurrContext(), prevRefs);
+    const currRef = isCurrent ? prevRefs[this.sequencer.currIdx] : null;
+
+    const listing = [];
+    const refs = [];
+    for (const item of files) {
+      // Local paths are stored verbatim (not URL-encoded), so take the basename
+      // as-is: decodeURIComponent here would throw on a name with a bare "%".
+      const base = item.path.split('/').pop();
+      const subtunes = (byPath && byPath.get(item.path)) || [];
+      if (subtunes.length > 1) {
+        const children = subtunes.map(st => {
+          const ctxIdx = refs.length;
+          refs.push(songRef(item.path, st.subtune));
+          return { subtune: st.subtune, name: subtuneLabel(st.subtune, st.title), ctxIdx };
+        });
+        listing.push({ ...item, name: base, type: 'folder', children });
+      } else {
+        const ctxIdx = refs.length;
+        refs.push(songRef(item.path, 0));
+        listing.push({ ...item, name: base, type: 'file', subtune: 0, ctxIdx });
+      }
+    }
+    this.playContexts['local'] = refs;
+    this.setState({ localFiles: listing });
+
+    // Keep the transport on the same song across the index shift the expansion
+    // causes (sub-tune 0 of a file is still sub-tune 0 after expanding).
+    if (isCurrent) {
+      this.sequencer.context = refs;
+      if (currRef) {
+        const i = refs.findIndex(r => songRefKey(r) === songRefKey(currRef));
+        if (i >= 0) this.sequencer.currIdx = i;
+      }
+    }
   }
 
   handleFiles = (files) => {
@@ -870,17 +925,20 @@ class App extends React.Component {
 
   handleLocalFileDelete = (filePaths) => {
     if (!Array.isArray(filePaths)) filePaths = [filePaths];
+    // One file can span several sub-tune rows; delete each file once.
+    filePaths = [...new Set(filePaths)];
     const currContextIsLocalFiles = songRefListsEqual(this.sequencer?.getCurrContext(), this.playContexts['local']);
     let currIndexWasDeleted = false;
     filePaths.forEach(filePath => {
       const deleted = this.localFilesManager.delete(filePath);
 
       if (deleted && currContextIsLocalFiles) {
-        const index = this.playContexts['local'].findIndex(ref => ref.path === filePath);
-        if (index === this.sequencer.currIdx) currIndexWasDeleted = true;
-        if (index <= this.sequencer.currIdx) {
-          this.sequencer.currIdx--;
-        }
+        const refs = this.playContexts['local'] || [];
+        const curr = refs[this.sequencer.currIdx];
+        if (curr && curr.path === filePath) currIndexWasDeleted = true;
+        // Every row of this file disappears, so shift by how many were before.
+        const removedBefore = refs.filter((ref, i) => ref.path === filePath && i < this.sequencer.currIdx).length;
+        this.sequencer.currIdx -= removedBefore;
       }
     });
 

@@ -54,8 +54,11 @@ function decodeBuffer(buf) {
       // Fallback if decode fails
     }
   }
-  // Fallback to Latin1 to preserve binary data 1:1
-  return buf.toString('latin1');
+  // Fallback to Latin1 to preserve binary data 1:1. Byte-at-a-time (not
+  // Buffer.toString) so a plain Uint8Array works too -- the browser passes one.
+  let latin1 = '';
+  for (let i = 0; i < buf.length; i++) latin1 += String.fromCharCode(buf[i]);
+  return latin1;
 }
 
 /**

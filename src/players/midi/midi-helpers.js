@@ -119,6 +119,13 @@ class EventIterator {
       }
       this.startIdx = this.absTicks.findIndex(t => t >= loop.startTick);
       if (this.startIdx < 0) this.startIdx = this.events.length;
+      // Each completed pass ends one loop length further along the emitted
+      // timeline; rebaseReplay() uses this so a repeated segment keeps the beat
+      // instead of re-adding the gap from its pre-loop neighbour.
+      const lastTick = this.absTicks.length ? this.absTicks[this.absTicks.length - 1] : 0;
+      this.boundaryTick = loop.endTick != null ? loop.endTick : lastTick;
+      this.loopLength = loop.endTick != null ? loop.endTick - loop.startTick : lastTick - loop.startTick;
+      this.replayDelta = null;
       if (loop.endTick != null) {
         this.postHasNotes = this.events.some((e, idx) =>
           this.absTicks[idx] > loop.endTick &&
@@ -136,6 +143,7 @@ class EventIterator {
       if (this.passesLeft > 1) {
         this.passesLeft--;
         this.elapsedLoops++;
+        this.rebaseReplay();
         this.pos = this.startIdx;
       } else if (this.pos >= this.events.length) {
         return null;
@@ -154,6 +162,7 @@ class EventIterator {
           this.startIdx < this.events.length) {
         this.passesLeft--;
         this.elapsedLoops++;
+        this.rebaseReplay();
         this.pos = this.startIdx;
       } else {
         return null;
@@ -163,13 +172,27 @@ class EventIterator {
     const event = this.events[this.pos++];
     if (!event) return null;
 
-    this.curTick += event.delta;
+    // The first event of a replayed pass carries the rebased delta; every other
+    // event keeps its own.
+    const delta = this.replayDelta != null ? this.replayDelta : event.delta;
+    this.replayDelta = null;
+    this.curTick += delta;
 
     // Sanity cap; jumps are bounded by passesLeft so this is just insurance.
     if (this.curTick > 100000000 || this.elapsedLoops > 1000) return null;
 
     // Return a copy because track consolidation will mutate the events.
-    return { ...event };
+    return { ...event, delta };
+  }
+
+  // Rebase the first event of a replayed pass onto the loop boundary (see
+  // next()). boundaryTick is where that pass ends; it advances one loop length
+  // per pass. The event's own delta would instead be the gap from its pre-loop
+  // neighbour, which shifts every repeat by that intro gap.
+  rebaseReplay() {
+    this.replayDelta = (this.boundaryTick - this.curTick) +
+      (this.absTicks[this.startIdx] - this.loop.startTick);
+    this.boundaryTick += this.loopLength;
   }
 }
 

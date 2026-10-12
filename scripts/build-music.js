@@ -8,6 +8,7 @@ const chalk = require('chalk');
 const { toArabic } = require('roman-numerals');
 const { FORMATS } = require('../src/config/index');
 const { parseMetadata, cleanString } = require('./metadata-parsers');
+const { describeSubtunes } = require('./subtune-headers');
 
 
 const program = new Command();
@@ -513,44 +514,6 @@ function escapeRegExp(string) {
 }
 
 // Formats that can contain more than one sub-tune in a single file.
-const MULTISONG_EXTENSIONS = new Set(['nsf', 'nsfe', 'sid', 'gbs', 'ay']);
-
-/**
- * Describe the playable sub-tunes inside a file from parser metadata.
- *
- * Returns an array of { subtune, title, lengthMs } when the file contains 2+
- * sub-tunes, otherwise an empty array. Single-song files have no sub-tunes, which
- * keeps the browse tree flat (a plain file).
- *
- *   - subtune:  0-based index, matches the player's subtune index
- *   - title:    per-track label when the format provides one, else null
- *               (clients show "Tune N" as a fallback)
- *   - lengthMs: duration in ms when known (reserved; parsers don't emit yet)
- *   - date:     per-track release date when the format provides one (rare)
- */
-function describeSubtunes(extension, meta) {
-  if (!MULTISONG_EXTENSIONS.has(extension)) return [];
-
-  const numSongs = meta.numSongs || 1;
-  if (numSongs < 2) return [];
-
-  const labels = Array.isArray(meta.trackLabels) ? meta.trackLabels : [];
-  const lengths = Array.isArray(meta.trackLengths) ? meta.trackLengths : [];
-  const dates = Array.isArray(meta.trackDates) ? meta.trackDates : [];
-
-  const subtunes = [];
-  for (let i = 0; i < numSongs; i++) {
-    const label = labels[i] != null ? cleanString(String(labels[i])) : '';
-    subtunes.push({
-      subtune: i,
-      title: label || null,
-      lengthMs: Number.isFinite(lengths[i]) ? lengths[i] : null,
-      date: dates[i] != null ? String(dates[i]).trim() || null : null,
-    });
-  }
-  return subtunes;
-}
-
 // --- DB Helpers ---
 
 function getImageId(imagePath) {
@@ -983,8 +946,9 @@ processDirectory(CATALOG_DIR, '')
 
     if (!options.dryrun) {
       // Only a build that scanned the whole catalog can vouch that every
-      // multi-song file now has its rows.
-      if (!options.filter) db.pragma(`user_version = ${SUBTUNE_BACKFILL_VERSION}`);
+      // multi-song file now has its rows. A run cut short by --limit (or a
+      // filter) has not seen every file, so it must not mark the backfill done.
+      if (!options.filter && (limit === 0 || processed < limit)) db.pragma(`user_version = ${SUBTUNE_BACKFILL_VERSION}`);
       console.log(`Database saved to ${DB_PATH}`);
     }
   })

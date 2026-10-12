@@ -342,9 +342,12 @@ mdx_parse_mml_ym2151_async(songdata *data, int track_mute_mask)
      (infinite_loops is the minimum across tracks still playing). The
      difference is the loop length; the first is intro + loop. */
   if ( infinite_loops < 32767 ) {
-    if ( self->loop_min_seen < 1 && infinite_loops >= 1 && self->loop_first_us == 0 )
+    /* Only one boundary per update: a jump from 0 to >=2 skips the first
+       crossing in a single tick, and recording both here would give a zero
+       loop length. The second boundary is taken on a later tick. */
+    if ( infinite_loops >= 1 && self->loop_first_us == 0 )
       self->loop_first_us = self->mdx->elapsed_time;
-    if ( self->loop_min_seen < 2 && infinite_loops >= 2 && self->loop_second_us == 0 )
+    else if ( infinite_loops >= 2 && self->loop_second_us == 0 )
       self->loop_second_us = self->mdx->elapsed_time;
     self->loop_min_seen = infinite_loops;
   }

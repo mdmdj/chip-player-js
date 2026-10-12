@@ -206,7 +206,10 @@ export default class MDXPlayer extends Player {
   // when actually leaving a looping state; a no-op toggle must not push the
   // fade boundary past a fade that is already scheduled.
   applyLoopCount(wasLooping) {
-    if (!this.mdxCtx || typeof this.core._mdx_set_max_loop !== 'function') return;
+    // `metadata` is set only after mdx_open, so this also gates the pre-load
+    // call: Sequencer.playSong invokes setLooping() before loadData, and
+    // mdxmini's mdx_set_max_loop dereferences data->mdx, which is still null.
+    if (!this.mdxCtx || !this.metadata || typeof this.core._mdx_set_max_loop !== 'function') return;
     const hasLoop = this.metadata && this.metadata.loop_length > 0;
     if (this.looping) {
       this._maxLoopCount = 0;

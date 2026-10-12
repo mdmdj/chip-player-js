@@ -86,7 +86,13 @@ MIDIPlayer.prototype.load = function (midiFile, useTrackLoops = false) {
     const jumpMs = startMs + (loopEndMs - startMs);
     let jumpIndex = events.findIndex(e => e.playTime >= jumpMs);
     if (jumpIndex < 0) jumpIndex = events.length;
-    this.loop = { startMs, lengthMs: loopEndMs - startMs, jumpMs, jumpIndex };
+    // The band ends one loop length past jumpMs. With Repeat One the wrap goes
+    // there, so a composed ending after the loop plays only with repeat off
+    // (matching the slider band instead of repeating the ending every pass).
+    const endMs = jumpMs + (loopEndMs - startMs);
+    let endIndex = events.findIndex(e => e.playTime >= endMs);
+    if (endIndex < 0) endIndex = events.length;
+    this.loop = { startMs, lengthMs: loopEndMs - startMs, jumpMs, jumpIndex, endMs, endIndex };
   }
   this.summarizeMidiEvents();
 };
@@ -132,6 +138,9 @@ MIDIPlayer.prototype.processPlaySynth = function (buffer, bufferSize) {
   let event = null;
   const synth = this.synth;
   const msPerBatch = this.speed * 1000 * (batchSize / this.sampleRate) / 2;
+  // With Repeat One, events at or past the band end belong to the outro; stop
+  // applying them here so the wrap below fires at the band end, not the list end.
+  const loopEndIdx = (this.looping && this.loop) ? this.loop.endIndex : Infinity;
 
   for (let samplesRemaining = bufferSize * 2;
        samplesRemaining > 0;
@@ -141,7 +150,7 @@ MIDIPlayer.prototype.processPlaySynth = function (buffer, bufferSize) {
     if (!this.paused) {
       let pos = this.position;
       for (this.elapsedTime += msPerBatch;
-           this.events[pos] && this.elapsedTime >= this.events[pos].playTime;
+           this.events[pos] && this.elapsedTime >= this.events[pos].playTime && pos < loopEndIdx;
            pos++) {
         event = this.events[pos];
         switch (event.subtype) {
@@ -188,30 +197,33 @@ MIDIPlayer.prototype.processPlaySynth = function (buffer, bufferSize) {
     bytesWritten += batchSize;
   }
 
-  if (!this.paused && !this.isAuditioning && this.position >= this.events.length) {
+  if (!this.paused && !this.isAuditioning) {
     // Repeat One with a loop region wraps back to the second pass instead of
     // ending: the in-loop note-offs already fired, so only still-ringing
-    // notes are cut and the loop continues like a native engine loop.
-    if (this.looping && this.loop) {
+    // notes are cut and the loop continues like a native engine loop. The wrap
+    // is at the band end, so a composed ending plays only with repeat off.
+    if (this.looping && this.loop && this.position >= this.loop.endIndex) {
       this.loopJump();
       return bytesWritten;
     }
-    // Last MIDI event has been processed.
-    // Continue synthesis until silence is detected.
-    // This allows voices with a long release tail to complete.
-    // Fast method: when entire buffer is below threshold, consider it silence.
-    let synthStillActive = 0;
-    const threshold = 0.001;
-    for (let i = 0; i < bufferSize; i+=8) {
-      if (synth.getValue(bufferStart + i, 'float') > threshold) { // Check left channel only
-        synthStillActive = 1;          // Exit early
-        break;
+    if (this.position >= this.events.length) {
+      // Last MIDI event has been processed.
+      // Continue synthesis until silence is detected.
+      // This allows voices with a long release tail to complete.
+      // Fast method: when entire buffer is below threshold, consider it silence.
+      let synthStillActive = 0;
+      const threshold = 0.001;
+      for (let i = 0; i < bufferSize; i+=8) {
+        if (synth.getValue(bufferStart + i, 'float') > threshold) { // Check left channel only
+          synthStillActive = 1;          // Exit early
+          break;
+        }
       }
-    }
-    if (synthStillActive === 0) {
-      this.position = 0;
-      this.paused = true;
-      return 0;
+      if (synthStillActive === 0) {
+        this.position = 0;
+        this.paused = true;
+        return 0;
+      }
     }
   }
 
@@ -231,8 +243,12 @@ MIDIPlayer.prototype.processPlay = function () {
   let message = null;
 
   this.elapsedTime += deltaTime;
+  // With Repeat One, stop scheduling at the band end so the outro is skipped;
+  // matches processPlaySynth's loopEndIdx.
+  const loopEndIdx = (this.looping && this.loop && !this.isAuditioning) ? this.loop.endIndex : Infinity;
   let event = this.events[this.position];
-  while (this.events[this.position] && event.playTime < this.elapsedTime + BUFFER_AHEAD) {
+  while (this.events[this.position] && event.playTime < this.elapsedTime + BUFFER_AHEAD &&
+         this.position < loopEndIdx) {
     message = null;
     delay = 0;
     if (event.type === MIDIEvents.EVENT_SYSEX || event.type === MIDIEvents.EVENT_DIVSYSEX) {
@@ -256,7 +272,21 @@ MIDIPlayer.prototype.processPlay = function () {
           message = [(event.subtype << 4) + event.channel, event.param1];
           break;
         case MIDIEvents.EVENT_MIDI_NOTE_OFF:
+          if (!this.channelMask[event.channel]) break;
+          // Web MIDI output does not go through processAudio, so track sounding
+          // notes here too: loopJump() cuts the ringing ones at a wrap.
+          this.activeNotes.delete((event.channel << 7) | event.param1);
+          message = [(event.subtype << 4) + event.channel, event.param1, event.param2 || 0x00];
+          break;
         case MIDIEvents.EVENT_MIDI_NOTE_ON:
+          if (!this.channelMask[event.channel]) break;
+          if (event.param2 === 0) {
+            this.activeNotes.delete((event.channel << 7) | event.param1);
+          } else {
+            this.activeNotes.set((event.channel << 7) | event.param1, 1);
+          }
+          message = [(event.subtype << 4) + event.channel, event.param1, event.param2 || 0x00];
+          break;
         case MIDIEvents.EVENT_MIDI_NOTE_AFTERTOUCH:
         case MIDIEvents.EVENT_MIDI_CONTROLLER:
         case MIDIEvents.EVENT_MIDI_PITCH_BEND:
@@ -276,11 +306,11 @@ MIDIPlayer.prototype.processPlay = function () {
     event = this.events[this.position];
   }
 
+  if (this.looping && this.loop && !this.isAuditioning && this.position >= this.loop.endIndex) {
+    this.loopJump();
+    return;
+  }
   if (this.position >= this.events.length) {
-    if (this.looping && this.loop && !this.isAuditioning) {
-      this.loopJump();
-      return;
-    }
     setTimeout(this.endCallback, BUFFER_AHEAD + 100);
     this.position = 0;
     this.paused = true;
@@ -386,6 +416,9 @@ MIDIPlayer.prototype.setPositionSynth = function (eventList) {
         // handleProgramChange() is called in setPosition()
         synth.programChange(event.channel, event.param1);
         break;
+      case MIDIEvents.EVENT_MIDI_PITCH_BEND:
+        synth.pitchBend(event.channel, (event.param2 << 7) + event.param1);
+        break;
       case MIDIEvents.EVENT_MIDI_CONTROLLER:
       default:
         synth.controlChange(event.channel, event.param1, event.param2);
@@ -403,6 +436,8 @@ MIDIPlayer.prototype.setPositionWebMidi = function (ms, eventList) {
     if (event.subtype === MIDIEvents.EVENT_MIDI_PROGRAM_CHANGE) {
       // handleProgramChange() is called in setPosition()
       message = [(event.subtype << 4) + event.channel, event.param1];
+    } else if (event.subtype === MIDIEvents.EVENT_MIDI_PITCH_BEND) {
+      message = [(event.subtype << 4) + event.channel, event.param1, event.param2];
     } else if (event.subtype === MIDIEvents.EVENT_MIDI_CONTROLLER) {
       message = [(event.subtype << 4) + event.channel, event.param1, event.param2];
     }
@@ -428,6 +463,10 @@ MIDIPlayer.prototype.collectStateEvents = function (fromIdx, toMs) {
     const event = this.events[pos];
     if (event.subtype === MIDIEvents.EVENT_MIDI_PROGRAM_CHANGE) {
       this.handleProgramChange(event.channel, event.param1);
+      eventMap[`${event.subtype}-${event.channel}`] = event;
+    } else if (event.subtype === MIDIEvents.EVENT_MIDI_PITCH_BEND) {
+      // Last pitch-bend state, so a loop wrap does not carry a bent ending
+      // into the next pass when the authored state before the wrap is centered.
       eventMap[`${event.subtype}-${event.channel}`] = event;
     } else if (event.subtype === MIDIEvents.EVENT_MIDI_CONTROLLER) {
       // These controllers (RPN, NRPN, Data Entry) must be sequenced in order
@@ -483,6 +522,8 @@ MIDIPlayer.prototype.loopJump = function () {
       let message = null;
       if (event.subtype === MIDIEvents.EVENT_MIDI_PROGRAM_CHANGE) {
         message = [(event.subtype << 4) + event.channel, event.param1];
+      } else if (event.subtype === MIDIEvents.EVENT_MIDI_PITCH_BEND) {
+        message = [(event.subtype << 4) + event.channel, event.param1, event.param2];
       } else if (event.subtype === MIDIEvents.EVENT_MIDI_CONTROLLER) {
         message = [(event.subtype << 4) + event.channel, event.param1, event.param2];
       }

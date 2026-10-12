@@ -401,6 +401,15 @@ const runStep = (step, trace) => {
     app().setState({ tempo: step.tempo });
   });
   if (step.param) fire(() => app().handleParamChange(step.param[0], step.param[1]));
+  if (step.addLocal) fire(() => {
+    dev.addLocalFiles(step.addLocal).then(
+      (r) => trace.mark(`added local: ${(r.names || []).join(', ') || r.error || 'none'}`),
+      (e) => trace.mark(`ERROR addLocal: ${e.message}`));
+  });
+  if (step.localRow) fire(() => {
+    const r = dev.clickLocalRow(step.localRow);
+    if (!r.clicked) trace.mark(`ERROR localRow not found: ${step.localRow}`);
+  });
   if (step.eval) fire(() => { if (!step.eval()) trace.mark(`assert failed: ${step.label || step.eval}`); });
   // A `waitFor` step's label names the event being waited for, so it is emitted
   // when the condition is met (by the runner), not now -- otherwise the mark lands
@@ -534,6 +543,46 @@ const dev = {
     window.history.pushState({}, '', path);
     window.dispatchEvent(new PopStateEvent('popstate', { state: {} }));
     return { navigated: path };
+  },
+
+  /**
+   * Add catalog fixtures to Local Files the way a user drops them: fetch each
+   * file's bytes, wrap it in a File, and hand them to the hidden file input.
+   * `specs` is a list of catalog-relative paths, or { path, name } to pin a
+   * display name (the Local Files view shows the basename).
+   *
+   * Local Files is not a catalog listing -- no song id, no /browse -- so a clip
+   * cannot reach it with clickRow; see clickLocalRow().
+   */
+  addLocalFiles(specs) {
+    const input = document.querySelector('input[type=file]');
+    if (!input) return Promise.resolve({ added: 0, error: 'no file input' });
+    return Promise.all((specs || []).map(async (spec) => {
+      const path = typeof spec === 'string' ? spec : spec.path;
+      const name = (typeof spec === 'object' && spec.name) || path.split('/').pop();
+      const enc = path.split('/').map(encodeURIComponent).join('/');
+      const blob = await (await fetch(`/catalog/${enc}`)).blob();
+      return new File([blob], name);
+    })).then((files) => {
+      const dt = new DataTransfer();
+      for (const f of files) dt.items.add(f);
+      input.files = dt.files;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      return { added: files.length, names: files.map((f) => f.name) };
+    });
+  },
+
+  /**
+   * Click a Local Files row by its exact visible label. Rows there are not
+   * catalog rows, so clickRow cannot resolve them; matching the anchor's
+   * textContent exactly keeps the "never fuzzy-match" rule (AGENTS.md).
+   */
+  clickLocalRow(label) {
+    const a = [...document.querySelectorAll('a')].find(
+      (el) => (el.getAttribute('href') || '').startsWith('local/') && el.textContent === label);
+    if (!a) return { clicked: false, label };
+    a.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+    return { clicked: true, label, href: a.getAttribute('href') };
   },
 
   /**

@@ -211,6 +211,68 @@ export const scenarios = [
   },
 
   {
+    id: 'local-files',
+    section: 'main',
+    group: 'subtunes',
+    ready: true,
+    title: 'Local files are songs too',
+    watch: [
+      'Each file is added from disk and plays immediately — no catalog, no round trip.',
+      'The 28-song NSFE and the 10-song SID open as virtual song folders: the file is a header, its sub-tunes are listed beneath.',
+      'A file whose name contains a bare <code>%</code> (<code>100% Pure Love.mid</code>) plays like any other.',
+    ],
+    before: 'master could add local files, but every one played its first tune and nothing else: a multi-song NSF or SID dropped in from disk had no folder, no sub-tune list, and no way to reach tune 2.',
+    harness: 'dev/test-parsers.js',
+    browse: '/local',
+    // Local Files starts empty here, so the usual '.BrowseList-row' readiness gate
+    // never appears; the page header is always rendered.
+    readySelector: 'h3.Browse-topRow',
+    fixtures: [
+      'midi/MIDI_Crystal Waters_100% Pure Love.mid',
+      'mods/One Must Fall/03-MENU.S3M',
+      'nsfe/Akumajou Densetsu (VRC6).nsfe',
+      'sid/Bionic_Commando.sid',
+    ],
+    // Add-then-play, four times over. Each `waitFor` resets the timeline, so the
+    // `atMs` after it is "this long after the file appeared / the song started".
+    steps: [
+      { atMs: 1500, addLocal: ['midi/MIDI_Crystal Waters_100% Pure Love.mid'], label: 'add a .mid' },
+      { waitFor: 'document.querySelectorAll(".BrowseList-row").length >= 1', waitForTimeoutMs: 10000, label: 'it appears in Local Files' },
+      { atMs: 700, localRow: 'MIDI_Crystal Waters_100% Pure Love.mid', label: 'play it' },
+      { waitFor: 's.player && s.positionMs > 300', label: 'playing the .mid' },
+
+      { atMs: 2500, addLocal: ['mods/One Must Fall/03-MENU.S3M'], label: 'add an .S3M' },
+      { waitFor: 'document.querySelectorAll(".BrowseList-row").length >= 2', waitForTimeoutMs: 10000, label: 'the second file appears' },
+      { atMs: 700, localRow: '03-MENU.S3M', label: 'play it' },
+      { waitFor: 's.player && s.positionMs > 300', label: 'playing the .S3M' },
+
+      { atMs: 2500, addLocal: ['nsfe/Akumajou Densetsu (VRC6).nsfe'], label: 'add a 28-song .nsfe' },
+      { waitFor: 'document.querySelectorAll(".LocalFiles-subtune").length >= 20', waitForTimeoutMs: 12000, label: 'it opens as a song folder' },
+      { atMs: 900, localRow: 'Epitaph', label: 'play a sub-tune' },
+      { waitFor: 's.player && s.positionMs > 300', label: 'playing an NSFE sub-tune' },
+
+      { atMs: 2500, addLocal: ['sid/Bionic_Commando.sid'], label: 'add a 10-song .sid' },
+      { waitFor: 'document.querySelectorAll(".LocalFiles-subtune").length >= 30', waitForTimeoutMs: 12000, label: 'the SID opens as a folder too' },
+      { atMs: 900, localRow: 'Tune 5', label: 'play another sub-tune' },
+      { waitFor: 's.player && s.positionMs > 300', label: 'playing a SID sub-tune' },
+      { atMs: 2000, label: 'still playing' },
+    ],
+    until: null,
+    assert: [
+      { name: 'four-files-were-added', test: 'new Set(Array.from(document.querySelectorAll("a")).filter((a) => (a.getAttribute("href") || "").startsWith("local/")).map((a) => a.getAttribute("href"))).size >= 4' },
+      // The two multi-song files fold out: 28 NSFE sub-tunes + 10 SID sub-tunes.
+      { name: 'song-folders-folded-out', test: 'document.querySelectorAll(".LocalFiles-subtune").length >= 35' },
+      { name: 'the-nsfe-is-a-folder-header', test: 'Array.from(document.querySelectorAll(".LocalFiles-folder .BrowseList-colName")).some((e) => /Akumajou Densetsu \\(VRC6\\)\\.nsfe/.test(e.textContent))' },
+      { name: 'played-the-midi', test: '(tr.samples.length >= 100) && tr.samples.some((x) => x.path === "local/MIDI_Crystal Waters_100% Pure Love.mid")' },
+      { name: 'played-the-s3m', test: '(tr.samples.length >= 100) && tr.samples.some((x) => x.path === "local/03-MENU.S3M")' },
+      { name: 'played-an-nsfe-sub-tune', test: '(tr.samples.length >= 100) && tr.samples.some((x) => x.path === "local/Akumajou Densetsu (VRC6).nsfe" && x.sub > 0)' },
+      { name: 'played-a-sid-sub-tune', test: '(tr.samples.length >= 100) && tr.samples.some((x) => x.path === "local/Bionic_Commando.sid" && x.sub > 0)' },
+      { name: 'last-song-is-the-sid-sub-tune', test: 's.path === "local/Bionic_Commando.sid" && s.subtune === 4' },
+      { name: 'audible', test: '(() => { const r = tr.samples.map((x) => x.rms).filter((n) => n != null); if (!(r.length >= 100)) return false; return Math.max(...r) > 0.02; })()' },
+    ],
+  },
+
+  {
     id: 'favorite-subtune',
     section: 'main',
     group: 'subtunes',

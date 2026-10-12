@@ -53,7 +53,7 @@ for (const s of scenarios) {
   // check only insists it is a path into this app rather than some absolute URL
   // that would silently record the wrong site.
   const isShareLink = s.browse && /^\/\?play=/.test(s.browse);
-  const IN_APP_PAGES = ['/top', '/favorites'];
+  const IN_APP_PAGES = ['/top', '/favorites', '/local'];
   if (!s.browse || (!s.browse.startsWith('/browse/') && !isShareLink && !IN_APP_PAGES.includes(s.browse))) {
     fail(s.id, `browse must be an in-app path: ${s.browse}`);
   }

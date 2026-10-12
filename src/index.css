@@ -560,8 +560,7 @@ button.IconButton {
 /* Local Files: the delete icon sits at the far right. Inactive by default,
    yellow only on hover. */
 .Trash-button .inline-icon { background-color: var(--neutral2); }
-.Trash-button:hover .inline-icon,
-.Trash-button:focus-visible .inline-icon { background-color: var(--clickable); }
+.Trash-button:hover .inline-icon { background-color: var(--clickable); }
 
 .Visualizer {
     position: relative; display: flex; flex-direction: column; align-items: flex-end;

@@ -261,4 +261,52 @@ realTest('AY files expose track counts and labels', 'ay', 'ay', (m, f) => {
   }
 });
 
+// The client imports scripts/subtune-headers.js directly (a lazy chunk) and
+// passes a Uint8Array, not a Node Buffer. These checks reuse the catalog files
+// on disk to prove that path: the module is buffer-agnostic, and its sub-tune
+// output matches the build's own parseMetadata path.
+console.log('Shared sub-tune module (the client path: Uint8Array, no Buffer)');
+const { describeSubtunes, describeSubtunesInBuffer } = require('../scripts/subtune-headers');
+const SAMPLE_DIRS = [['nsf', 'nsf'], ['nsfe', 'nsfe'], ['sid', 'sid'], ['gbs', 'gbs'], ['ay', 'ay']];
+const samples = [];
+for (const [dir, ext] of SAMPLE_DIRS) {
+  const d = path.join(CATALOG, dir);
+  if (!fs.existsSync(d)) continue;
+  for (const f of fs.readdirSync(d)) {
+    if (f.toLowerCase().endsWith('.' + ext)) samples.push([ext, path.join(d, f), f]);
+  }
+}
+if (samples.length === 0) {
+  console.log('  (skipped: no catalog files)');
+} else {
+  check('a Uint8Array gives the same sub-tunes as a Buffer', () => {
+    for (const [ext, p, f] of samples) {
+      const buf = fs.readFileSync(p);
+      const u8 = Uint8Array.from(buf); // the browser's byte view, not a Buffer
+      assert.deepStrictEqual(
+        describeSubtunesInBuffer(ext, u8),
+        describeSubtunesInBuffer(ext, buf),
+        `${f}: Uint8Array vs Buffer`);
+    }
+  });
+  check('the shared module agrees with the build path (parseMetadata)', () => {
+    for (const [ext, p, f] of samples) {
+      const buf = fs.readFileSync(p);
+      assert.deepStrictEqual(
+        describeSubtunesInBuffer(ext, Uint8Array.from(buf)),
+        describeSubtunes(ext, parseMetadata(buf, ext)),
+        `${f}: shared module vs build path`);
+    }
+  });
+  check('a real multi-song file lists its sub-tunes with 0-based indices', () => {
+    const multi = samples.find(([ext, p]) =>
+      describeSubtunesInBuffer(ext, Uint8Array.from(fs.readFileSync(p))).length > 1);
+    assert.ok(multi, 'no multi-song catalog file found');
+    const [ext, p, f] = multi;
+    const subs = describeSubtunesInBuffer(ext, Uint8Array.from(fs.readFileSync(p)));
+    assert.ok(subs.length > 1, `${f}: expected >1 sub-tunes`);
+    subs.forEach((s, i) => assert.strictEqual(s.subtune, i, `${f}: index ${i}`));
+  });
+}
+
 console.log(`\n${passed} passed, ${failed} failed.`);

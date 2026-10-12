@@ -344,6 +344,23 @@ export const snippets = [
       easy to miss: the wrapper reports the requested sub-tune while every one plays
       song 0, so comparing two sub-tunes is the only way to hear it.`,
   },
+  {
+    id: 'percent-filename',
+    title: 'A "%" in a filename, and the songs it hid',
+    file: 'src/players/MIDIPlayer.js',
+    from: /^  metadataFromFilepath\(filepath\) \{/,
+    before: /^    const parts = filepath\.split\('\/'\);/,
+    expect: 'decodeURIComponent',
+    why: `Not a local-files detail. <code>metadataFromFilepath</code> ran
+      <code>decodeURIComponent</code> on the path with nothing to catch a malformed one,
+      and a filename may contain a bare <code>%</code>. <code>100% Pure Love.mid</code>
+      is in the live catalog, and the throw (<code>URIError: URI malformed</code>) happened
+      before the song loaded, so it would not play at all. Guarding the decode fixes it
+      wherever the file lives, which means it <strong>un-breaks songs on chiptune.app
+      today</strong> — compare
+      <a href="https://chiptune.app/?q=100+pure+love">that search</a> against a build with
+      this change.`,
+  },
 ];
 
 export const limitations = [

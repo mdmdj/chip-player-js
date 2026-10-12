@@ -1312,8 +1312,8 @@ checks no longer work. Compare a live context to a stored one with
     local files: https://chiptune.app/?q=100+pure+love returns a song that cannot play
     there today. The `local-files` clip exercises it (the bare-`%` file is added and
     played on camera).
-    **Changelog TODO (user asked, not done): add a line/snippet calling this out as a
-    prod fix**, since the page currently frames it only as a local-files detail.
+    **Changelog: done** — the `percent-filename` snippet in `dev/record/site.mjs` says
+    so, with the search link.
   - **Open (not fixed on purpose):** the `UserProvider` optimistic-favorite
     *failure* path is not token-guarded, so a late rejection can revert a
     different song's favorite. Judged not worth speculative defensive code blind.

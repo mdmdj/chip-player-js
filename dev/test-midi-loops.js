@@ -309,6 +309,47 @@ check('Gyrocopter: padded END_OF_TRACK does not inflate duration', () => {
 
 // --- Synthetic shapes -------------------------------------------------------
 
+// A loop whose start marker sits 480 ticks (2000 ms) into the song, so the
+// marker's own delta is that intro gap, plus a composed ending after the loop.
+// tpq=120 => 4.1667 ms/tick.
+function loopWithIntroGapAndEnding() {
+  return parseBytes(buildMidi([
+    tempo(),
+    noteOnAt(0), noteOffAt(TPQ),        // intro note, ticks 0..120
+    ccAt(TPQ * 3, 110),                 // loop start at tick 480
+    noteOnAt(0), noteOffAt(TPQ),        // ticks 480..600
+    noteOnAt(TPQ * 6), noteOffAt(TPQ),  // ticks 1320..1440
+    cc(111),                            // loop end at tick 1440
+    noteOnAt(TPQ * 3), noteOffAt(TPQ),  // composed ending, ticks 1800..1920
+  ]));
+}
+
+check('replayed pass keeps the beat (loop-start delta is rebased)', () => {
+  const mf = loopWithIntroGapAndEnding();
+  const { events, loopStartMs, loopEndMs } = mf.getPlaybackEvents(false);
+  assert.ok(Math.abs(loopStartMs - 2000) < 1, `startMs=${loopStartMs}`);
+  assert.ok(Math.abs(loopEndMs - 6000) < 1, `endMs=${loopEndMs}`);
+  // The second pass places the loop-start marker at the boundary (6000 ms), not
+  // its own 480-tick (2000 ms) intro gap later.
+  const starts = events.filter(e => e.subtype === 11 && e.param1 === 110)
+    .map(e => Math.round(e.playTime));
+  assert.deepStrictEqual(starts, [2000, 6000], `loop-start playTimes=${starts}`);
+});
+
+check('Repeat One wraps at the band end, leaving the composed ending', () => {
+  const mf = loopWithIntroGapAndEnding();
+  const p = makePlayer(stubSynth(true));
+  p.load(mf, false);
+  assert.ok(p.loop, 'expected a loop region');
+  assert.ok(p.loop.endIndex < p.events.length, 'the ending is past the band end');
+  p.play(() => {});
+  p.setLooping(true);
+  p.setPosition(p.loop.endMs - 10);
+  p.processPlaySynth(0, 2048);
+  assert.strictEqual(p.position, p.loop.jumpIndex, 'wrapped at the band end, not the list end');
+  assert.ok(!p.paused, 'still playing after the wrap');
+});
+
 check('N64 shape: a CC102/103 pair gives a region and a band', () => {
   // Mario Kart marks the loop with CC102 at 0 and CC103 at the end of the body.
   // The real file is format 1 (measured), so that is the shape to test here;

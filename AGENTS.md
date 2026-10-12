@@ -1232,21 +1232,30 @@ checks no longer work. Compare a live context to a stored one with
   directory as appropriate, including stale-cache and old-client shapes; Top
   Charts and Favorites labels/grouping unchanged. `dev/run-tests.sh` green
   (2 known VGM xfails), 20/20 in `dev/test-subtunes-server.js`.
-- **Out of scope, recorded (2026-10-06):** shuffle play is dead for local
-  files. Two mechanisms, neither with a catalog: browser local files are IDBFS
-  (`src/LocalFilesManager.js`) listed by `fs.readdir('/local')` and addressed by
-  a `local/` path prefix that `Sequencer.playSong` special-cases; and
-  `BROWSE_LOCAL_FILESYSTEM=true` browses `LOCAL_CATALOG_ROOT` with
-  `fs.readdir` and serves bytes from `/catalog`. Both report rows with no
-  `song_id`, so `/metadata` 404s and every file plays sub-tune 0. (The server's
-  filesystem mode also never populated `music`, which is why `/shuffle` and
-  `/random` cannot work there at all — pre-existing, not a regression.) The
-  count *is* knowable after load — `Player.getNumSubtunes()` rides the player
-  state — but not before, which is what a listing and a shuffle need.
-- **Engine-provenance stamping is overlay-only (2026-10-02).** `scripts/build-info.js`
-  (the reader), `config/webpack.config.common.js` (the `DefinePlugin`) are listed in
-  `dev/promote-paths.txt`; `src/index.js`'s `window.ChipCoreBuildInfo` assignment is
-  a DEV region, because the config it depends on never promotes — leaving the
+- **Local files get sub-tunes too (2026-10-12).** Browser local files are IDBFS
+  (`src/LocalFilesManager.js`), listed by `fs.readdir('/local')` and addressed by
+  a `local/` prefix that `Sequencer.playSong` special-cases. They have no
+  `song_id`, so there is still no `/metadata`, no favorites and no share links —
+  but the sub-tune count/labels are read from the file's **own header**, so a
+  dropped multi-song file (NSF/NSFE/SID/GBS/AY) expands into one row per
+  sub-tune: play, next and shuffle cover every sub-tune like a catalog song
+  folder, and rows show the format's label or "Tune N". This replaces the old
+  "every local file plays sub-tune 0, no listing" behavior. The shared parser is
+  one canonical, dependency-free module (`scripts/subtune-headers.js`); the
+  client loads it with a dynamic `import()` (`src/localFilesSubtunes.js`, its own
+  webpack chunk) and caches results in `localStorage` by (path,size,mtime), so
+  users without local files download nothing new. `App.applyLocalFiles` builds
+  `playContexts['local']` as one `SongRef` per sub-tune. `dev/test-parsers.js`
+  proves the Uint8Array (client) path equals the Buffer (build) path against real
+  `catalog/` files. The server's `BROWSE_LOCAL_FILESYSTEM=true` mode still never
+  populates `music`, so its `/shuffle`/`/random` remain dead there (pre-existing).
+- **Engine-provenance stamping is overlay-only (2026-10-02; updated 2026-10-12).**
+  `scripts/build-info.js` (the reader) is listed in `dev/promote-paths.txt`.
+  `config/webpack.config.common.js` **used to be listed and no longer is**: its
+  build-info `DefinePlugin` now lives in a DEV-BEGIN/DEV-END region, so the file
+  promotes (it also carries the `ModuleScopePlugin` `scripts/` relaxation the
+  local-files feature needs, so this de-listing removed a hand-carry). `src/index.js`'s
+  `window.ChipCoreBuildInfo` assignment is a DEV region that strips with it — leaving the
   assignment behind would reference an undefined `__BUILD_INFO__`. Its `no-undef`
   waiver has to live inside that region too (`eslintConfig` is in `package.json`,
   which promote.sh does *not* skip). Verified in-app: `JSON.parse(window.ChipCoreBuildInfo)`

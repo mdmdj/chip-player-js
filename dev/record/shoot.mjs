@@ -219,7 +219,10 @@ async function shootOne(scenario) {
     const target = new URL(scenario.browse, BASE);
     target.searchParams.set('r', String(Date.now()));
     await page.goto(target.toString(), { waitUntil: 'domcontentloaded' });
-    await page.waitForSelector('.BrowseList-row', { timeout: 30000 });
+    // A listing page is ready when a row is painted. Local Files can legitimately
+    // open empty (the whole clip is about adding the files), so a scenario may name
+    // its own readiness selector -- e.g. the page header, which is always rendered.
+    await page.waitForSelector(scenario.readySelector || '.BrowseList-row', { timeout: 30000 });
     await page.waitForFunction(() => !!window.__cpRec, null, { timeout: 30000 });
     await page.evaluate((s) => window.__cpRec.pinDefaults(s), scenario.settings || {});
     // Opt-in, and off the settings object so it never reaches the app's settings POST.

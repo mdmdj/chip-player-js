@@ -102,8 +102,47 @@ function LocalFiles(props) {
             {
               listing.map((item) => {
                 const href = item.path;
-                const title = item.name || decodeURIComponent(href.split('/').pop());
-                const isPlaying = isCurrentContext && currIdx === i;
+                // A multi-song file is a virtual folder: a header row (the file,
+                // with the delete button) and one row per sub-tune beneath it.
+                if (item.type === 'folder') {
+                  return (
+                    <React.Fragment key={href}>
+                      <div className="BrowseList-row">
+                        <button className='Trash-button' title='Delete' onClick={handleDelete} data-href={href}>
+                          <span className='inline-icon icon-trash'/>
+                        </button>
+                        <div className="BrowseList-colName">{item.name}</div>
+                        <div className="BrowseList-colDir">&lt;TUNES&gt;</div>
+                        <div className="BrowseList-colCount"
+                             title={`Contains ${item.children.length} sub-tunes`}>
+                          {item.children.length}
+                        </div>
+                        <div className="BrowseList-colMtime">
+                          {item.mtime}
+                        </div>
+                        <div className="BrowseList-colSize">
+                          {bytes(item.size, { unitSeparator: ' ' })}
+                        </div>
+                      </div>
+                      {item.children.map((child) => {
+                        const isPlaying = isCurrentContext && currIdx === child.ctxIdx;
+                        return (
+                          <div key={`${href}#${child.subtune}`}
+                               className={`BrowseList-row LocalFiles-subtune${isPlaying ? ' Song-now-playing' : ''}`}>
+                            {/* Same width as the header's trash button, so names line up. */}
+                            <button className='Trash-button' tabIndex={-1} aria-hidden='true' style={{ visibility: 'hidden' }}>
+                              <span className='inline-icon icon-trash'/>
+                            </button>
+                            <div className="BrowseList-colName">
+                              <a onClick={onSongClick(href, playContext, child.ctxIdx)} href={href}>{child.name}</a>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </React.Fragment>
+                  );
+                }
+                const isPlaying = isCurrentContext && currIdx === item.ctxIdx;
                 return (
                   <div key={`${href}#${item.subtune || 0}`} className={isPlaying ? 'Song-now-playing BrowseList-row' : 'BrowseList-row'}>
                     <button className='Trash-button' title='Delete' onClick={handleDelete} data-href={href}>

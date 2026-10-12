@@ -343,10 +343,15 @@ router.get('/search', cache1Hour, (req, res) => {
   if (ftsQuery) {
     try {
       const subtuneItems = searchSubtuneStmt.all(ftsQuery, limit);
-      // Drop sub-tunes of files that already matched at the file level.
-      const seen = new Set(items.map(item => item.file));
+      // Drop exact duplicates only. A file hit is (file, sub-tune 0); a sub-tune
+      // whose title matched must survive even when its file also matched by
+      // title, otherwise the query yields the file and plays tune 0 instead of
+      // the tune the user searched for.
+      const seen = new Set(items.map(item => `${item.file}\u0000${item.subtune ?? 0}`));
       for (const item of subtuneItems) {
-        if (!seen.has(item.file)) {
+        const key = `${item.file}\u0000${item.subtune ?? 0}`;
+        if (!seen.has(key)) {
+          seen.add(key);
           items.push(item);
         }
       }

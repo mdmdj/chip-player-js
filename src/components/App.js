@@ -869,23 +869,28 @@ class App extends React.Component {
     // list, so take the player's own current SongRef rather than prevRefs[currIdx].
     const currRef = isCurrent ? this.sequencer.getCurrSongRef() : null;
 
-    const rows = [];
+    const listing = [];
     const refs = [];
     for (const item of files) {
-      const base = decodeURIComponent(item.path.split('/').pop());
+      // Local paths are stored verbatim (not URL-encoded), so take the basename
+      // as-is: decodeURIComponent here would throw on a name with a bare "%".
+      const base = item.path.split('/').pop();
       const subtunes = (byPath && byPath.get(item.path)) || [];
       if (subtunes.length > 1) {
-        for (const st of subtunes) {
-          rows.push({ ...item, subtune: st.subtune, name: `${base} — ${subtuneLabel(st.subtune, st.title)}` });
+        const children = subtunes.map(st => {
+          const ctxIdx = refs.length;
           refs.push(songRef(item.path, st.subtune));
-        }
+          return { subtune: st.subtune, name: subtuneLabel(st.subtune, st.title), ctxIdx };
+        });
+        listing.push({ ...item, name: base, type: 'folder', children });
       } else {
-        rows.push({ ...item, subtune: 0, name: base });
+        const ctxIdx = refs.length;
         refs.push(songRef(item.path, 0));
+        listing.push({ ...item, name: base, type: 'file', subtune: 0, ctxIdx });
       }
     }
     this.playContexts['local'] = refs;
-    this.setState({ localFiles: rows });
+    this.setState({ localFiles: listing });
 
     // Keep the transport on the same song across the index shift the expansion
     // causes (sub-tune 0 of a file is still sub-tune 0 after expanding).

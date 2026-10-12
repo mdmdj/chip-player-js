@@ -126,8 +126,8 @@ function parseVGM(buf) {
         return '';
       };
 
-      meta.title = readString();             // Track Title (English)
-      readString();                          // Track Title (Japanese)
+      meta.title = readString();             // Track Name (English)
+      readString();                          // Track Name (Japanese)
       meta.game = readString();              // Game Name (English)
       readString();                          // Game Name (Japanese)
       meta.system = readString();            // System Name (English)

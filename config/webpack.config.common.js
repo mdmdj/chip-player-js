@@ -87,6 +87,11 @@ module.exports = {
     ],
   },
   plugins: [
+    // DEV-BEGIN (stripped for promotion; engine provenance is our dev build
+    // tooling -- scripts/build-info.js and Matt builds his own way, so neither
+    // the reader nor this stamp belongs in the PR. src/index.js carries the
+    // matching assignment inside its own DEV region, so the two strip together.)
+    //
     // Stamp the audio engines' provenance into the bundle as a single-line
     // string literal. Evaluated here (not written to a committed file) so it
     // always describes the build that produced it, and it runs for any build
@@ -101,6 +106,7 @@ module.exports = {
     new webpack.DefinePlugin({
       __BUILD_INFO__: JSON.stringify(JSON.stringify(require('../scripts/build-info').buildInfo())),
     }),
+    // DEV-END
     new ESLintPlugin({
       context: paths.appSrc,
       formatter: eslintFormatter,

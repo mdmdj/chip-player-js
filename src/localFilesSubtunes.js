@@ -59,16 +59,11 @@ function cacheKey(file) {
 async function subtunesForFile(mod, read, file, cache, fresh) {
   const key = cacheKey(file);
   if (cache[key]) return cache[key];
-  const ext = extensionOf(file.path);
   let subtunes = [];
-  // Only multi-song formats carry sub-tunes; skip reading the bytes otherwise
-  // (a large .spc/.miniusf would be read for nothing).
-  if (mod.MULTISONG_EXTENSIONS && mod.MULTISONG_EXTENSIONS.has(ext)) {
-    try {
-      subtunes = mod.describeSubtunesInBuffer(ext, read(file.path)) || [];
-    } catch (e) {
-      console.warn('Local file sub-tune parse failed:', file.path, e && e.message);
-    }
+  try {
+    subtunes = mod.describeSubtunesInBuffer(extensionOf(file.path), read(file.path)) || [];
+  } catch (e) {
+    console.warn('Local file sub-tune parse failed:', file.path, e && e.message);
   }
   cache[key] = subtunes;
   fresh.push(key);

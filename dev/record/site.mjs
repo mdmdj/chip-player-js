@@ -8,7 +8,6 @@
 
 export const header = {
   title: 'First Class Sub-Tunes and More Powerful Looping',
-  pr: 'chip-player-js PR',
     lede: `
     <h2>Overview</h2>
     This is a high level overview, there is a more detailed <a href="#summary">summary</a>, <a href="#demos">per-feature demos</a> and <a href="#snippets">code snippets</a> below.
@@ -18,12 +17,11 @@ export const header = {
     The classic way of listening to looping chiptunes is obscured in a per-engine setting that is difficult to understand.<br>
     This PR aims to make sub-tunes fully integrated with easy browsing, searching and looping across all formats.<br>
     With these improvements Chip Player JS matches or even exceeds the usability and capability of other major music players like foobar2000.
-    The existing Brows and Player UI is augmented instead of expanded, reducing overall complexity to the user.
+    The existing Browse and Player UI is augmented instead of expanded, reducing overall complexity to the user.
 
-    <h3>Each sub-tune is a first-class song</h3>
-    A file that contains sub-tunes browses like a folder
-    <p>
-    Sub-tunes now support:
+    <h3>Each Sub-tune Is a First-class Song</h3>
+    <p>A file that contains sub-tunes browses like a folder.</p>
+    <p>Sub-tunes now support:</p>
     <ul>
     <li>Favorite</li>
     <li>Search</li>
@@ -32,33 +30,30 @@ export const header = {
     <li>Loops via Repeat One</li>
     <li>Date Label (with improved parsing)</li>
     </ul>
+    <p>
     Share links are fully backward compatible.<br>
     The favorites list is now sorted and shows paths (similar to search results) for clarity and ease of navigation.<br>
+    Local files get the same result without a catalog: a multi-song file dropped in from disk opens as a folder of its songs, and each one plays.<br>
     </p>
 
-    <h3>Repeat One Upgraded For Sub-Tunes and Seamless Loops</h3>
-    <p>
-    Formats with native loop regions loop seamlessly, on load where available
+    <h3>Repeat One Upgraded for Sub-Tunes and Seamless Loops</h3>
+    <p>Formats with native loop regions loop seamlessly, on load where available.</p>
     <ul>
       <li>Slider Knob reflects the relative position across loops</li>
       <li>MIDI piano roll is now populated across loop boundaries</li>
       <li>Loop regions can optionally be displayed to the user</li>
-      </ul></li>
     </ul>
-    </p>
-    <p>
-    Formats that loop via Indefinite Playback use it automatically
-      <ul>
+    <p>Formats that loop via Indefinite Playback use it automatically.</p>
+    <ul>
       <li>Applied optional GME-style ending detection to N64 and SID
         <ul>
           <li>Parameters are tunable, can be customized by the player.</li>
-          <li>Implented is its own module, can be reused by any new player.</li>
+          <li>Implemented is its own module, can be reused by any new player.</li>
         </ul>
       </li>
       <li>Slider Knob will park at the end of the Slider Bar</li>
       <li>A "Looping" message has been added to clarify to the user</li>
-      </ul>
-    </p>
+    </ul>
     <p>
     Seamless looping behavior is opt-in on certain players, by default the original Sequencer behavior applies.<br>
     When Repeat One is not active, the Sequencer is fully in control.<br>
@@ -75,20 +70,19 @@ export const header = {
     </ul>
 
     <h4>Chip Core</h4>
-    Need to rebuild the Chip Core:
+    <p>Need to rebuild the Chip Core:</p>
     <ul>
     <li>There are new exports</li>
     <li>There are changes to wrappers</li>
     <li>There is a fix in vendored mdxmini</li>
     </ul>
 
-    <strong>There may be unexpected differences in your build due to the sibling libraries not being version pinned.<br>
-    ⚠Specifically, seeking N64 miniusf files has glitchy audio in my version and I'm not sure how it's fixed on your side.</strong>
-    <p>
+    <p><strong>There may be unexpected differences in your build due to the sibling libraries not being version pinned.<br>
+    ⚠Specifically, seeking N64 miniusf files has glitchy audio in my version and I'm not sure how it's fixed on your side.</strong></p>
     <h4>Auth</h4>
-    This feature was developed using a mock user shim,
-    best effort was make to mock the user properly,
-    but it's possible unxepected issues will appear when using the real Firebase config.
+    <p>This feature was developed using a mock user shim,
+    best effort was made to mock the user properly,
+    but it's possible unexpected issues will appear when using the real Firebase config.</p>
     `,
 };
 
@@ -103,19 +97,22 @@ export const header = {
 export const summary = {
   changed: [
     {
-      heading: 'Sub-tunes are songs',
+      heading: 'Sub-tunes Are Songs',
       points: [
         'Each sub-tune is an ordinary song: favorited, searched, shared, charted and shuffled on its own.',
         'A file that holds many songs (NSFE/NSF, SID, GBS, AY) browses as a <strong>song folder</strong>: a directory listing whose rows are its songs.',
         'Identity is <code>{path, sub-tune}</code>, defined once (<code>songRef</code>), so the row highlight, the now-playing song, a playlist and a share link cannot disagree.',
         'A share link keeps its format, <code>/?play=&lt;id&gt;&amp;subtune=N</code>, and lands inside the song folder with that sub-tune selected instead of on the containing directory.',
         '<code>/shuffle</code> and <code>/random</code> return one row per playable song, not per file, so a directory containing multi-song files will shuffle all songs, including sub-tunes.',
-        'Top Charts group by <code>(song_id, sub-tune)</code>, so one file can hold several ranks at once, each labelled with its own song.',
-        'The footer sub-tune widget (“Tune N of M”, prev/next) has been removed bcause it is obsolete. Browse/Sequencer owns song-level navigation, so a sub-tune is just another entry in the play context.',
+        'Top Charts group by <code>(song_id, sub-tune)</code>, so one file can hold several ranks at once, each labeled with its own song.',
+        'The footer sub-tune widget (“Tune N of M”, prev/next) has been removed because it is obsolete. Browse/Sequencer owns song-level navigation, so a sub-tune is just another entry in the play context.',
+        'Local files get the same treatment. A dropped multi-song file (NSF/NSFE, SID, GBS, AY) has no catalog row and no <code>song_id</code>, so the page reads its own header and shows it as a folder header with its songs listed beneath; play, Next and Shuffle cover every sub-tune.',
+        'That parse reuses the catalog’s own readers, which is why they moved out of <code>scripts/metadata-parsers.js</code> into <code>scripts/subtune-headers.js</code>. The module is dependency-free and reads any byte view (a Node <code>Buffer</code> at build time, a <code>Uint8Array</code> in the page), so one definition serves both and the page’s answer cannot drift from the catalog’s. It is loaded with a dynamic <code>import()</code>, into its own chunk, and its results are cached by <code>(path, size, mtime)</code>; a user who never opens Local Files downloads nothing new.',
+        'A local file still has no <code>song_id</code>, so it stays out of search, charts and favorites and cannot be shared. The folder view is the whole of it.',
       ],
     },
     {
-      heading: 'Repeat One loops the intended region',
+      heading: 'Repeat One Loops the Intended Region',
       points: [
         'One Repeat One across formats. Where the engine exposes the region the composer wrote, it loops it: VGM/VGZ, MDX, MIDI (CC 102/103, CC 110/111), and MOD/XM/IT/S3M (learned from playback, because libxmp exposes no loop position up front).',
         'Where there is no region, the driver free-runs and a tail detector restarts a finished one: NSFE, SID and N64.',
@@ -126,12 +123,12 @@ export const summary = {
     },
   ],
   // What to look out for. Each block is a thing that is true *before* you deploy,
-  // not a caveat about the code. The no-region formats get no block here; they are
-  // the `#limits` section, and repeating them was pure duplication.
+  // not a caveat about the code. The no-region formats are not repeated here either;
+  // they are covered by the per-format Variants section.
   lookout: [
     {
       id: 'database',
-      title: 'Database: rebuild the catalog before deploying',
+      title: 'Database: Rebuild the Catalog Before Deploying',
       body: [
         'The server prepares every statement at <code>require</code> time, and the new statements reference <code>subtune</code>, <code>subtune_fts</code> and <code>music.subtune_count</code>. Against an old catalog, startup throws <code>SqliteError: no such table: subtune</code>. That takes down <code>/top</code>, <code>/search</code>, <code>/browse</code> and <code>/user/favorites</code>.',
         '<strong>Fix:</strong> run <code>node scripts/build-music.js</code> (no <code>--reset-db</code>, no <code>-n</code>). It creates the tables, adds the column, and re-parses every file to backfill counts and labels. A <code>user_version</code> marker records that the backfill ran, since <code>DEFAULT 1</code> looks the same as a real single-song file. On 6,787 files this took <strong>11.7 s</strong> and produced a catalog byte-identical to the feature branch’s (1,140 sub-tune rows, 87 multi-song files).',
@@ -141,7 +138,7 @@ export const summary = {
     },
     {
       id: 'chip-core',
-      title: 'Chip-core: the vendored wasm differs from production’s',
+      title: 'Chip-core: The Vendored Wasm Differs from Production’s',
       body: [
         'Read song length late in a song, not early: <code>getDurationMs()</code> reports short until the engine has worked out where the fade ends, then settles. Never compare two readings taken at different points in a song.',
         '<strong>Seven exports</strong> are added to <code>scripts/build-chip-core.js</code>: <code>_lvgm_get_cur_loop</code>, <code>_lvgm_get_fade_start_ms</code>, <code>_lvgm_get_loop_start_ms</code>, <code>_lvgm_get_loop_end_ms</code>, <code>_lvgm_set_loop_count</code>, <code>_mdx_get_loop_start_ms</code>, <code>_mdx_get_loop_length_ms</code>. They are plain getters and setters, and every call site feature-detects, so a core without them falls back to the blind-loop UI rather than breaking. (Production exports none of them; it ships no VGM loop-region feature.)',
@@ -154,7 +151,7 @@ export const summary = {
     },
     {
       id: 'api',
-      title: 'API shapes',
+      title: 'API Shapes',
       body: [
         'Additive except where noted: <code>/api/top</code> rows gained <code>subtune</code>, <code>subtuneCount</code> and <code>subtune_title</code>; <code>/api/browse</code> returns <code>type: "songfolder"</code> for multi-song files and sub-tune rows (<code>subtune</code>, <code>durationMs</code>, <code>url</code>) when you browse inside one; <code>/api/search</code> unions sub-tune titles, so a hit can name a song rather than a file; <code>/api/playback</code> accepts <code>subtune</code>.',
         '<strong>Watch <code>/shuffle</code> and <code>/random</code>:</strong> they now return one row per playable song as <code>{path, subtune}</code>, which for the same directory is <em>more</em> rows than before plus a new field. Anything walking a shuffle has to key on the pair, not the path.',
@@ -162,14 +159,14 @@ export const summary = {
     },
     {
       id: 'tests',
-      title: 'Testing is not in the PR',
+      title: 'Testing Is Not in the PR',
       body: [
         'This repo has no test runner, no CI and no <code>test</code> script, and the catalog is gitignored, so a tracked suite would silently skip about a third of its checks because there is no fixture. The harnesses behind every number on this page live in <code>dev/</code> and are not in the diff; they build their own minimal SMFs for the edge cases rather than depending on a catalog file. If you want them tracked, they can move to a <code>test/</code> directory running on <code>node --test</code> with no new dependencies.',
       ],
     },
     {
       id: 'subtrees',
-      title: 'Vendored engines: four subtrees can be deleted',
+      title: 'Vendored Engines: Four Subtrees Can Be Deleted',
       body: [
         'Unrelated to this change, and worth doing when convenient: <code>libvgm/</code>, <code>libxmp/</code>, <code>fluidlite/</code> and <code>game-music-emu/</code> (about 3,000 files) are still committed but cannot build. <code>README.md</code> already calls them deprecated, and <code>scripts/build-chip-core.js</code> exports <code>_gme_disable_echo</code>, <code>_gme_seek_scaled</code> and <code>_xmp_seek_time_frame</code>, none of which exist in the vendored trees, so a build against them cannot link.',
         'They’re a stale second copy of each engine, which makes it unclear which libvgm you’re building against. Deleting them is a straight simplification; this change does not touch them or depend on it.',
@@ -259,15 +256,16 @@ export const prose = {
 export const snippets = [
   {
     id: 'api-songfolder',
-    title: 'A song folder is a listing, not a special case',
+    title: 'A multi-song file is presented as a folder',
     file: 'server/index.js',
     from: /const result = children\.map\(\(child\) => \{/,
     before: /\} else \{/,
     expect: 'isSongFolder',
-    why: `The parent listing returns <code>type: "songfolder"</code> with a count and
-      <code>url: null</code>; asking for the file itself returns one row per sub-tune,
-      each a playable file with its own <code>/?play=…&amp;subtune=N</code>. No client
-      code has to know that NSFE and SID are multi-song formats.`,
+    why: `In a directory listing, a file with more than one sub-tune comes back as
+      <code>type: "songfolder"</code> with no <code>url</code> and a <code>count</code> of its
+      songs. Requesting that path returns each sub-tune as an ordinary file row with its own
+      <code>/?play=…&amp;subtune=N</code> URL. The server decides the row shape in one place,
+      so the client does not have to know which formats are multi-song.`,
   },
   {
     id: 'schema-subtune',
@@ -361,19 +359,4 @@ export const snippets = [
       <a href="https://chiptune.app/?q=100+pure+love">that search</a> against a build with
       this change.`,
   },
-];
-
-export const limitations = [
-  `MOD/XM/IT/S3M: the loop band is <em>learned</em> from the engine’s first backward order
-    jump, because libxmp exposes no loop position up front. It is exact once found, but it
-    appears mid-song: on TECHTRIS about 80 seconds in. A band shown earlier would be a guess,
-    and a wrong band is worse than a late one.`,
-  `V2M has no loop points and no loop API at all, so Repeat One is the engine’s end →
-    stop → reload: a visible jump to 0:00. Unchanged from <code>master</code>, and shown here so
-    the floor is on the page.`,
-  `MIDI format 2 (async patterns, no shared timeline) gets no loop band: there is no single
-    timeline to mark a region on. The player says so rather than highlighting the whole file.`,
-  `SID has no loop API. Under Repeat One the tune free-runs past its listed length and a
-    tail detector restarts it when the output is quiet and still. That is a heuristic, and the
-    one place in this change where a setting exists to turn it off.`,
 ];

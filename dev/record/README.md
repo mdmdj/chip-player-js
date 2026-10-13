@@ -100,29 +100,36 @@ site: site/index.html — 14 clip(s) published (6 main, 8 per-format), 7 snippet
 media: 0 clip(s) re-probed + re-framed, 14 reused from cache
 ```
 
-Flags, for when you would rather force the behaviour than trust the cache:
+Flags, for when you would rather force the behavior than trust the cache:
 
 ```sh
 node dev/record/build-site.mjs --text-only        # never run ffmpeg/ffprobe
 node dev/record/build-site.mjs --clips loop-band  # derive media facts for these only
 ```
 
-Requires `playwright` installed without touching `package.json` (see the npm trap
-in AGENTS.md §Dev environment — install it in one command with webpack pinned,
-and check `better-sqlite3`'s ABI afterwards):
+The recorder and the page builder pull their npm dependencies from
+**`dev/record/package.json`**, not the root package. `dev/**` is path-listed, so
+this reaches neither the PR nor the feature branch, and the root `package.json`
+(shared with the feature branch) is never touched. The directory has its own
+lockfile, so the install is reproducible:
 
 ```sh
-npm i --no-save --no-package-lock playwright@1.63.0 webpack@5.106.0
+cd dev/record
+npm ci                           # playwright + shiki, pinned in package-lock.json
+npx playwright install chromium  # once per machine; browsers cache in ~/.cache
 ```
 
-The snippet blocks are highlighted at build time with `shiki`, installed the same
-way (a dev-time dependency, never in `package.json`). It is imported dynamically:
-without it the page still builds and the blocks render as plain text, so this is
-a nicety to add, not a hard requirement:
+Node finds `playwright` and `shiki` in `dev/record/node_modules` because it is the
+nearest `node_modules` above each script, so the commands above need no `NODE_PATH`
+or `cd`. **Do not** reach for `npm i --no-save` at the repo root instead: one
+`--no-save` install prunes the last, and it rebuilds native modules against
+whatever `node` is on `PATH` (the npm trap in AGENTS.md §Dev environment).
+`webpack` is the one exception and stays a root dependency.
 
-```sh
-npm i --no-save --no-package-lock shiki
-```
+The snippet blocks are highlighted at build time with `shiki` (VS Code's TextMate
+grammars), which lives in that same `dev/record/package.json`. It is imported
+dynamically: a checkout without the `dev/record` install still builds, and the
+blocks fall back to plain escaped text rather than failing the page.
 
 ## Where the pipeline stands
 
@@ -195,7 +202,7 @@ In scope — what the PR changes that a listener can see or hear:
   favorites/search/top-charts/share links/shuffle, sequencer-owned navigation).
 - **Repeat One across formats** (loop band on the slider, jump-free toggling,
   per-engine mechanisms, blind-loop UI).
-- The small visible fixes riding along (download filenames, visited-link colour,
+- The small visible fixes riding along (download filenames, visited-link color,
   link-copy fallback).
 
 Out of scope: dev overlay, `AGENTS.md`, engine build scripts/provenance stamping,
@@ -454,7 +461,7 @@ songs browses as a folder of songs, each of which is an ordinary song.
 | id | feature | fixture | script | verdict must show |
 | -- | ------- | ------- | ------ | ----------------- |
 | `songfolder` | A multi-song file browses as a folder (`<TUNES>` + count), and its rows are ordinary songs: real labels, no `Tune N of M` widget, share links unchanged | `nsfe/Akumajou Densetsu (VRC6).nsfe` (28 tunes) + `nsfe/Mega Man 2.nsfe` (22) | browse `/browse/nsfe`, into the folder, play `Mad Forest`, `..` back, into `Mega Man 2`, play `Stage Select` | `<TUNES>` + count; ends inside the *second* folder on sub-tune 3 of 22; both sub-tunes are separate songs |
-| `favorite-subtune` | Favourite one sub-tune; Favorites groups it under a song-folder heading | same | play `Epitaph`, click the **footer** heart, open Favorites | the heart's `.isFavorite` flips; the Favorites page holds exactly one row, labelled `Epitaph`, under the folder heading |
+| `favorite-subtune` | Favorite one sub-tune; Favorites groups it under a song-folder heading | same | play `Epitaph`, click the **footer** heart, open Favorites | the heart's `.isFavorite` flips; the Favorites page holds exactly one row, labeled `Epitaph`, under the folder heading |
 | `shuffle-subtunes` | Shuffle Play shuffles *songs*: one entry per playable song, so a 13-file directory is a 100-song walk, and each song's own folder page highlights the row being played | `/browse/nsfe` (13 files, 352 playable songs) | Shuffle Play, then ×8: play 1.7 s, click the footer's folder path (guarded), hold the highlighted row 1.1 s, Next | `ctxLen` 100 over `ctxFiles` 13 — one entry per song, not per file; ≥6 distinct songs played, ≥3 of them past sub-tune 0; ≥5 songs observed with the highlighted row **visible** on their own folder page; no frame where a highlighted row sits on a page that is not the playing song's folder; ≥5 Next clicks; ends on a folder page showing the playing song; audible |
 
 | `charts-subtunes` | The Top Charts page ranks **songs**: one file appears at several ranks, each a different sub-song; Shuffle Play on the page plays those rows, and each song highlights its own row | `/top` (the global chart) | Shuffle Play, then ×10: play, reveal the highlighted chart row, Next | the chart's own DOM carries ≥3 rows linking `?play=…&subtune=…`; ≥2 distinct **sub-songs** played; ≥3 distinct songs confirmed highlighted per tick — the row's text must name the playing file *and* its `subtune` parameter must match; the highlight was inside the scroll box for ≥15 ticks; ≥7 Next clicks; audible |
@@ -493,7 +500,7 @@ for every format, loop region on the timeline, no jump at the toggle.
 
 | id | feature | fixture | script | verdict must show |
 | -- | ------- | ------- | ------ | ----------------- |
-| `loop-band` | The shaded band on the slider, head folding inside it, and Settings → "Show Loop Area" toggling it without touching playback | `vgz-genesis/Sega Genesis_Sonic the Hedgehog_02 - Green Hill Zone.vgz` | Repeat One, seek into the band at 1:28, untick the band, tick it again | `band = {start,end}` ms from `getLoopBandMs()` (`[53199, 91599]`); the display folds back to the band start after the seek and climbs past 0:56; band absent from the DOM while unticked and back at the end; the checkbox was genuinely clickable (topmost element at its own centre) |
+| `loop-band` | The shaded band on the slider, head folding inside it, and Settings → "Show Loop Area" toggling it without touching playback | `vgz-genesis/Sega Genesis_Sonic the Hedgehog_02 - Green Hill Zone.vgz` | Repeat One, seek into the band at 1:28, untick the band, tick it again | `band = {start,end}` ms from `getLoopBandMs()` (`[53199, 91599]`); the display folds back to the band start after the seek and climbs past 0:56; band absent from the DOM while unticked and back at the end; the checkbox was genuinely clickable (topmost element at its own center) |
 | `repeat-toggle-smooth` | Enabling Repeat One *after* the loop region: head continuous, no jump | `vgz-genesis/Sega Genesis_Sonic the Hedgehog 2_05 - Chemical Plant Zone.vgz` | play to 0:03, seek to 1:45.6, toggle One after the band end (mid-fade) | toggled after the band end; `displayMs` monotonic across the toggle and never folds back into the band; the song plays out, the file restarts, and 0:03 comes round again |
 | `repeat-leave-fade` | Leaving a deep repeat plays the current pass + full fade, then ends | `neogeo/Samurai_Shodown_(Neo_Geo)/23 Heartbeat (Shiro Tokisada Amakusa 1).vgz` | Repeat One, leave at loop 3 (`waitFor` on `curLoop`) | position reaches deep into the tail; a gradual level decline (max 0.057 → 0.000) ending near silence; the take ends inside the silence, before the restart |
 | `blind-loop` | No known region: head parks at the end, label reads `↻ Looping` | `nsfe/Akumajou Densetsu (VRC6).nsfe` sub-tune 3 (`play_length` 101000 ms) | Repeat One, seek to `play_length − 1000` | `isPlayingIndefinitely()` true, band null, `positionMs >= durationMs`, `Looping` in the DOM |
@@ -581,7 +588,7 @@ Repeat One falls back to what it always did.
 Two things the last group is asserting on purpose. **It is a default, not a
 failure:** `Sequencer.advanceSong` never advances `currIdx` under `REPEAT_ONE`, so a
 player with no `setLooping` override replays the whole file — which means a format
-added tomorrow inherits working behaviour with nothing to implement. And **the clip
+added tomorrow inherits working behavior with nothing to implement. And **the clip
 must be one whose mechanism is genuinely that**, which is why the V2M entry is
 withheld: its reported duration does not match its engine, so it was showing the
 blind-loop UI instead, and its take was too short to reach the reload it claimed.
@@ -638,7 +645,6 @@ Nav             one anchor per top-level section
                   - <details> proof: verdict table + key numbers + trace link
 #deep            §7b per-format clips, same shape, grouped by mechanism
 #snippets        §8, each with file:line and a one-paragraph "why this can't be a video"
-#limits          XMP's late band, V2M's tier-3 reload, format-2 MIDI has no band
 ```
 
 Prose (`site.mjs`: `before`, `watch`, section notes) is inserted as **HTML**, not
@@ -650,7 +656,7 @@ only values that could carry anything unexpected — are still escaped.
 One piece of app iconography is borrowed: the Repeat One heading says
 "⟲One Loops Any Song", where ⟲ is the app's own `src/images/repeat.png` inlined as a
 data URI (200 bytes) by `build-site.mjs`, drawn as a CSS **mask** so it takes the
-heading's colour, and sized in `em` so the same span works in the nav link. It is
+heading's color, and sized in `em` so the same span works in the nav link. It is
 `role="img" aria-label="Repeat"` rather than decoration, because there the glyph *is*
 the word: without it the heading, the nav link, the page outline and find-in-page all
 say "One Loops Any Song" (checked over CDP against the AX tree). An unknown
@@ -693,7 +699,7 @@ The repo has harnesses per engine (`dev/test-vgm-loops.js`, `test-mdx-loops.js`,
 `test-midi-loops.js`, `test-xmp-loops.js`, `test-end-detector.js`,
 `test-subtunes-server.js`, `test-songrefs.js`, …) and no browser in CI. So:
 
-- `dev/record/scenarios.mjs` **references** the harness that pins the behaviour it
+- `dev/record/scenarios.mjs` **references** the harness that pins the behavior it
   demonstrates (`harness: 'dev/test-vgm-loops.js'`), so the page and the tests
   cannot claim different things about the same engine.
 - `dev/record/scenarios.check.mjs` runs in `dev/run-tests.sh` and fails when a

@@ -599,4 +599,29 @@ check('Repeat One Web MIDI: the wrap reschedules the new pass in the same call',
   assert.ok(p.position < p.loop.endIndex, 'position did not move into the new pass');
 });
 
+check('multi-track: a track replayed after an in-loop tempo change keeps that tempo', () => {
+  // Track 0 defines the loop and carries a tempo change at TPQ. Track 1's first
+  // in-loop event is at 1.5*TPQ, after that change. Restoring the loop-start
+  // tempo per track (at track 1's replay) would erase the change; restoring it
+  // once at the shared boundary must not.
+  const bytes = buildMidi([
+    [tempo(500000), cc(110),
+     noteOnAt(0, 0, 60), noteOffAt(TPQ, 0, 60),
+     tempo(250000),
+     noteOnAt(0, 0, 60), noteOffAt(TPQ, 0, 60), cc(111)],
+    [noteOnAt(Math.round(1.5 * TPQ), 1, 72), noteOffAt(Math.round(0.4 * TPQ), 1, 72)],
+  ], { format: 1 });
+  const mf = parseBytes(bytes);
+  const { events, loopStartMs, loopEndMs } = mf.getPlaybackEvents(false);
+  assert.ok(loopEndMs > loopStartMs, `band ${loopStartMs}..${loopEndMs}`);
+  const ons = events.filter(e => e.param1 === 72 && e.param2 > 0).map(e => e.playTime);
+  const offs = events.filter(e => e.param1 === 72 && e.param2 === 0).map(e => e.playTime);
+  assert.strictEqual(ons.length, 2, `track-1 note-ons=${ons.length}`);
+  assert.strictEqual(offs.length, 2, `track-1 note-offs=${offs.length}`);
+  const gap1 = offs[0] - ons[0];
+  const gap2 = offs[1] - ons[1];
+  assert.ok(Math.abs(gap2 - gap1) < 1,
+    `the replayed note keeps its length: pass1 ${gap1.toFixed(1)}ms vs pass2 ${gap2.toFixed(1)}ms`);
+});
+
 console.log(`\n${passed} checks passed${process.exitCode ? ' (WITH FAILURES)' : ''}.`);

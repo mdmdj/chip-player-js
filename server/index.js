@@ -702,7 +702,7 @@ const topCache = new LRUCache({
 //
 // What it excludes: catalog/nes-audio-tests is a copy of the bbbradsmith NES audio
 // hardware test suite, brought in as a *fixture* for the expansion-chip work in
-// AGENTS.md. Its files are one-second tests of a single chip's behaviour, not tunes,
+// AGENTS.md. Its files are one-second tests of a single chip's behavior, not tunes,
 // and engine work put 11 plays on one of them -- enough to sit in the global Top 50
 // beside real music, which is the one place a fixture must not appear.
 //

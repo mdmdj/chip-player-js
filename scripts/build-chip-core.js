@@ -583,7 +583,7 @@ if (previous && previous.engines) {
     if (process.env.CHIP_ALLOW_ENGINE_FALLBACK !== '1') {
       console.error(chalk.red(
         'Refusing to build: an engine\'s content differs from the recorded build.\n' +
-        'That silently changes playback (loop/fade behaviour, chip set). Restore the\n' +
+        'That silently changes playback (loop/fade behavior, chip set). Restore the\n' +
         'previous engine state, or re-run with CHIP_ALLOW_ENGINE_FALLBACK=1 to accept it.'
       ));
       process.exit(1);

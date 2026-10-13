@@ -507,4 +507,75 @@ check('format 1 with the same markers still gets its band (guards the guard)', (
   assert.ok(p.loop, 'and the player still wraps');
 });
 
+// --- Replay/merge edge cases (regression guards) ----------------------------
+
+check('a track whose only events are past the loop end still shifts its ending', () => {
+  // Track A defines the loop; track B has no events inside it, only an ending.
+  // B's ending must follow both passes -- not overlap the second one, and not
+  // be duplicated.
+  const bytes = buildMidi([
+    [tempo(), ccAt(0, 102), noteOnAt(0), noteOffAt(TPQ * 2), ccAt(0, 103), noteOnAt(0), noteOffAt(TPQ * 2)],
+    [noteOnAt(TPQ * 3, 0, 72), noteOffAt(TPQ, 0, 72)],
+  ], { format: 1 });
+  const mf = parseBytes(bytes);
+  const { events, loopStartMs, loopEndMs } = mf.getPlaybackEvents(true);
+  const B = loopEndMs - loopStartMs;
+  assert.ok(B > 0, `band length ${B}`);
+  const ons = events.filter(e => e.param1 === 72 && e.param2 === 100);
+  assert.strictEqual(ons.length, 1, `ending note appeared ${ons.length} time(s), expected 1`);
+  // Authored at 3*TPQ = 1500 ms; two passes push it one loop length later.
+  assert.ok(Math.abs(ons[0].playTime - (1500 + B)) < 1,
+    `ending at ${ons[0].playTime}ms, expected ${1500 + B} (1500 + loop ${B})`);
+});
+
+check('a tempo change inside the loop is restored on the replayed pass', () => {
+  // Intro at 120bpm; the loop starts at 2*TPQ and runs 120bpm for one beat, then
+  // 240bpm. The tempo in force at the loop start (120bpm) is set by the intro
+  // event, which the replay does not re-emit -- so it must be restored, or the
+  // second pass runs the pre-change beat at the leftover 240bpm.
+  const bytes = buildMidi([
+    tempo(500000),
+    noteOnAt(0), noteOffAt(TPQ * 2),   // intro, ticks 0..2*TPQ
+    cc(110),                            // loop start, tick 2*TPQ
+    noteOnAt(0), noteOffAt(TPQ),        // 2*TPQ..3*TPQ at 120bpm
+    tempo(250000),                      // tick 3*TPQ: 240bpm
+    noteOnAt(0), noteOffAt(TPQ),        // 3*TPQ..4*TPQ at 240bpm
+    cc(111),                            // loop end, tick 4*TPQ
+  ]);
+  const mf = parseBytes(bytes);
+  const { events, loopStartMs, loopEndMs } = mf.getPlaybackEvents(false);
+  const B = loopEndMs - loopStartMs; // 500ms @120 + 250ms @240 = 750
+  const tempos = events.filter(e => e.type === 0xff && e.subtype === 0x51)
+    .map(e => Math.round(e.playTime));
+  assert.strictEqual(tempos.length, 3, `tempo-event times=${tempos} (intro + one per pass)`);
+  assert.ok(Math.abs((tempos[2] - tempos[1]) - B) < 1,
+    `the replayed change is one loop apart: ${tempos[2] - tempos[1]}ms vs loop ${B}ms`);
+});
+
+check('Repeat One Web MIDI: the wrap reschedules the new pass in the same call', () => {
+  const sends = [];
+  const p = new MIDIFilePlayer({
+    programChangeCb: () => {},
+    useWebMIDI: true,
+    output: { send: (message, timestamp) => sends.push([message, timestamp]) },
+    skipSilence: false,
+    sampleRate: 44100,
+    synth: stubSynth(true),
+  });
+  const mf = loopWithIntroGapAndEnding();
+  p.load(mf, false);
+  assert.ok(p.loop, 'expected a loop region');
+  p.play(() => {});
+  p.setLooping(true);
+  // Park on the event index at the band end, with the clock just past it.
+  p.position = p.loop.endIndex;
+  p.elapsedTime = p.loop.endMs + 1;
+  p.lastProcessPlayTimestamp = performance.now();
+  sends.length = 0;
+  p.processPlay();
+  // The new pass must be scheduled now, not on the next callback.
+  assert.ok(sends.length > 0, 'no events scheduled during the wrap call');
+  assert.ok(p.position < p.loop.endIndex, 'position did not move into the new pass');
+});
+
 console.log(`\n${passed} checks passed${process.exitCode ? ' (WITH FAILURES)' : ''}.`);

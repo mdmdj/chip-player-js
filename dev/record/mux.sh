@@ -26,7 +26,7 @@
 # Quality: the video re-encode is crf 14 / preset slow. crf 20 / veryfast was
 # visibly soft on the bitmap font (SSIM 0.931 on a static text crop vs 0.934 at
 # crf 14, and crf 12 measures the same as 14 -- so 14 is the knee, not a guess).
-# Note that SSIM over the whole frame is useless here: the spectrum visualiser
+# Note that SSIM over the whole frame is useless here: the spectrum visualizer
 # changes every frame, so a one-frame misalignment dominates the score.
 #
 # `-fps_mode passthrough` is mandatory, not a nicety. The recorder's streams

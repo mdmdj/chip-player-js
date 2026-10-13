@@ -40,7 +40,7 @@ re-litigated.
 
 The most expensive lesson here, and it generalises past this project.
 
-`__cpRec`'s verdict asserts **app** behaviour: the right song is loaded, the
+`__cpRec`'s verdict asserts **app** behavior: the right song is loaded, the
 head folded into the band, the loop count incremented. It knows nothing about
 what ffmpeg does next. So when the sync mark was detected on the wrong frame —
 the mark was white, the capture starts on a blank page, and the detector
@@ -156,7 +156,7 @@ does not say what an explicit larger value does.
 
 **Mistake 1 — `size: viewport * deviceScaleFactor`.** Playwright's screencast
 frame is then *padded* to that size: the app occupies ~57% of the picture, the
-rest is page backdrop, and a full-viewport colour mark stops being detectable
+rest is page backdrop, and a full-viewport color mark stops being detectable
 because it only lights a third of the frame — `find-flash.sh` reported "no flash"
 for takes that had one.
 
@@ -176,7 +176,7 @@ protect. Widening the viewport alone would have silently resampled every clip:
 | 640 | 2 | unset | 640x640 | 1.000 | yes |
 
 So the rule is **size == viewport exactly**: that bypasses the 800 cap without
-padding. `vidcap.mjs` verifies it by painting the page a known colour and reading
+padding. `vidcap.mjs` verifies it by painting the page a known color and reading
 the corners back out of the *encode*, because the padded case still reports the
 requested dimensions — only pixels give it away. An earlier version of that probe
 used an ffmpeg corner-crop filter that silently produced no bytes when it failed,
@@ -205,7 +205,7 @@ same clip. Read this before writing a step that clicks something.
 | the selector | what it actually did |
 | --- | --- |
 | `button[title*="avorite"]` | matched **nothing** — `FavoriteButton` renders no `title` attribute |
-| `button.FavoriteButton` | matched the **first** one in the DOM: the browse list's per-row heart, not the footer's. The clip favourited "Prelude" while claiming "Epitaph" |
+| `button.FavoriteButton` | matched the **first** one in the DOM: the browse list's per-row heart, not the footer's. The clip favorited "Prelude" while claiming "Epitaph" |
 | `a[href="/favorites"]` | matched **nothing** — the nav link is `to={{pathname, ...search}}` and `search` carries the driver's `?r=<cache-buster>`, so the href is `/favorites?r=…`. The take never left `/browse` |
 
 All three verdicts passed, because the assertions were `document.body.textContent`
@@ -224,10 +224,10 @@ checking the app's own state after the click (`.AppFooter button.FavoriteButton.
 Two related traps in the same family:
 
 - **A synthetic click bypasses occlusion.** `Show Loop Area` was clicked while
-  *behind* the footer (`elementFromPoint` at its centre returned a transport
+  *behind* the footer (`elementFromPoint` at its center returned a transport
   button), and the band assertions were green. Nothing in the panel scrolls, so
   the fix was a taller capture (900x840) plus an assertion that the checkbox is
-  the topmost element at its own centre. If a clip claims "the viewer sees this
+  the topmost element at its own center. If a clip claims "the viewer sees this
   control being clicked", assert the control is *reachable*.
 - **A sampling window that ends at the event hides the event.** The SID restart
   looked like it left the engine silent because the first watch window ended
@@ -546,7 +546,7 @@ Measured on the same take machinery:
 
 | clip | page state | fps | frames |
 | ---- | ---------- | --- | ------ |
-| `loop-band` (VGM playing) | visualiser + playhead animating | **29.8** | 165 in 5.5 s |
+| `loop-band` (VGM playing) | visualizer + playhead animating | **29.8** | 165 in 5.5 s |
 | `songfolder` (navigation only) | static list, nothing playing | **1.0** | 5 in 5 s |
 
 The host recorder is a low-rate screencast: it emits roughly one frame a second
@@ -557,11 +557,11 @@ the page genuinely animates. `preview_recording_start` has no rate option.
 `setInterval`, verified running during a take via `getElementById('__cpRecBeat')`
 and its computed background) did **not** lift a static page above ~1 fps.
 
-What did produce 30 fps: `loop-band`, where the spectrum visualiser was painting.
+What did produce 30 fps: `loop-band`, where the spectrum visualizer was painting.
 The obvious hypothesis — "a clip that ends with playback will animate and record
 at 30 fps" — was then tested on `songfolder` (re-recorded with a sub-tune
 playing for the last 3 s of the take) and **it is false**: still 6 frames in 5.3 s.
-The visualiser apparently only paints under whatever condition held in the
+The visualizer apparently only paints under whatever condition held in the
 `loop-band` session, which has not been identified. So the honest statement is:
 *frame rate varies per clip between ~1 and ~30 fps, and the clip that demonstrates
 looping happens to be the smooth one.* Both are watchable; neither is a
@@ -628,7 +628,7 @@ with the *same* expression that later succeeded unchanged. What it is not:
 What it correlates with: calling `preview_evaluate` immediately after
 `preview_navigate`. `preview_wait_for('.BrowseList-row')` returns as soon as the
 list exists, but the app is still fetching `/api/browse`, fetching metadata and
-mounting the visualiser; an evaluate landing in that window fails at the
+mounting the visualizer; an evaluate landing in that window fails at the
 transport level without reaching the page.
 
 Protocol, therefore: **retry, and verify.** After a failed evaluate, read
@@ -770,7 +770,7 @@ Every assertion that filters or slices the trace now constrains its length, and
 Related: the pinned `silenceDuration` is **-1** ("Insert Silence: None", the app's
 own default), not 0. The base end detector is only armed when
 `silenceDuration >= 0`, so pinning 0 armed it and let a looping clip be ended by
-a silence heuristic instead of by the behaviour under test.
+a silence heuristic instead of by the behavior under test.
 
 - **An assertion that compares against a missing value passes for the wrong
   reason.** `never-highlights-a-song-that-is-not-playing` read `loc !==
@@ -871,7 +871,7 @@ checkable afterwards.
 
 The measurement that matters: the landing is **not repeatable between runs**. Two
 identical seeks landed at 92260 and 112995. So `n64-indefinite` asks for a point,
-lets the pre-roll settle, and asserts the *behaviour* afterwards rather than a
+lets the pre-roll settle, and asserts the *behavior* afterwards rather than a
 position. Scheduling around a single sample of an unrepeatable seek is how a clip
 ends up claiming a moment it never reached.
 

@@ -38,7 +38,7 @@ const player = () => {
 // The first five values mirror UserProvider's own DEFAULT_SETTINGS; `silenceDuration:
 // -1` is that default ("Insert Silence: None"), and it matters: the base end
 // detector is only armed when silenceDuration >= 0, so pinning 0 would arm it and
-// let a looping clip be ended by a silence heuristic instead of by the behaviour
+// let a looping clip be ended by a silence heuristic instead of by the behavior
 // under test. A clip that is *about* the detector overrides it.
 // `showVisualizer: true` because the spectrum is the one thing in the frame that
 // visibly reacts to the audio, which is the point of shipping audio in the clips.
@@ -87,7 +87,7 @@ const snap = () => {
     subtune: typeof p.getSubtune === 'function' ? p.getSubtune() : null,
     subtunes: typeof p.getNumSubtunes === 'function' ? p.getNumSubtunes() : null,
   };
-  // The length the app is working from is engine-reported rather than catalogued
+  // The length the app is working from is engine-reported rather than cataloged
   // (GME parses play_length at load; SID fetches HVSC lengths over HTTP and falls
   // back to a default), so it cannot be read from the DB -- a clip that asserts
   // "past the reported length" has to see the number the player used. tripAtMs is
@@ -100,10 +100,10 @@ const snap = () => {
     s.fadeStartMs = p.core._lvgm_get_fade_start_ms(p.vgmCtx);
   }
   if (typeof p.maxLoopCount !== 'undefined') s.maxLoopCount = p.maxLoopCount;
-  // Is the *current* song a favourite? Favourites live in UserProvider's state, not
+  // Is the *current* song a favorite? Favorites live in UserProvider's state, not
   // on the player, so the only observable is the button's own class -- which is
   // exactly what the eye checks, and it only flips once the POST has landed and the
-  // context has re-fetched. A clip that claims to favourite something needs this,
+  // context has re-fetched. A clip that claims to favorite something needs this,
   // because "the row is on the Favorites page" is also true of the previous take.
   // Scoped to the footer: the browse list has a heart per row, so an unscoped query
   // answers for row 1 rather than for what is playing.
@@ -292,7 +292,7 @@ const audio = {
 
 // Repaint heartbeat. The host tab recorder is change-driven, not clock-driven:
 // a 46 s take of a static page contained 4 frames, and a clip with no audio
-// playing (so the spectrum visualiser never repaints) came out as a slideshow.
+// playing (so the spectrum visualizer never repaints) came out as a slideshow.
 // Clips whose whole point is navigation have almost nothing moving, so without
 // this they are 4-frame artefacts. A 2 px element nudged on every animation
 // frame is enough to make the compositor produce a frame each time; it is
@@ -329,7 +329,7 @@ const heartbeat = {
   },
 };
 
-// Full-viewport colour frame: the sync mark find-flash.sh looks for.
+// Full-viewport color frame: the sync mark find-flash.sh looks for.
 //
 // It must be *green*, and that is not a style choice. A white mark is
 // indistinguishable from the two other full-frame whites in a recording: the
@@ -339,7 +339,7 @@ const heartbeat = {
 // passed. Green is unique here by construction: the app is blue (high U) and
 // yellow (high V) on near-black, so a frame that is bright with *both* U and V
 // low cannot be app content, and a blank page is neutral (U = V = 128). No
-// post-scaling by ffmpeg can produce that signature from white or grey.
+// post-scaling by ffmpeg can produce that signature from white or gray.
 const flash = (ms = 150, color = '#00ff00') => {
   const el = document.createElement('div');
   el.id = '__cpRecFlash';
@@ -414,7 +414,7 @@ const runStep = (step, trace) => {
   // A `waitFor` step's label names the event being waited for, so it is emitted
   // when the condition is met (by the runner), not now -- otherwise the mark lands
   // at the start of the poll and the proof reads as if the event happened instantly.
-  // A refused `play` is likewise not labelled: it did not happen.
+  // A refused `play` is likewise not labeled: it did not happen.
   if (step.label && !step.waitFor && !playBlocked) trace.mark(step.label);
 };
 
@@ -806,16 +806,16 @@ const dev = {
   },
 
   /**
-   * Empty the signed-in user's favourites, so a take that demonstrates favouriting
+   * Empty the signed-in user's favorites, so a take that demonstrates favoriting
    * starts from an empty list and the row the viewer sees appear is unambiguously
    * the one the clip just added.
    *
    * Needed because the Favorites page is *virtualized*: measured 33 rows in the DOM
    * against a 33-row list that the nsfe group sat outside of. A clip that clicks the
-   * heart and then shows the page cannot claim "your favourite is listed" if the
+   * heart and then shows the page cannot claim "your favorite is listed" if the
    * group is scrolled out of frame -- and worse, "Epitaph" and the folder name are
    * on screen anyway in the *footer*, which still shows the playing song, so text
-   * assertions pass while the claim is not visible. Accumulated dev-user favourites
+   * assertions pass while the claim is not visible. Accumulated dev-user favorites
    * also made the page content differ from take to take.
    *
    * Dev-only and reversible in the sense that matters: it only empties the dev user's
@@ -835,7 +835,7 @@ const dev = {
     // Toggle through the app rather than POSTing /favorites/remove directly, and that
     // is the fix for the second silent no-op this function had. `faves` is seeded from
     // localStorage, so clearing only the *server* left the client still believing the
-    // old favourites existed -- the clip's heart click then read "already favourited"
+    // old favorites existed -- the clip's heart click then read "already favorited"
     // and REMOVED it, and the take ended with an empty list. handleToggleFavorite
     // re-reads the server and rewrites localStorage on every call, so going through it
     // keeps all three stores (React state, localStorage, server) in step.

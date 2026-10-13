@@ -91,6 +91,28 @@ Everything else (20 files) has no loop markers.
 4. **Durability caveat.** Because `catalog/` is gitignored, the real-file checks
    are opportunistic; the synthetic checks are what always runs.
 
+## Decision: a note crossing the loop end is cut at the seam
+
+`EventIterator` collapses post-loop events that carry no note-on to the loop
+boundary (so converter padding cannot inflate the duration). A note that
+*starts* inside the loop and is *released* after it looks the same to that test,
+so its release is moved to the boundary and the note is cut.
+
+This is deliberate and conventional:
+
+- DAWs cut notes that cross a loop/cycle boundary by default — Logic ("Notes
+  cut off when cycles"), Cubasis ("note cut off in loop mode"); Ableton needs a
+  manual wrap. Continuing a held note is an explicit opt-in ("note chase" /
+  "chase long notes" in Studio One / Bitwig / Reason), with "cut long notes" as
+  its counterpart.
+- It is also the standard-safe choice: letting the note ring past the boundary
+  makes the replay send a second NoteOn for a still-sounding note, which the
+  MIDI spec calls invalid (Ardour, "Handling Overlapping Notes").
+
+A file whose loop marker sits mid-note is an authoring error — the loop should
+be placed where voices resolve — and cutting is what we do. Not planned to
+change; there is no note-tracking to add.
+
 ## How to regenerate the inventory
 
 A scanner was used to produce the table above (parse each file with the repo's

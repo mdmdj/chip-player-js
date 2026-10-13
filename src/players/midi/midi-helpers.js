@@ -403,6 +403,10 @@ MIDIFile.prototype.getLoopedEvents = function (tracks, loopCount = 2, range = nu
   // each replay so an in-loop tempo change reapplies from the top. An implicit
   // start at tick 0 with no event there never latches below, so seed it.
   let loopStartTickResolution = range != null && range.startTick === 0 ? tickResolution : null;
+  // In the multi-track merge, restore that tempo once at the shared pass
+  // boundary (the first event any track replays) -- not per track, or a later
+  // track's replay erases a tempo change an earlier one already re-applied.
+  let passTempoRestored = false;
   const isRpgMaker = range != null && range.endTick == null;
   // Format-2 tracks have no shared timeline, so a song-global range is
   // meaningless: they play once and must not report a band. Reporting one

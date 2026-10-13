@@ -129,6 +129,19 @@ class EventIterator {
       this.boundaryTick = loop.endTick != null ? loop.endTick : lastTick;
       this.loopLength = loop.endTick != null ? loop.endTick - loop.startTick : lastTick - loop.startTick;
       this.replayDelta = null;
+      // A post-loop event that would otherwise inflate the duration (converter
+      // padding, END_OF_TRACK) is collapsed to the loop boundary -- unless the
+      // track has a real note-on after the loop end, which is a composed outro
+      // that keeps its exact timing.
+      //
+      // Decision (2026-10): a note that starts inside the loop and is released
+      // after it is cut at the seam. Its release is "noteless" (this only sees
+      // note-ons), so the collapse moves it to the boundary. That matches the
+      // DAW default -- Logic/Cubasis cut notes crossing a cycle, Ableton needs a
+      // manual wrap -- and it is the standard-safe choice: letting the note ring
+      // past the boundary would make the replay send a second NoteOn for a still
+      // sounding note, which the MIDI spec calls invalid. The composer should put
+      // the loop where voices resolve. See dev/MIDI_LOOP_TEST_GAPS.md.
       if (loop.endTick != null) {
         this.postHasNotes = this.events.some((e, idx) =>
           this.absTicks[idx] > loop.endTick &&
@@ -264,8 +277,13 @@ MIDIFile.prototype.getLoopedEvents = function (tracks, loopCount = 2, range = nu
   let loopStartMs = null;
   let loopEndMs = null;
   // Tempo in force at the loop start, latched on the first pass and restored at
-  // each replay so an in-loop tempo change reapplies from the top.
-  let loopStartTickResolution = null;
+  // each replay so an in-loop tempo change reapplies from the top. An implicit
+  // start at tick 0 with no event there never latches below, so seed it.
+  let loopStartTickResolution = range != null && range.startTick === 0 ? tickResolution : null;
+  // In the multi-track merge, restore that tempo once at the shared pass
+  // boundary (the first event any track replays) -- not per track, or a later
+  // track's replay erases a tempo change an earlier one already re-applied.
+  let passTempoRestored = false;
   const isRpgMaker = range != null && range.endTick == null;
   // Format-2 tracks have no shared timeline, so a song-global range is
   // meaningless: they play once and must not report a band. Reporting one
@@ -340,7 +358,6 @@ MIDIFile.prototype.getLoopedEvents = function (tracks, loopCount = 2, range = nu
     smallestDelta = -1;
 
     const trackIterators = [];
-    const lastLoops = [];
 
     // Creating iterators
     for (i = 0, j = tracks.length; i < j; i++) {
@@ -381,9 +398,10 @@ MIDIFile.prototype.getLoopedEvents = function (tracks, loopCount = 2, range = nu
         }
         // filling values
         event = trackIterators[smallestDelta].curEvent;
-        const loops = trackIterators[smallestDelta].elapsedLoops;
-        if (loops !== (lastLoops[smallestDelta] || 0)) {
-          lastLoops[smallestDelta] = loops;
+        // Restore the loop-start tempo once, at the shared pass boundary (the
+        // first event any track replays), not per track.
+        if (trackIterators[smallestDelta].elapsedLoops > 0 && !passTempoRestored) {
+          passTempoRestored = true;
           if (loopStartTickResolution != null) tickResolution = loopStartTickResolution;
         }
         playTime += event.delta ? event.delta * tickResolution / 1000 : 0;

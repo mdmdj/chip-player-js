@@ -938,11 +938,20 @@ class App extends React.Component {
     // One file can span several sub-tune rows; delete each file once.
     filePaths = [...new Set(filePaths)];
     const onLocal = songRefListsEqual(this.sequencer?.getCurrContext(), this.playContexts['local']);
-    // Capture the now-playing song and its linear slot BEFORE the list changes,
-    // so deleting the playing file can move to the next surviving song.
+    // Capture the now-playing song and, from the pre-delete order, the next song
+    // that will survive. Track the surviving SongRef, not a slot index: removed
+    // rows shift the rebuilt list, so a clamped old index lands on a later song.
     const playing = onLocal ? this.sequencer.getCurrSongRef() : null;
     const deletedPlaying = !!(playing && filePaths.includes(playing.path));
+    const oldRefs = onLocal ? (this.playContexts['local'] || []) : [];
     const oldIdx = onLocal ? this.sequencer.getCurrIdx() : 0;
+    const survives = (r) => r && !filePaths.includes(r.path);
+    let successor = null;
+    if (deletedPlaying) {
+      successor = oldRefs.find((r, i) => i > oldIdx && survives(r))
+        || [...oldRefs].reverse().find((r) => survives(r) && songRefKey(r) !== songRefKey(playing))
+        || null;
+    }
 
     filePaths.forEach(filePath => this.localFilesManager.delete(filePath));
     // updateLocalFiles() parses headers asynchronously; await the rebuild before
@@ -956,14 +965,15 @@ class App extends React.Component {
       const current = this.sequencer.getCurrSongRef();
       if (!current || songRefKey(current) !== songRefKey(playing)) return;
       const refs = this.playContexts['local'] || [];
-      if (refs.length === 0) {
-        // No songs survive: eject (advanceSong off the empty context stops the
+      const next = successor ? refs.findIndex(r => songRefKey(r) === songRefKey(successor)) : -1;
+      if (next < 0) {
+        // Nothing survives: eject (advanceSong off the empty context stops the
         // player), rather than leaving the deleted buffer playing -- forever,
         // under Repeat One.
         this.sequencer.nextSong();
         return;
       }
-      this.sequencer.currIdx = Math.min(oldIdx, refs.length - 1);
+      this.sequencer.currIdx = next;
       if (this.sequencer.shuffle) this.sequencer.setShuffle(this.sequencer.shuffle);
       this.sequencer.playCurrentSong();
     }

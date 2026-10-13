@@ -259,7 +259,7 @@ MIDIPlayer.prototype.processPlay = function () {
     // the band start are not a whole callback late.
     if (loopEndIdx !== Infinity && this.position >= loopEndIdx) {
       if (this.elapsedTime >= this.loop.endMs && wraps++ < 4) {
-        this.loopJump(false);
+        this.loopJump();
         event = this.events[this.position];
         continue;
       }
@@ -523,7 +523,7 @@ MIDIPlayer.prototype.setPosition = function (ms) {
 // panic: the loop is authored to continue, so program/controller state is
 // restored silently and only notes still ringing from the finished pass are
 // cut — the closest a JS event loop gets to a native engine loop.
-MIDIPlayer.prototype.loopJump = function (carryOvershoot = true) {
+MIDIPlayer.prototype.loopJump = function () {
   const loop = this.loop;
   if (!loop) return;
   const ringing = [...this.activeNotes.keys()];
@@ -552,12 +552,12 @@ MIDIPlayer.prototype.loopJump = function (carryOvershoot = true) {
     }
     if (this.synth) this.setPositionSynth(eventList);
   }
-  // The synth path renders whole blocks, so its clock can be up to a block past
-  // the band end; carrying that overshoot keeps the loop in absolute time
-  // instead of drifting. Web MIDI schedules against the clock, so it passes
-  // false -- its new pass must not be scheduled behind the clock.
-  this.elapsedTime = loop.jumpMs +
-    (carryOvershoot ? Math.max(0, this.elapsedTime - loop.endMs) : 0);
+  // The clock can be up to a processing block past the band end when the wrap
+  // is detected (the synth renders whole buffers; Web MIDI is called on a
+  // timer). Carry that overshoot: it keeps the loop in absolute time, and for
+  // Web MIDI it is what schedules the new pass against the original boundary
+  // rather than the late callback, so the loop does not drift.
+  this.elapsedTime = loop.jumpMs + Math.max(0, this.elapsedTime - loop.endMs);
   this.position = loop.jumpIndex;
 };
 

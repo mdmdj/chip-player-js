@@ -354,6 +354,15 @@ export default class MDXPlayer extends Player {
     this.muteAudioDuringCall(this.audioNode, () =>
       this.core._mdx_set_position_ms(this.mdxCtx, seekMs)
     );
+    // mdxmini keeps max_infinite_loops across a seek, and the extended count /
+    // durationExtended were for the pass we just abandoned. A seek repositions
+    // into the normal timeline, so restore the default finite count and let the
+    // end detector re-arm -- unless Repeat One is still on (count 0).
+    if (this.songOpen && !this.looping && typeof this.core._mdx_set_max_loop === 'function') {
+      this._maxLoopCount = DEFAULT_LOOP_COUNT;
+      this.durationExtended = false;
+      this.core._mdx_set_max_loop(this.mdxCtx, this._maxLoopCount);
+    }
   }
 
   stop() {

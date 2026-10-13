@@ -140,7 +140,8 @@ class EventIterator {
     // then plays once as the outro.
     if (this.loop && this.loop.endTick != null &&
         (this.pos >= this.events.length || this.absTicks[this.pos] > this.loop.endTick)) {
-      if (this.passesLeft > 1) {
+      if (this.passesLeft > 1 && this.startIdx < this.events.length &&
+          this.absTicks[this.startIdx] <= this.loop.endTick) {
         this.passesLeft--;
         this.elapsedLoops++;
         this.rebaseReplay();
@@ -148,12 +149,15 @@ class EventIterator {
       } else if (this.pos >= this.events.length) {
         return null;
       } else if (!this.postHasNotes && !this.postStarted) {
-        // Noteless outro: attach it at the loop end (see postHasNotes).
+        // Noteless outro: attach it at the loop end (see postHasNotes), not at
+        // the preceding in-loop event's tick, so a replayed note rings to the
+        // boundary instead of being cut short.
         this.postStarted = true;
         const event = this.events[this.pos++];
         if (!event) return null;
-        this.curTick += event.delta;
-        return { ...event, delta: 0 };
+        const delta = Math.max(0, this.boundaryTick - this.curTick);
+        this.curTick += delta;
+        return { ...event, delta };
       }
       // Else fall through: the outro plays once, then the track ends.
     } else if (this.pos >= this.events.length) {

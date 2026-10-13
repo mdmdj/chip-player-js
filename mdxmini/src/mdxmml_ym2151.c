@@ -63,6 +63,7 @@ typedef struct _mdxmml_ym2151_instances {
   int loop_min_seen;       /* last observed song-wide infinite-loop count */
   int64_t loop_first_us;   /* elapsed at the 1st loop (intro + loop) */
   int64_t loop_second_us;  /* elapsed at the 2nd loop (intro + 2 * loop) */
+  int loop_region_bad;     /* a non-looping track left the min: region invalid */
 } mdxmml_ym2151_instances;
 
 /* ------------------------------------------------------------------ */
@@ -342,14 +343,23 @@ mdx_parse_mml_ym2151_async(songdata *data, int track_mute_mask)
      (infinite_loops is the minimum across tracks still playing). The
      difference is the loop length; the first is intro + loop. */
   if ( infinite_loops < 32767 ) {
-    /* Only one boundary per update: a jump from 0 to >=2 skips the first
-       crossing in a single tick, and recording both here would give a zero
-       loop length. The second boundary is taken on a later tick. */
-    if ( infinite_loops >= 1 && self->loop_first_us == 0 )
-      self->loop_first_us = self->mdx->elapsed_time;
-    else if ( infinite_loops >= 2 && self->loop_second_us == 0 )
-      self->loop_second_us = self->mdx->elapsed_time;
-    self->loop_min_seen = infinite_loops;
+    /* A real crossing advances the song-wide count by one. A larger jump is a
+       non-looping track dropping out of the minimum (its infinite_loop_times
+       stays 0 until it ends), not a crossing: recording it would place the
+       first boundary on that tick and the second on the next, i.e. a one-tick
+       loop. Flag the region invalid instead so the getters report no region
+       (a wrong band is worse than none). */
+    int step = infinite_loops - self->loop_min_seen;
+    if ( step == 1 && !self->loop_region_bad ) {
+      if ( self->loop_first_us == 0 )
+        self->loop_first_us = self->mdx->elapsed_time;
+      else if ( self->loop_second_us == 0 )
+        self->loop_second_us = self->mdx->elapsed_time;
+    } else if ( step > 1 && self->loop_second_us == 0 ) {
+      self->loop_region_bad = 1;
+    }
+    if ( infinite_loops > self->loop_min_seen )
+      self->loop_min_seen = infinite_loops;
   }
 
   /* timer count */
@@ -416,6 +426,7 @@ int64_t
 mdx_parse_mml_get_loop_first_us(void* in_self)
 {
   if (!in_self) return 0;
+  if (((mdxmml_ym2151_instances *)in_self)->loop_region_bad) return 0;
   return ((mdxmml_ym2151_instances *)in_self)->loop_first_us;
 }
 
@@ -423,6 +434,7 @@ int64_t
 mdx_parse_mml_get_loop_second_us(void* in_self)
 {
   if (!in_self) return 0;
+  if (((mdxmml_ym2151_instances *)in_self)->loop_region_bad) return 0;
   return ((mdxmml_ym2151_instances *)in_self)->loop_second_us;
 }
 

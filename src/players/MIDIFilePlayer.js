@@ -200,10 +200,16 @@ MIDIPlayer.prototype.processPlaySynth = function (buffer, bufferSize) {
   if (!this.paused && !this.isAuditioning) {
     // Repeat One with a loop region wraps back to the second pass instead of
     // ending: the in-loop note-offs already fired, so only still-ringing
-    // notes are cut and the loop continues like a native engine loop. The wrap
-    // is at the band end, so a composed ending plays only with repeat off.
+    // notes are cut and the loop continues like a native engine loop.
+    //
+    // `position` reaches endIndex as soon as the last in-band event is read,
+    // which is often before the clock reaches the band end, so a trailing rest
+    // would be dropped on every pass. Wait for elapsedTime to reach endMs
+    // before wrapping; until then keep rendering the (silent) remainder.
     if (this.looping && this.loop && this.position >= this.loop.endIndex) {
-      this.loopJump();
+      if (this.elapsedTime >= this.loop.endMs) {
+        this.loopJump();
+      }
       return bytesWritten;
     }
     if (this.position >= this.events.length) {
@@ -307,7 +313,12 @@ MIDIPlayer.prototype.processPlay = function () {
   }
 
   if (this.looping && this.loop && !this.isAuditioning && this.position >= this.loop.endIndex) {
-    this.loopJump();
+    // Same rule as processPlaySynth: the event index is not the clock. Wait for
+    // the band end so a trailing rest plays and Web MIDI's ahead-scheduled
+    // notes are not cut short.
+    if (this.elapsedTime >= this.loop.endMs) {
+      this.loopJump();
+    }
     return;
   }
   if (this.position >= this.events.length) {
@@ -535,7 +546,9 @@ MIDIPlayer.prototype.loopJump = function () {
     }
     if (this.synth) this.setPositionSynth(eventList);
   }
-  this.elapsedTime = loop.jumpMs;
+  // The clock can be past the band end by up to one processing block. Carry
+  // that overshoot so the loop advances in absolute time instead of drifting.
+  this.elapsedTime = loop.jumpMs + Math.max(0, this.elapsedTime - loop.endMs);
   this.position = loop.jumpIndex;
 };
 

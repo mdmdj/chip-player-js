@@ -33,6 +33,9 @@ export default class MDXPlayer extends Player {
     // Fade start captured when repeat one is enabled while a fade is already
     // running; see syncFadeTailCapture().
     this.fadeTailStartMs = null;
+    // Whether mdx_open has succeeded and not yet been closed. Guards
+    // _mdx_set_max_loop against a freed song (see applyLoopCount).
+    this.songOpen = false;
     this.mdxCtx = this.core._mdx_create_context();
     this.core._mdx_set_rate(this.sampleRate);
     this.core._mdx_set_dir(this.mdxCtx, MOUNTPOINT);
@@ -85,6 +88,7 @@ export default class MDXPlayer extends Player {
           const len = buf.indexOf(0);
           const title = new TextDecoder("shift-jis").decode(buf.subarray(0, len));
           this.metadata = { title: title || pathe.basename(filename) };
+          this.songOpen = true;
           this._readLoopRegion();
           this.applyLoopCount(false);
 
@@ -206,10 +210,12 @@ export default class MDXPlayer extends Player {
   // when actually leaving a looping state; a no-op toggle must not push the
   // fade boundary past a fade that is already scheduled.
   applyLoopCount(wasLooping) {
-    // `metadata` is set only after mdx_open, so this also gates the pre-load
-    // call: Sequencer.playSong invokes setLooping() before loadData, and
-    // mdxmini's mdx_set_max_loop dereferences data->mdx, which is still null.
-    if (!this.mdxCtx || !this.metadata || typeof this.core._mdx_set_max_loop !== 'function') return;
+    // Gate the pre-load call and any call after stop(): Sequencer.playSong
+    // invokes setLooping() before loadData, and mdxmini's mdx_set_max_loop
+    // dereferences data->mdx. `metadata` alone cannot gate that -- stop() frees
+    // the song but leaves metadata set -- so gate on `songOpen`, set by
+    // mdx_open and cleared by stop().
+    if (!this.mdxCtx || !this.songOpen || typeof this.core._mdx_set_max_loop !== 'function') return;
     const hasLoop = this.metadata && this.metadata.loop_length > 0;
     if (this.looping) {
       this._maxLoopCount = 0;
@@ -346,6 +352,10 @@ export default class MDXPlayer extends Player {
   stop() {
     this.suspend();
     this.core._mdx_close(this.mdxCtx);
+    // mdx_close frees the song data behind mdxCtx; mark it closed so a later
+    // setLooping() (Sequencer calls it before the next loadData) cannot hand
+    // the freed context to _mdx_set_max_loop.
+    this.songOpen = false;
     console.debug('MDXPlayer.stop()');
     this.emit('playerStateUpdate', { isStopped: true });
   }

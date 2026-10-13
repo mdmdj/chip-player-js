@@ -74,7 +74,7 @@ export default class SIDPlayer extends Player {
     super.setParameter(id, value);
   }
 
-  getSidMetadata(md5) {
+  getSidMetadata(md5, generation) {
     console.log("SIDPlayer: Fetching metadata for SID:", md5);
     const metadataUrl = `${API_BASE}/hvsc?sidHash=${md5}`;
 
@@ -85,6 +85,10 @@ export default class SIDPlayer extends Player {
       validateStatus: status => status === 404 || (status >= 200 && status < 300)
     }).then(response => {
       if (response.status === 404) return;
+      // A newer load or a suspend may own the core/fields by now. These are
+      // shared per player, so an older response must be checked here, before it
+      // assigns; the check after the await in loadData runs too late.
+      if (generation !== this.loadGeneration) return;
       console.log('SIDPlayer: Got metadata for SID:', response.data);
       const { lengths, name, author, copyright, image_url } = response.data;
       this.subtuneDurations = lengths.split(' ').map(parseSongLength);
@@ -126,7 +130,7 @@ export default class SIDPlayer extends Player {
     // starts right after, delayed only by this fetch.
     const ptr = this.core._sid_get_song_md5();
     const md5 = this.core.UTF8ToString(ptr);
-    await this.getSidMetadata(md5);
+    await this.getSidMetadata(md5, generation);
     // A newer load took over while we fetched; it owns the core and the state
     // emit now, so stop here rather than resuming this song over the top of it.
     if (generation !== this.loadGeneration) return;

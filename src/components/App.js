@@ -806,8 +806,6 @@ class App extends React.Component {
 
   async updateLocalFiles() {
     const localFiles = this.localFilesManager.readAll();
-    // Convert timestamp 1704067200 to ISO date 2024-01-01
-    localFiles.forEach(item => item.mtime = new Date(item.mtime * 1000).toISOString().split('T')[0]);
     const generation = ++this.localFilesGeneration;
     // Sub-tune counts come from the file headers, parsed by a lazily-loaded,
     // cached module (see ../localFilesSubtunes). On any failure we fall back to
@@ -819,6 +817,11 @@ class App extends React.Component {
       console.warn('Local file sub-tunes unavailable:', e && e.message);
     }
     if (generation !== this.localFilesGeneration) return; // a newer update won
+    // The sub-tune cache keys on (path, size, mtime), so it must see the real
+    // timestamp; format it for display only here, after the parse. Truncating
+    // to a date first made same-day replacements reuse stale sub-tunes.
+    // Convert timestamp 1704067200 to ISO date 2024-01-01
+    localFiles.forEach(item => item.mtime = new Date(item.mtime * 1000).toISOString().split('T')[0]);
     this.applyLocalFiles(localFiles, byPath);
   }
 
@@ -828,7 +831,9 @@ class App extends React.Component {
   applyLocalFiles(files, byPath) {
     const prevRefs = this.playContexts['local'] || [];
     const isCurrent = this.sequencer && songRefListsEqual(this.sequencer.getCurrContext(), prevRefs);
-    const currRef = isCurrent ? prevRefs[this.sequencer.currIdx] : null;
+    // Shuffle-aware: with Shuffle on, currIdx indexes shuffleOrder, not this
+    // list, so take the player's own current SongRef rather than prevRefs[currIdx].
+    const currRef = isCurrent ? this.sequencer.getCurrSongRef() : null;
 
     const listing = [];
     const refs = [];
@@ -857,10 +862,15 @@ class App extends React.Component {
     // causes (sub-tune 0 of a file is still sub-tune 0 after expanding).
     if (isCurrent) {
       this.sequencer.context = refs;
-      if (currRef) {
-        const i = refs.findIndex(r => songRefKey(r) === songRefKey(currRef));
-        if (i >= 0) this.sequencer.currIdx = i;
-      }
+      let idx = -1;
+      if (currRef) idx = refs.findIndex(r => songRefKey(r) === songRefKey(currRef));
+      // If the current song survived, re-anchor on it; otherwise clamp. With
+      // Shuffle on, currIdx indexes shuffleOrder, so rebuilding it for the new
+      // list is required or advancing can pick a stale/out-of-range entry.
+      this.sequencer.currIdx = idx >= 0
+        ? idx
+        : Math.max(0, Math.min(this.sequencer.currIdx, refs.length - 1));
+      if (this.sequencer.shuffle) this.sequencer.setShuffle(this.sequencer.shuffle);
     }
   }
 
@@ -906,10 +916,10 @@ class App extends React.Component {
         .filter(result => result.status === 'fulfilled')
         .reduce((acc, result) => acc + result.value, 0);
       if (numSongsAdded > 0) {
-        const currContextIsLocalFiles = songRefListsEqual(this.sequencer?.getCurrContext(), this.playContexts['local']);
+        // updateLocalFiles() rebuilds the context (and keeps the current song
+        // when it survives) once its async header parse finishes.
         this.updateLocalFiles();
         this.props.history.push('/local');
-        if (currContextIsLocalFiles) this.sequencer.context = this.playContexts['local'];
         this.forceUpdate();
       }
       // Display all rejection reasons with duplicate reasons removed.
@@ -923,28 +933,30 @@ class App extends React.Component {
     this.handleFiles(droppedFiles);
   };
 
-  handleLocalFileDelete = (filePaths) => {
+  handleLocalFileDelete = async (filePaths) => {
     if (!Array.isArray(filePaths)) filePaths = [filePaths];
     // One file can span several sub-tune rows; delete each file once.
     filePaths = [...new Set(filePaths)];
-    const currContextIsLocalFiles = songRefListsEqual(this.sequencer?.getCurrContext(), this.playContexts['local']);
-    let currIndexWasDeleted = false;
-    filePaths.forEach(filePath => {
-      const deleted = this.localFilesManager.delete(filePath);
+    const onLocal = songRefListsEqual(this.sequencer?.getCurrContext(), this.playContexts['local']);
+    // Capture the now-playing song and its linear slot BEFORE the list changes,
+    // so deleting the playing file can move to the next surviving song.
+    const playing = onLocal ? this.sequencer.getCurrSongRef() : null;
+    const deletedPlaying = !!(playing && filePaths.includes(playing.path));
+    const oldIdx = onLocal ? this.sequencer.getCurrIdx() : 0;
 
-      if (deleted && currContextIsLocalFiles) {
-        const refs = this.playContexts['local'] || [];
-        const curr = refs[this.sequencer.currIdx];
-        if (curr && curr.path === filePath) currIndexWasDeleted = true;
-        // Every row of this file disappears, so shift by how many were before.
-        const removedBefore = refs.filter((ref, i) => ref.path === filePath && i < this.sequencer.currIdx).length;
-        this.sequencer.currIdx -= removedBefore;
-      }
-    });
+    filePaths.forEach(filePath => this.localFilesManager.delete(filePath));
+    // updateLocalFiles() parses headers asynchronously; await the rebuild before
+    // advancing, or nextSong() runs against the old context and steps into
+    // another tune of the file just deleted.
+    await this.updateLocalFiles();
 
-    this.updateLocalFiles();
-    if (currContextIsLocalFiles) this.sequencer.context = this.playContexts['local'];
-    if (currIndexWasDeleted)     this.sequencer.nextSong();
+    if (deletedPlaying) {
+      const refs = this.playContexts['local'] || [];
+      if (refs.length === 0) return;
+      this.sequencer.currIdx = Math.min(oldIdx, refs.length - 1);
+      if (this.sequencer.shuffle) this.sequencer.setShuffle(this.sequencer.shuffle);
+      this.sequencer.playCurrentSong();
+    }
   }
 
   handleCopyLink = (url) => {

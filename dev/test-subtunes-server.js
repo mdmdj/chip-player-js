@@ -33,6 +33,34 @@ const get = async (route) => {
   return res.json();
 };
 
+// The server assembles its client routes by fetching index.html from the
+// webpack dev server and string-replacing markers in it. If that dev server is
+// stale or down, the response is not our app at all (raw template, no React
+// root, or even a plain-text error), and every later HTML assertion reads a
+// meaningless page. Validate the shell up front so the failure names the cause
+// instead of the symptom.
+function appShellProblems(html) {
+  const problems = [];
+  if (html.includes('%PUBLIC_URL%'))
+    problems.push('served the raw index template (the API server must run with NODE_ENV=development)');
+  if (html.includes('Webpack Dev Server is not responding'))
+    problems.push('the webpack dev server is not responding on its port');
+  if (!/<div id="root">/.test(html))
+    problems.push('no React root (#root): the response is not this app\u2019s shell');
+  return problems;
+}
+
+async function fetchAppShell(route) {
+  const res = await fetch(`${API_BASE}${route}`);
+  assert.strictEqual(res.status, 200, `GET ${route} -> ${res.status}`);
+  const html = await res.text();
+  const problems = appShellProblems(html);
+  assert.ok(problems.length === 0,
+    `GET ${route}: the response does not look like our app:\n      - ${problems.join('\n      - ')}` +
+    '\n      A stale dev server is the usual cause \u2014 restart `npm run dev`.');
+  return html;
+}
+
 const multiSong = db.prepare(`
   SELECT m.path, m.song_id, m.subtune_count, m.release_date, m.mtime
   FROM music m WHERE m.subtune_count > 1 ORDER BY m.subtune_count DESC LIMIT 1
@@ -83,6 +111,11 @@ async function check(name, fn) {
 const skip = (why) => Object.assign(new Error(why), { code: 'SKIP' });
 
 async function main() {
+  // Fail fast, and with the right name, when the server is up but not serving
+  // our app, before any check reads a page. (An unreachable server still skips
+  // in main().catch above.)
+  await fetchAppShell('/');
+
   await check('a multi-song file appears as a song folder in its directory', async () => {
     const rows = await get(`/api/browse?path=${enc(dirOf(multiSong.path))}`);
     const row = rows.find(r => r.path === multiSong.path);
@@ -187,11 +220,12 @@ async function main() {
       '/metadata counts a plain file as one song');
 
     for (const song of [multiSong, singleSong]) {
-      const res = await fetch(`${API_BASE}/?play=${encodeURIComponent(song.song_id)}`);
-      assert.strictEqual(res.status, 200, `GET /?play=${song.song_id}`);
-      const html = await res.text();
+      const html = await fetchAppShell(`/?play=${encodeURIComponent(song.song_id)}`);
       const match = html.match(/__chipConfig = (\{.*?\});/);
-      assert.ok(match, 'the page states its song in __chipConfig');
+      assert.ok(match,
+        `GET /?play=${song.song_id}: no __chipConfig in the page. The server ` +
+        'injects it into index.html fetched from the webpack dev server, so a ' +
+        'missing marker means that dev server is stale \u2014 restart `npm run dev`.');
       const config = JSON.parse(match[1]);
       assert.strictEqual(config.subtuneCount, song.subtune_count || 1,
         `a share link into ${song.path} counts its songs`);

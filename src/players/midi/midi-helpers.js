@@ -121,7 +121,7 @@ class EventIterator {
       if (this.startIdx < 0) this.startIdx = this.events.length;
       // Each completed pass ends one loop length further along the emitted
       // timeline; rebaseReplay() uses this so a repeated segment keeps the beat
-      // instead of re-adding the gap from its pre-loop neighbour.
+      // instead of re-adding the gap from its pre-loop neighbor.
       const lastTick = this.absTicks.length ? this.absTicks[this.absTicks.length - 1] : 0;
       this.boundaryTick = loop.endTick != null ? loop.endTick : lastTick;
       this.loopLength = loop.endTick != null ? loop.endTick - loop.startTick : lastTick - loop.startTick;
@@ -188,7 +188,7 @@ class EventIterator {
   // Rebase the first event of a replayed pass onto the loop boundary (see
   // next()). boundaryTick is where that pass ends; it advances one loop length
   // per pass. The event's own delta would instead be the gap from its pre-loop
-  // neighbour, which shifts every repeat by that intro gap.
+  // neighbor, which shifts every repeat by that intro gap.
   rebaseReplay() {
     this.replayDelta = (this.boundaryTick - this.curTick) +
       (this.absTicks[this.startIdx] - this.loop.startTick);

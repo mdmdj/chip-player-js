@@ -253,8 +253,19 @@ MIDIPlayer.prototype.processPlay = function () {
   // matches processPlaySynth's loopEndIdx.
   const loopEndIdx = (this.looping && this.loop && !this.isAuditioning) ? this.loop.endIndex : Infinity;
   let event = this.events[this.position];
-  while (this.events[this.position] && event.playTime < this.elapsedTime + BUFFER_AHEAD &&
-         this.position < loopEndIdx) {
+  let wraps = 0;
+  for (;;) {
+    // Wrap and reschedule the new pass in this same invocation, so events at
+    // the band start are not a whole callback late.
+    if (loopEndIdx !== Infinity && this.position >= loopEndIdx) {
+      if (this.elapsedTime >= this.loop.endMs && wraps++ < 4) {
+        this.loopJump(false);
+        event = this.events[this.position];
+        continue;
+      }
+      break; // still waiting for the clock to reach the band end
+    }
+    if (!(this.events[this.position] && event.playTime < this.elapsedTime + BUFFER_AHEAD)) break;
     message = null;
     delay = 0;
     if (event.type === MIDIEvents.EVENT_SYSEX || event.type === MIDIEvents.EVENT_DIVSYSEX) {
@@ -312,13 +323,8 @@ MIDIPlayer.prototype.processPlay = function () {
     event = this.events[this.position];
   }
 
-  if (this.looping && this.loop && !this.isAuditioning && this.position >= this.loop.endIndex) {
-    // Same rule as processPlaySynth: the event index is not the clock. Wait for
-    // the band end so a trailing rest plays and Web MIDI's ahead-scheduled
-    // notes are not cut short.
-    if (this.elapsedTime >= this.loop.endMs) {
-      this.loopJump();
-    }
+  if (loopEndIdx !== Infinity && this.position >= loopEndIdx) {
+    // Waiting for the clock to reach the band end (the outro is skipped).
     return;
   }
   if (this.position >= this.events.length) {
@@ -517,7 +523,7 @@ MIDIPlayer.prototype.setPosition = function (ms) {
 // panic: the loop is authored to continue, so program/controller state is
 // restored silently and only notes still ringing from the finished pass are
 // cut — the closest a JS event loop gets to a native engine loop.
-MIDIPlayer.prototype.loopJump = function () {
+MIDIPlayer.prototype.loopJump = function (carryOvershoot = true) {
   const loop = this.loop;
   if (!loop) return;
   const ringing = [...this.activeNotes.keys()];
@@ -546,9 +552,12 @@ MIDIPlayer.prototype.loopJump = function () {
     }
     if (this.synth) this.setPositionSynth(eventList);
   }
-  // The clock can be past the band end by up to one processing block. Carry
-  // that overshoot so the loop advances in absolute time instead of drifting.
-  this.elapsedTime = loop.jumpMs + Math.max(0, this.elapsedTime - loop.endMs);
+  // The synth path renders whole blocks, so its clock can be up to a block past
+  // the band end; carrying that overshoot keeps the loop in absolute time
+  // instead of drifting. Web MIDI schedules against the clock, so it passes
+  // false -- its new pass must not be scheduled behind the clock.
+  this.elapsedTime = loop.jumpMs +
+    (carryOvershoot ? Math.max(0, this.elapsedTime - loop.endMs) : 0);
   this.position = loop.jumpIndex;
 };
 

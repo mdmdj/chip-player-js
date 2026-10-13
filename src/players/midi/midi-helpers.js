@@ -108,6 +108,9 @@ class EventIterator {
     // ending with notes keeps its exact timing.
     this.postHasNotes = false;
     this.postStarted = false;
+    // Tick shift owed to a skipped replay, applied to the next emitted event's
+    // delta (see next()).
+    this.pendingExtra = 0;
     if (loop) {
       // Absolute tick of each event, so the shared range cuts every track at
       // the same musical point regardless of which track holds the markers.
@@ -140,24 +143,40 @@ class EventIterator {
     // then plays once as the outro.
     if (this.loop && this.loop.endTick != null &&
         (this.pos >= this.events.length || this.absTicks[this.pos] > this.loop.endTick)) {
-      if (this.passesLeft > 1 && this.startIdx < this.events.length &&
+      if (this.passesLeft > 1 &&
+          this.startIdx < this.events.length &&
           this.absTicks[this.startIdx] <= this.loop.endTick) {
         this.passesLeft--;
         this.elapsedLoops++;
         this.rebaseReplay();
         this.pos = this.startIdx;
-      } else if (this.pos >= this.events.length) {
-        return null;
-      } else if (!this.postHasNotes && !this.postStarted) {
-        // Noteless outro: attach it at the loop end (see postHasNotes), not at
-        // the preceding in-loop event's tick, so a replayed note rings to the
-        // boundary instead of being cut short.
-        this.postStarted = true;
-        const event = this.events[this.pos++];
-        if (!event) return null;
-        const delta = Math.max(0, this.boundaryTick - this.curTick);
-        this.curTick += delta;
-        return { ...event, delta };
+      } else {
+        if (this.passesLeft > 1) {
+          // Nothing inside the loop to replay (this track's first event is past
+          // the loop end), but the passes still add time: shift the outro past
+          // them so it follows the loop instead of overlapping the last pass,
+          // and never duplicate it.
+          const extra = (this.passesLeft - 1) * this.loopLength;
+          this.pendingExtra = (this.pendingExtra || 0) + extra;
+          this.boundaryTick += extra;
+          this.elapsedLoops += this.passesLeft - 1;
+          this.passesLeft = 1;
+        }
+        if (this.pos >= this.events.length) {
+          return null;
+        } else if (!this.postHasNotes && !this.postStarted) {
+          // Noteless outro: attach it at the loop end (see postHasNotes), not at
+          // the preceding in-loop event's tick, so a replayed note rings to the
+          // boundary instead of being cut short.
+          this.postStarted = true;
+          const event = this.events[this.pos++];
+          if (!event) return null;
+          const delta = Math.max(0, this.boundaryTick - this.curTick);
+          this.pendingExtra = 0;
+          this.curTick += delta;
+          return { ...event, delta, absTick: this.absTicks[this.pos - 1] };
+        }
+        // Else fall through: the outro plays once, then the track ends.
       }
       // Else fall through: the outro plays once, then the track ends.
     } else if (this.pos >= this.events.length) {
@@ -176,17 +195,20 @@ class EventIterator {
     const event = this.events[this.pos++];
     if (!event) return null;
 
-    // The first event of a replayed pass carries the rebased delta; every other
-    // event keeps its own.
-    const delta = this.replayDelta != null ? this.replayDelta : event.delta;
+    // The first event of a replayed pass carries the rebased delta, plus any
+    // shift owed to passes a loop-empty track skipped; every other event keeps
+    // its own delta.
+    const delta = (this.replayDelta != null ? this.replayDelta : event.delta) +
+      (this.pendingExtra || 0);
     this.replayDelta = null;
+    this.pendingExtra = 0;
     this.curTick += delta;
 
     // Sanity cap; jumps are bounded by passesLeft so this is just insurance.
     if (this.curTick > 100000000 || this.elapsedLoops > 1000) return null;
 
     // Return a copy because track consolidation will mutate the events.
-    return { ...event, delta };
+    return { ...event, delta, absTick: this.absTicks ? this.absTicks[this.pos - 1] : null };
   }
 
   // Rebase the first event of a replayed pass onto the loop boundary (see
@@ -241,6 +263,9 @@ MIDIFile.prototype.getLoopedEvents = function (tracks, loopCount = 2, range = nu
   // number. One global latch, so only the outermost loop is reported.
   let loopStartMs = null;
   let loopEndMs = null;
+  // Tempo in force at the loop start, latched on the first pass and restored at
+  // each replay so an in-loop tempo change reapplies from the top.
+  let loopStartTickResolution = null;
   const isRpgMaker = range != null && range.endTick == null;
   // Format-2 tracks have no shared timeline, so a song-global range is
   // meaningless: they play once and must not report a band. Reporting one
@@ -274,15 +299,25 @@ MIDIFile.prototype.getLoopedEvents = function (tracks, loopCount = 2, range = nu
       // reset playtime if format is 2
       playTime = 2 === format && playTime ? playTime : 0;
       const eventIterator = new EventIterator(tracks[i], loop);
+      let lastLoops = 0;
       // loooping through events
       event = eventIterator.next();
       while (event) {
+        if (eventIterator.elapsedLoops !== lastLoops) {
+          lastLoops = eventIterator.elapsedLoops;
+          if (loopStartTickResolution != null) tickResolution = loopStartTickResolution;
+        }
         playTime += event.delta ? event.delta * tickResolution / 1000 : 0;
         if (event.type === MIDIEvents.EVENT_META) {
           // tempo change events
           if (event.subtype === MIDIEvents.EVENT_META_SET_TEMPO) {
             tickResolution = this.header.getTickResolution(event.tempo);
           }
+        }
+        // Latch the tempo in force at the loop start -- the last tempo event at
+        // or before startTick -- so a replay can restore it.
+        if (expandLoop && event.absTick != null && event.absTick <= range.startTick) {
+          loopStartTickResolution = tickResolution;
         }
         // push the asked events
         if (
@@ -305,6 +340,7 @@ MIDIFile.prototype.getLoopedEvents = function (tracks, loopCount = 2, range = nu
     smallestDelta = -1;
 
     const trackIterators = [];
+    const lastLoops = [];
 
     // Creating iterators
     for (i = 0, j = tracks.length; i < j; i++) {
@@ -345,12 +381,21 @@ MIDIFile.prototype.getLoopedEvents = function (tracks, loopCount = 2, range = nu
         }
         // filling values
         event = trackIterators[smallestDelta].curEvent;
+        const loops = trackIterators[smallestDelta].elapsedLoops;
+        if (loops !== (lastLoops[smallestDelta] || 0)) {
+          lastLoops[smallestDelta] = loops;
+          if (loopStartTickResolution != null) tickResolution = loopStartTickResolution;
+        }
         playTime += event.delta ? event.delta * tickResolution / 1000 : 0;
         if (event.type === MIDIEvents.EVENT_META) {
           // tempo change events
           if (event.subtype === MIDIEvents.EVENT_META_SET_TEMPO) {
             tickResolution = this.header.getTickResolution(event.tempo);
           }
+        }
+        // Same loop-start tempo latch as the sequential path.
+        if (expandLoop && event.absTick != null && event.absTick <= range.startTick) {
+          loopStartTickResolution = tickResolution;
         }
         // push midi events
         if (

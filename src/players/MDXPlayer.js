@@ -219,15 +219,22 @@ export default class MDXPlayer extends Player {
     const hasLoop = this.metadata && this.metadata.loop_length > 0;
     if (this.looping) {
       this._maxLoopCount = 0;
-    } else if (wasLooping && hasLoop) {
-      const curLoop = this.getCurLoop();
-      this._maxLoopCount = Math.max(DEFAULT_LOOP_COUNT, curLoop + 1);
-      // Leaving after passing the default fade: the position is already past
-      // the reported duration, so the base end detector must stand down and let
-      // the engine's fade end the song (the display runs its tail from here).
-      if (curLoop >= DEFAULT_LOOP_COUNT) this.durationExtended = true;
-    } else {
-      this._maxLoopCount = DEFAULT_LOOP_COUNT;
+    } else if (wasLooping) {
+      // Only re-derive when actually leaving a looping state. A false-to-false
+      // toggle (Repeat Off <-> All) must not reset a count already extended for
+      // a deep pass, or the engine fades the pass short.
+      if (hasLoop) {
+        const curLoop = this.getCurLoop();
+        this._maxLoopCount = Math.max(DEFAULT_LOOP_COUNT, curLoop + 1);
+        // Leaving after passing the default fade: the position is already past
+        // the reported duration, so the base end detector must stand down and
+        // let the engine's fade end the song (the display runs its tail from
+        // here).
+        if (curLoop >= DEFAULT_LOOP_COUNT) this.durationExtended = true;
+      } else {
+        // No measured loop region: finish the pass and fade.
+        this._maxLoopCount = DEFAULT_LOOP_COUNT;
+      }
     }
     this.core._mdx_set_max_loop(this.mdxCtx, this._maxLoopCount);
   }

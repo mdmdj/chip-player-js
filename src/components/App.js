@@ -951,8 +951,18 @@ class App extends React.Component {
     await this.updateLocalFiles();
 
     if (deletedPlaying) {
+      // The header parse above is async, so only act if playback is still this
+      // deleted local song -- the user may have selected another song meanwhile.
+      const current = this.sequencer.getCurrSongRef();
+      if (!current || songRefKey(current) !== songRefKey(playing)) return;
       const refs = this.playContexts['local'] || [];
-      if (refs.length === 0) return;
+      if (refs.length === 0) {
+        // No songs survive: eject (advanceSong off the empty context stops the
+        // player), rather than leaving the deleted buffer playing -- forever,
+        // under Repeat One.
+        this.sequencer.nextSong();
+        return;
+      }
       this.sequencer.currIdx = Math.min(oldIdx, refs.length - 1);
       if (this.sequencer.shuffle) this.sequencer.setShuffle(this.sequencer.shuffle);
       this.sequencer.playCurrentSong();

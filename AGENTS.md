@@ -1356,6 +1356,23 @@ checks no longer work. Compare a live context to a stored one with
     Files folder UI, `readAll` sorted by path), and the `%`-filename MIDI fix. The
     `local-files` changelog clip and the `percent-filename` snippet are dev-only and
     stayed on the overlay. Feature head after it: `145749e45`.
+  - **2026-10-13 practice review (PR #5).** A throwaway PR (our fork,
+    `feature/subtunes-as-first-class` → *our* `master`, never upstream) ran through
+    macroscope + Greptile across five rounds. Rounds 1–2 found the structural
+    bugs (MDX `_mdx_set_max_loop` use-after-free after `stop()`; SID HVSC-metadata
+    clobber across loads; the local-files shuffle/delete edges; MIDI Repeat-One
+    wrapping on the event index instead of the clock). Rounds 3–5 mostly found
+    regressions in *those* fixes: the tempo restore ran per track and erased
+    another track's re-applied change (restore once at the shared pass boundary);
+    dropping the Web MIDI wrap overshoot lost timing (keep it, and reschedule the
+    new pass in the same call); an implicit-zero loop never latched its start
+    tempo; the delete path clamped an old-list slot instead of following the
+    surviving `SongRef`. The MIDI harness grew **22 → 27** checks for exactly those
+    shapes. Stop criterion adopted: fix only findings that reproduce and are ours;
+    document the rest — see **`dev/MIDI_LOOP_TEST_GAPS.md`** (catalog MIDI coverage,
+    and the cut-at-the-seam decision for a note crossing the loop end, which is the
+    DAW default and not a bug). Feature head after promoting rounds 4+5:
+    `d5715a88d`; PR #5 closed (no further action; nothing pending to promote).
 - **A catalog rebuild is a prerequisite for booting the server after a merge that
   adds a column a query reads.** `server/index.js` selects `m.contributor`,
   created by `scripts/build-music.js`, not the server; an old catalog dies at

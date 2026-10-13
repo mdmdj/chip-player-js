@@ -552,6 +552,27 @@ check('a tempo change inside the loop is restored on the replayed pass', () => {
     `the replayed change is one loop apart: ${tempos[2] - tempos[1]}ms vs loop ${B}ms`);
 });
 
+check('implicit-zero loop with no tick-0 event restores the start tempo', () => {
+  // Same tempo restore, but the loop is an implicit-start CC103 (startTick 0)
+  // whose first event is not at tick 0, so the loop-start tempo comes from the
+  // initial default rather than a latched event.
+  const bytes = buildMidi([
+    noteOnAt(TPQ, 0, 60), noteOffAt(TPQ, 0, 60),   // first event at tick TPQ
+    tempo(250000),                                  // tick 2*TPQ: 240bpm
+    noteOnAt(0, 0, 60), noteOffAt(TPQ, 0, 60),      // 2*TPQ..3*TPQ
+    cc(103),                                        // loop end, tick 3*TPQ
+  ]);
+  const mf = parseBytes(bytes);
+  const { events, loopStartMs, loopEndMs } = mf.getPlaybackEvents(false);
+  assert.ok(loopEndMs > loopStartMs, `band ${loopStartMs}..${loopEndMs}`);
+  const B = loopEndMs - loopStartMs;
+  const tempos = events.filter(e => e.type === 0xff && e.subtype === 0x51)
+    .map(e => Math.round(e.playTime));
+  assert.strictEqual(tempos.length, 2, `tempo-event times=${tempos}`);
+  assert.ok(Math.abs((tempos[1] - tempos[0]) - B) < 1,
+    `the replayed change is one loop apart: ${tempos[1] - tempos[0]}ms vs loop ${B}ms`);
+});
+
 check('Repeat One Web MIDI: the wrap reschedules the new pass in the same call', () => {
   const sends = [];
   const p = new MIDIFilePlayer({

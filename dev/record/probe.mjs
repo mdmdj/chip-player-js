@@ -103,7 +103,7 @@ const INSTALL_SAMPLER = () => {
   return true;
 };
 
-// Sample for `ms`, then summarise: enough to see a sawtooth (reset) and whether
+// Sample for `ms`, then summarize: enough to see a sawtooth (reset) and whether
 // the position crossed the reported length.
 const SAMPLE = async (ms) => {
   window.__probe.on = true;

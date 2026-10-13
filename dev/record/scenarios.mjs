@@ -40,8 +40,8 @@
 //   assert   { name, test } where test is JS over (s, tr): s = final snap(),
 //            tr = the sampled trace. Every entry must pass for the clip to ship.
 
-const NSFE = 'nsfe/Akumajou Densetsu (VRC6).nsfe';      // 28 sub-tunes, labelled
-const MM2 = 'nsfe/Mega Man 2.nsfe';                      // 22 sub-tunes, labelled
+const NSFE = 'nsfe/Akumajou Densetsu (VRC6).nsfe';      // 28 sub-tunes, labeled
+const MM2 = 'nsfe/Mega Man 2.nsfe';                      // 22 sub-tunes, labeled
 const NSFE_DIR = 'nsfe';                                 // 13 multi-song files
 
 const HURRY = "arcade-capcom/Ghosts'N_Goblins_(Arcade)/16 Hurry Up!.vgz";
@@ -199,7 +199,7 @@ export const scenarios = [
       // fails on a clip whose every other number is correct.
       { name: 'in-the-second-song-folder', test: 'decodeURIComponent(window.location.pathname).indexOf("Mega Man 2") >= 0' },
       { name: 'sub-tune-rows', test: 'document.querySelectorAll("a[href*=\'subtune=\']").length >= 20' },
-      { name: 'labelled-row', test: 'Array.from(document.querySelectorAll(".BrowseList-colName a")).some((a) => /Stage Select/.test(a.textContent))' },
+      { name: 'labeled-row', test: 'Array.from(document.querySelectorAll(".BrowseList-colName a")).some((a) => /Stage Select/.test(a.textContent))' },
       { name: 'sub-tune-plays', test: 's.player && s.positionMs > 200' },
       // Two song files, two sub-tunes, one transport: the identity the whole
       // feature rests on. `path` alone would pass for the first folder alone.
@@ -277,16 +277,16 @@ export const scenarios = [
     section: 'main',
     group: 'subtunes',
     ready: true,
-    title: 'Favouriting one sub-tune leaves the others alone',
+    title: 'Favoriting one sub-tune leaves the others alone',
     watch: [
-      'The heart in the footer fills in — that exact sub-tune is now a favourite.',
+      'The heart in the footer fills in — that exact sub-tune is now a favorite.',
       'A second later, on the Favorites page, it is listed on its own under the song folder.',
       'The sub-tune number travels with it: this is the same identity the playlist and the share link use.',
     ],
-    before: 'master could only favourite a whole file, so a multi-song file was one row in your list no matter which tune you liked.',
+    before: 'master could only favorite a whole file, so a multi-song file was one row in your list no matter which tune you liked.',
     harness: 'dev/test-subtunes-server.js',
     browse: `/browse/${NSFE}`,
-    // Start from an empty favourites list so the row the viewer sees appear is
+    // Start from an empty favorites list so the row the viewer sees appear is
     // unambiguously this clip's, and so the group is not scrolled out of a
     // virtualized list full of leftovers from earlier takes.
     clearFavorites: true,
@@ -294,7 +294,7 @@ export const scenarios = [
       { atMs: 300, open: { dir: NSFE, name: 'Epitaph', subtune: 1 }, label: 'play tune 2' },
       // Scoped to `.AppFooter`, not a bare `button.FavoriteButton`: every sub-song row
       // in the browse list carries its own heart, so an unscoped selector clicks the
-      // FIRST one -- row 1, "Prelude" -- while the clip claims it favourited the
+      // FIRST one -- row 1, "Prelude" -- while the clip claims it favorited the
       // playing sub-song, Epitaph. That is what the previous take did; the Favorites
       // page then listed Prelude. (The selector before that,
       // `button[title*="avorite"]`, matched nothing at all: FavoriteButton renders no
@@ -331,10 +331,10 @@ export const scenarios = [
       { name: 'on-the-favorites-page', test: '/favorites/.test(window.location.pathname)' },
       // Scoped to the LIST, not document.body: the footer still shows the playing
       // song, so a body-wide text search for "Epitaph" or the folder name passes
-      // whether or not the favourites page is showing anything at all -- which is
+      // whether or not the favorites page is showing anything at all -- which is
       // exactly how the previous take stayed green while never leaving /browse.
       { name: 'listed-in-the-favorites-list', test: 'Array.from(document.querySelectorAll(".BrowseList-colName a")).some((a) => a.textContent.trim() === "Epitaph")' },
-      // A sub-song, not the file: the row is labelled with the sub-tune title.
+      // A sub-song, not the file: the row is labeled with the sub-tune title.
       { name: 'under-song-folder-heading', test: 'Array.from(document.querySelectorAll(".BrowseList-colName a")).some((a) => /nsfe\\/Akumajou Densetsu/.test(a.textContent))' },
       // The list holds this and only this: with clearFavorites the one row is the
       // whole claim. This is what makes the clip show its own action rather than
@@ -510,7 +510,7 @@ export const scenarios = [
     // Taller than the other clips, and the reason is measured rather than aesthetic.
     // With the Settings panel open, VGM's per-chip toggles push "Show Loop Area" to
     // y=532-551 while the footer starts at y=509 -- so at 900x720 the checkbox is
-    // *behind* the footer. elementFromPoint at its centre returns a footer transport
+    // *behind* the footer. elementFromPoint at its center returns a footer transport
     // button, and a synthetic click still fires the React handler, which is how this
     // clip first passed its band assertions while clicking something no viewer could
     // click. Nothing in the panel scrolls; height is the only lever (780 clears it by
@@ -571,7 +571,7 @@ export const scenarios = [
       { name: 'band-absent-while-unticked', test: '(() => { const u = tr.marks.filter((m) => /untick Show Loop Area/.test(m.label)); const t = tr.marks.filter((m) => /tick Show Loop Area again/.test(m.label)); if (u.length < 2 || t.length < 2) return false; return tr.samples.filter((x) => x.t > u[1].t + 100 && x.t < t[1].t - 50 && x.hasBand === false).length >= 2; })()' },
       { name: 'band-present-again-at-end', test: '!!document.querySelector(".Slider-loop")' },
       // And the control that was clicked is genuinely on screen: topmost element at
-      // the checkbox's own centre must be the checkbox. This is the assertion that
+      // the checkbox's own center must be the checkbox. This is the assertion that
       // catches an occluded control, which no band assertion can -- a synthetic click
       // dispatches straight to the handler whatever is painted over it.
       { name: 'checkbox-was-really-clickable', test: '(() => { const cb = document.querySelector("#showLoopArea"); if (!cb) return false; const r = cb.getBoundingClientRect(); const t = document.elementFromPoint(Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)); return t === cb || cb.contains(t) || (t && t.contains(cb)); })()' },
@@ -942,7 +942,7 @@ export const scenarios = [
       { name: 'audible-throughout', test: 'tr.samples.length > 40 && tr.samples.filter((x) => x.rms != null).length > 40 && Math.max(...tr.samples.map((x) => x.rms || 0)) > 0.02' },
       { name: 'played-inside-the-band', test: 'tr.samples.length > 40 && tr.samples.some((x) => x.p > 73000 && x.p < 144000)' },
       // The loop itself, from the trace rather than from a mark, so a clip that
-      // merely *labelled* the loop cannot pass: the position reached deep inside
+      // merely *labeled* the loop cannot pass: the position reached deep inside
       // the band and then came back into it.
       {
         name: 'looped-back-to-band-start',
@@ -1027,7 +1027,7 @@ export const scenarios = [
       // jump happened. A band stopping short would be a different claim.
       { name: 'band-runs-to-the-end-of-the-pass', test: 's.band && Math.abs(s.band.endMs - s.durationMs) < 400' },
       // The wrap itself, from the trace rather than from a mark, so a clip that merely
-      // labelled the loop cannot pass. One wrap is the learning jump itself.
+      // labeled the loop cannot pass. One wrap is the learning jump itself.
       {
         name: 'wrapped-at-the-band-end',
         test: '(() => { const ps = tr.samples.map((x) => x.p).filter((n) => typeof n === "number"); if (!(ps.length >= 100)) return false; for (let i = 1; i < ps.length; i++) if (ps[i] < ps[i - 1] - 2000) return true; return false; })()',
@@ -1104,7 +1104,7 @@ export const scenarios = [
     // 105000 reads 4395 immediately, and 92260 or 112995 once settled, after ~9 s. The
     // landing is NOT repeatable between runs, so the script does not schedule around
     // a particular number -- it asks for a point, lets the pre-roll settle, and
-    // asserts the behaviour after it. settleMs is generous for that reason.
+    // asserts the behavior after it. settleMs is generous for that reason.
     preRoll: { seek: 105000, settleMs: 12000, minMs: 400 },
     // No preload: the share link loads the song in App’s mount handler, and a
     // preload would click a row this clip is deliberately not using.
@@ -1124,7 +1124,7 @@ export const scenarios = [
       { name: 'looping', test: 's.looping === true' },
       { name: 'n64-engine', test: 's.player === "N64Player"' },
       // The clip’s actual claim: the reported length was passed and the position did
-      // not rewind. Both from the trace, so a clip that merely labelled the crossing
+      // not rewind. Both from the trace, so a clip that merely labeled the crossing
       // cannot pass -- and "no backward jump" is what separates a free-run from a
       // reload that happens to finish further along.
       {
@@ -1249,7 +1249,7 @@ export const scenarios = [
         test: 'tr.samples.length >= 100 && tr.samples.some((x) => x.p > 80000) && tr.samples.slice(-40).every((x) => decodeURIComponent(x.path || "").indexOf("At Doom") >= 0)',
       },
       // The actual claim: the transport went back to the top. Read from the trace, so
-      // a clip that merely labelled the reload cannot pass.
+      // a clip that merely labeled the reload cannot pass.
       {
         name: 'wrapped-back-to-zero',
         test: '(() => { const ps = tr.samples.map((x) => x.p).filter((n) => typeof n === "number"); if (!(ps.length >= 100)) return false; for (let i = 1; i < ps.length; i++) if (ps[i] < 200 && ps[i - 1] > 80000) return true; return false; })()',

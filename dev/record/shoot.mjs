@@ -83,7 +83,7 @@ const SCALE = 2;
 // describe was a different mistake: setting size to viewport x deviceScaleFactor
 // (1440) pads the frame and leaves the app at ~57% of the picture. So the rule is
 // "size == viewport exactly", never the dsf product. vidcap.mjs asserts the app fills
-// the frame -- paint a known colour, read the corners back out of the encode -- since
+// the frame -- paint a known color, read the corners back out of the encode -- since
 // the padded case still reports the requested dimensions and only pixels give it away.
 //
 // 900 CSS px is well above the app's 500 px breakpoints (which hide the mtime column,
@@ -177,7 +177,7 @@ async function ensureReceiver() {
 // A scenario may ask for a taller frame (see loop-band). The reason is measured, not
 // aesthetic: with the Settings panel open, VGM's per-chip toggles push "Show Loop
 // Area" down to y=532-551 while the footer starts at y=509, so at 720 the control
-// sits *behind* the footer -- elementFromPoint at its centre returns a footer
+// sits *behind* the footer -- elementFromPoint at its center returns a footer
 // transport button. A synthetic click still fires the React handler, which is how a
 // DOM assertion can be green over a click no viewer could make. Nothing in the panel
 // scrolls, so height is the only lever: 780 gives 18px of clearance, 840 gives 78px,
@@ -226,7 +226,7 @@ async function shootOne(scenario) {
     await page.waitForFunction(() => !!window.__cpRec, null, { timeout: 30000 });
     await page.evaluate((s) => window.__cpRec.pinDefaults(s), scenario.settings || {});
     // Opt-in, and off the settings object so it never reaches the app's settings POST.
-    // A scenario that demonstrates favouriting needs an empty list to start from -- see
+    // A scenario that demonstrates favoriting needs an empty list to start from -- see
     // clearFavorites in the shim for why (virtualized list, and the footer satisfies
     // text assertions regardless).
     if (scenario.clearFavorites) {
@@ -272,7 +272,7 @@ async function shootOne(scenario) {
     if (result.error) throw new Error(`page-side failure: ${result.error}`);
 
     const video = page.video();
-    await context.close();          // finalises the video file
+    await context.close();          // finalizes the video file
     const videoPath = await video.path();
 
     const failed = Object.entries(result.verdict).filter(([, v]) => !v.pass);

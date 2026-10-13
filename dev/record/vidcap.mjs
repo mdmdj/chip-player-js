@@ -12,7 +12,7 @@
 // Dimensions alone cannot answer the rest: the padded case is the one that
 // silently shrinks the app to ~57% of the picture and breaks full-viewport flash
 // detection, while the frame still reports the requested size. So paint the page
-// a known colour and read actual pixels out of the encode:
+// a known color and read actual pixels out of the encode:
 //   - corners red  -> the app fills the frame (1:1, no padding)
 //   - corners other -> padded or letterboxed
 // Sampling is done on a late frame via a raw rgb24 pipe decoded here, because a
@@ -50,7 +50,7 @@ const sh = (cmd, args, opts = {}) => {
 
 const label = (c) => `${c.w}x${c.h} size:${c.explicit ? 'explicit' : 'unset'}`;
 
-// Decode one late frame to rgb24 and report the corner/centre colours.
+// Decode one late frame to rgb24 and report the corner/center colors.
 function framePixels(file, w, h) {
   const raw = sh('ffmpeg', ['-v', 'error', '-sseof', '-0.5', '-i', file, '-frames:v', '1',
     '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], { encoding: 'buffer' });
@@ -77,7 +77,7 @@ for (const c of CANDIDATES) {
   const page = await context.newPage();
   await page.goto(`${BASE}/browse/nsfe?r=${Date.now()}`, { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('.BrowseList-row', { timeout: 30000 }).catch(() => {});
-  // Known colour so padding is unmistakable, and the list is populated so the
+  // Known color so padding is unmistakable, and the list is populated so the
   // width under test is actually exercised.
   await page.evaluate(() => {
     document.documentElement.style.background = '#ff0000';

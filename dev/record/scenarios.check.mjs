@@ -113,7 +113,7 @@ for (const s of scenarios) {
   // It moved once more to 35 s, for watchability rather than necessity: the MOD/XM
   // clip now plays 10.5 s of music before its seek and holds ~7.7 s of loop after
   // the wrap, which is what the ear needs to follow it, and lands at 31.5 s. A clip
-  // that proves the behaviour in 22 s but is hard to follow is not worth much on the
+  // that proves the behavior in 22 s but is hard to follow is not worth much on the
   // page, and the extra 9 s is ~2 MB.
   //
   // Lifted to 120 s, generously, on the grounds that page weight stopped being the

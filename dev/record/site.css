@@ -16,6 +16,12 @@
 
 * { box-sizing: border-box; }
 
+/* Content links take the nav's accent blue in every state. The browser default
+   reserves a darker purple for :visited, which reads as disabled against this
+   dark page, and the page is a one-off document where marking a visited anchor
+   buys nothing. */
+a, a:visited { color: var(--accent); }
+
 body {
   margin: 0;
   padding: 0 1.25rem 4rem;
@@ -24,7 +30,7 @@ body {
   font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 
-header, nav, section, footer { max-width: 68rem; margin: 0 auto; }
+header, nav, section { max-width: 68rem; margin: 0 auto; }
 
 header { padding: 3rem 0 1rem; }
 /* The nav is sticky at the very top, so every anchor scroll has to stop below it
@@ -34,7 +40,6 @@ html { scroll-padding-top: 4.5rem; }
 h1 { font-size: 2rem; line-height: 1.2; margin: 0 0 .75rem; letter-spacing: -.01em; }
 .lede { max-width: 46rem; color: var(--ink); }
 .lede strong { color: var(--accent); }
-.meta { color: var(--dim); font-size: .9rem; font-family: var(--mono); }
 
 nav {
   position: sticky; top: 0; z-index: 5;
@@ -101,7 +106,7 @@ section h2 { font-size: 1.35rem; margin: 0 0 .5rem; }
    introduces it, not a line) while the second keeps the one that divides the
    groups. The wrapper's heading is a size up from the sections it covers, so the
    hierarchy reads without nesting two same-sized headings. */
-#demos > h2 { font-size: 1.55rem; }
+#demos > h1 { font-size: 1.55rem; }
 .demo-group > section:first-of-type { border-top: 0; }
 
 /* Clip rows: video beside the prose. The column is 600px rather than something
@@ -187,18 +192,11 @@ summary { cursor: pointer; font-size: .9rem; color: var(--accent); }
 }
 code { font-family: var(--mono); }
 
-/* Mechanism subheadings inside "Variants". The count sits on the
-   title because the useful thing about a group is how much of it there is, and a
-   reader scanning the section is comparing sizes as much as reading titles. */
+/* Mechanism subheadings inside "Variants". */
 .group-title {
-  display: flex; align-items: baseline; gap: .6rem;
   margin: 2.6rem 0 .2rem; padding-bottom: .35rem;
   border-bottom: 1px solid var(--border);
   font-size: 1.05rem; letter-spacing: .02em;
-}
-.group-count {
-  font-family: var(--mono); font-size: .8rem; font-weight: 400;
-  color: var(--dim);
 }
 .group-note {
   margin: .45rem 0 1.1rem; max-width: 46rem;
@@ -246,8 +244,6 @@ section#deep > .group-title:first-of-type { margin-top: .6rem; }
   -webkit-mask-size: contain;
   mask-size: contain;
 }
-
-footer { padding-top: 2rem; color: var(--dim); font-size: .9rem; }
 
 @media (max-width: 720px) {
   .clip { grid-template-columns: 1fr; }

@@ -126,7 +126,7 @@ diffed. Never build the dev core from an unpinned clone.
 - **libvgm tree dependence.** The loop band multiplies `Tick2Second` by playback
   speed; correct and speed-invariant by construction, but position semantics
   differ between libvgm trees. Verify on the pin; document the tested version.
-- **`mdxmini` patch** is a behaviour change to a vendored lib; call it out in B.
+- **`mdxmini` patch** is a behavior change to a vendored lib; call it out in B.
 - **PR A is a judgement call for the maintainer.** It removes his subtrees. Present
   it as cleanup with the "cannot build them anyway" evidence, and let him decline —
   B does not depend on A landing, only on rebasing cleanly if it does.

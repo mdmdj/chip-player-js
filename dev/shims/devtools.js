@@ -43,7 +43,7 @@ const snapshot = () => {
     positionMs: typeof p.getPositionMs === 'function' ? p.getPositionMs() : null,
     displayPositionMs: typeof p.getDisplayPositionMs === 'function' ? p.getDisplayPositionMs() : null,
     durationMs: typeof p.getDurationMs === 'function' ? p.getDurationMs() : null,
-    // Engine-reported, not catalogued (see dev/record/README.md): GME parses
+    // Engine-reported, not cataloged (see dev/record/README.md): GME parses
     // play_length at load, SID fetches HVSC lengths over HTTP. Plus the tail
     // detector's trip gate, so a probe can tell "the gate is shut" from "the tune
     // has not gone quiet yet".

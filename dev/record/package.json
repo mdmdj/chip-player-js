@@ -1,0 +1,10 @@
+{
+  "name": "chip-player-js-record",
+  "version": "0.0.0",
+  "private": true,
+  "description": "DEV-ONLY. Build/record dependencies for the PR communication page (dev/record/**). Never promoted: dev/** is path-listed in dev/promote-paths.txt, and node_modules is gitignored. Not a workspace of the root package -- the root package.json stays untouched (it is shared with the feature branch and the PR).",
+  "devDependencies": {
+    "playwright": "1.63.0",
+    "shiki": "4.5.0"
+  }
+}

@@ -10,16 +10,80 @@ export const header = {
   title: 'First Class Sub-Tunes and More Powerful Looping',
     lede: `
     <h2>Overview</h2>
-    <p>Details follow in the <a href="#summary">summary</a>, <a href="#demos">per-feature demos</a> and <a href="#snippets">code snippets</a>.</p>
+    This is a high level overview, there is a more detailed <a href="#summary">summary</a>, <a href="#demos">per-feature demos</a> and <a href="#snippets">code snippets</a> below.
+    <h3>Why?</h3>
+    Many chiptune formats have single files that contain multiple songs. In the current version, this creates a split where some files
+    need special UI to navigate and operate differently in many ways. <br>
+    The classic way of listening to looping chiptunes is obscured in a per-engine setting that is difficult to understand.<br>
+    This PR aims to make sub-tunes fully integrated with easy browsing, searching and looping across all formats.<br>
+    With these improvements Chip Player JS matches or even exceeds the usability and capability of other major music players like foobar2000.
+    The existing Browse and Player UI is augmented instead of expanded, reducing overall complexity to the user.
 
-    <h3>Sub-tunes are songs</h3>
-    <p>Some formats put many songs in one file (NSF/NSFE, SID/RSID, GBS, AY). Such a file browses as a <strong>song folder</strong>, and each sub-tune is an ordinary song: favorited, searched, shuffled, charted, and shared by URL. Share links stay backward compatible. A sub-tune is its own page (<code>?play=&lt;id&gt;&amp;subtune=N</code>) with its own title and sitemap entry. A multi-song file dropped in locally opens as a folder of its songs, read from the file’s own header.</p>
+    <h3>Each Sub-tune Is a First-class Song</h3>
+    <p>A file that contains sub-tunes browses like a folder.</p>
+    <p>Sub-tunes now support:</p>
+    <ul>
+    <li>Favorite</li>
+    <li>Search</li>
+    <li>Shuffle</li>
+    <li>Charts</li>
+    <li>Loops via Repeat One</li>
+    <li>Date Label (with improved parsing)</li>
+    <li>Own page and sitemap entry</li>
+    </ul>
+    <p>
+    Share links are fully backward compatible.<br>
+    The favorites list is now sorted and shows paths (similar to search results) for clarity and ease of navigation.<br>
+    Local files get the same result without a catalog: a multi-song file dropped in from disk opens as a folder of its songs, and each one plays.<br>
+    </p>
 
-    <h3>Repeat One loops the intended region</h3>
-    <p>Formats that expose a loop region loop it seamlessly and draw it on the slider: VGM/VGZ, MDX, MIDI, and MOD/XM/IT/S3M. SID and N64 free-run past their listed length and restart on a detected tail. Toggling Repeat One never moves the playhead.</p>
+    <h3>Repeat One Upgraded for Sub-Tunes and Seamless Loops</h3>
+    <p>Formats with native loop regions loop seamlessly, on load where available.</p>
+    <ul>
+      <li>Slider Knob reflects the relative position across loops</li>
+      <li>MIDI piano roll is now populated across loop boundaries</li>
+      <li>Loop regions can optionally be displayed to the user</li>
+    </ul>
+    <p>Formats that loop via Indefinite Playback use it automatically.</p>
+    <ul>
+      <li>Applied optional GME-style ending detection to N64 and SID
+        <ul>
+          <li>Parameters are tunable, can be customized by the player.</li>
+          <li>Implemented is its own module, can be reused by any new player.</li>
+        </ul>
+      </li>
+      <li>Slider Knob will park at the end of the Slider Bar</li>
+      <li>A "Looping" message has been added to clarify to the user</li>
+    </ul>
+    <p>
+    Seamless looping behavior is opt-in on certain players, by default the original Sequencer behavior applies.<br>
+    When Repeat One is not active, the Sequencer is fully in control.<br>
+    There is no incremental burden for new formats by default.<br>
+    The existing per-song Indefinite Playback setting has not changed.<br>
+    </p>
+    <h3>Catches</h3>
+    <h4>Database</h4>
+    <ul>
+    <li>The database will need to be migrated.</li>
+    <li>The catalog will need to be rebuilt.</li>
+    <li>New sub-tune metadata parsing may conflict with any undocumented metadata overlays.</li>
+    <li>Any undocumented metadata overlays may need to be re-applied matching the updated schema.</li>
+    </ul>
 
-    <h3>Before deploying</h3>
-    <p>Rebuild the catalog (<code>node scripts/build-music.js</code>) and the chip core. The <a href="#summary">summary</a> lists the schema, engine and API changes.</p>
+    <h4>Chip Core</h4>
+    <p>Need to rebuild the Chip Core:</p>
+    <ul>
+    <li>There are new exports</li>
+    <li>There are changes to wrappers</li>
+    <li>There is a fix in vendored mdxmini</li>
+    </ul>
+
+    <p><strong>There may be unexpected differences in your build due to the sibling libraries not being version pinned.<br>
+    ⚠Specifically, seeking N64 miniusf files has glitchy audio in my version and I'm not sure how it's fixed on your side.</strong></p>
+    <h4>Auth</h4>
+    <p>This feature was developed using a mock user shim,
+    best effort was made to mock the user properly,
+    but it's possible unexpected issues will appear when using the real Firebase config.</p>
     `,
 };
 
@@ -99,7 +163,7 @@ export const summary = {
       id: 'tests',
       title: 'Testing Is Not in the PR',
       body: [
-        'No test suite is included. The harnesses behind every number on this page live in <code>dev/</code> and are not in the diff.',
+        'This repo has no test runner, no CI and no <code>test</code> script, and the catalog is gitignored, so a tracked suite would silently skip about a third of its checks because there is no fixture. The harnesses behind every number on this page live in <code>dev/</code> and are not in the diff; they build their own minimal SMFs for the edge cases rather than depending on a catalog file. If you want them tracked, they can move to a <code>test/</code> directory running on <code>node --test</code> with no new dependencies.',
       ],
     },
     {

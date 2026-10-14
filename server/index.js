@@ -22,6 +22,7 @@ const axiosRetry = require('axios-retry').default;
 const { XMLParser } = require('fast-xml-parser');
 
 const { dbStatements } = require('./database.js');
+const { resolveDirectoryMetadata } = require('./directory-metadata');
 let authModule = './middleware/auth.js';
 // DEV-BEGIN (stripped for promotion; the dev auth bypass lives in an untracked module)
 authModule = process.env.DEV_AUTH_MODULE || authModule;

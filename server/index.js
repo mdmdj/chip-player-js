@@ -982,22 +982,39 @@ function getHtmlInjectionsForRequest(req) {
     }
 
     if (song) {
-      // Canonical URL is https://chiptune.app/?play=ABCD1234
-      url = `https://chiptune.app/?play=${encodeURIComponent(song.song_id)}`;
+      // A sub-tune is a song of its own: a valid subtune > 0 gets its own
+      // canonical, title and structured data, so it can be indexed and shared
+      // on its own. Sub-tune 0 is the file page (the bare ?play= URL), which
+      // keeps the two forms from duplicating each other.
+      const subtuneCount = song.subtune_count || 1;
+      const requestedSubtune = parseInt(req.query.subtune, 10);
+      const subtune = Number.isInteger(requestedSubtune) && requestedSubtune > 0 && requestedSubtune < subtuneCount
+        ? requestedSubtune
+        : 0;
+
+      url = `https://chiptune.app/?play=${encodeURIComponent(song.song_id)}`
+        + (subtune > 0 ? `&subtune=${subtune}` : '');
 
       const chipConfig = {
         songId: song.song_id,
         songPath: song.path,
+        subtune,
         // How many songs the file holds: > 1 means Browse presents it as a
         // "song folder", so a share link lands inside it instead of on the
         // containing directory. Sent for plain files too, so the client never
         // has to read meaning into an absent field.
-        subtuneCount: song.subtune_count || 1,
+        subtuneCount,
       };
       scriptTag = `<script>window.__chipConfig = ${JSON.stringify(chipConfig)};</script>`;
 
-      if (song.title) {
-        title = song.title;
+      // The sub-tune's own name when the format gives one, else "Tune N".
+      const subtuneTitle = subtune > 0
+        ? (getSubtuneMetadataStmt.get(song.path, subtune)?.title || `Tune ${subtune + 1}`)
+        : null;
+      const songTitle = subtuneTitle || song.title;
+
+      if (songTitle) {
+        title = songTitle;
         if (song.artist) title += ` - ${song.artist}`;
         else if (song.game) title += ` - ${song.game}`;
       } else {
@@ -1021,7 +1038,7 @@ function getHtmlInjectionsForRequest(req) {
       const songSchema = {
         '@context': 'https://schema.org',
         '@type': 'MusicRecording',
-        name: song.title || path.basename(song.path || play),
+        name: songTitle || path.basename(song.path || play),
         url: url,
       };
       if (song.artist) {

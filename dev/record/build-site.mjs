@@ -510,19 +510,22 @@ ${g.clips.map(clipHtml).join('\n')}
 // know before I deploy it" (which no clip can show, because all of it is true *before*
 // the code runs -- a catalog that has to be rebuilt, a wasm build that may not be
 // reproducible, an endpoint that returns more rows than it used to).
+// Bullets are reserved for genuinely short, parallel items (the Overview). A
+// summary body is prose: each block is a run of paragraphs, and a block entry
+// that is already block-level (a list, table or heading) is emitted as-is.
+const bodyParagraph = (p) =>
+  /^\s*<(ul|ol|table|h[1-6])\b/i.test(p) ? `      ${p}` : `      <p>${p}</p>`;
 const summaryHtml = `  <section id="summary" class="summary">
     <h2>Summary</h2>
     <div class="summary-block">
       <h3>What’s Changed</h3>
 ${summary.changed.map((c) => `      <h4>${c.heading}</h4>
-      <ul>
-${c.points.map((p) => `        <li>${p}</li>`).join('\n')}
-      </ul>`).join('\n')}
+${c.body.map(bodyParagraph).join('\n')}`).join('\n')}
     </div>
     <div class="summary-block">
       <h3>What To Look Out For</h3>
 ${summary.lookout.map((b) => `      <h4 id="${esc(b.id)}">${b.title}</h4>
-${b.body.map((p) => /^\s*<(ul|ol|table|h[1-6])\b/i.test(p) ? `      ${p}` : `      <p>${p}</p>`).join('\n')}`).join('\n')}
+${b.body.map(bodyParagraph).join('\n')}`).join('\n')}
     </div>
   </section>`;
 

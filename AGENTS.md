@@ -403,6 +403,12 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
     `play_length`, the SID end-detector trip gate, whether a driver free-runs past
     its reported length. Taps the app's own gain node, so a seek into a silent tail
     cannot pass as music.
+  - `dev/record/stress.mjs` — rapid mixed-format switching stress
+    (`node dev/record/stress.mjs [--groups 10] [--per-group 100] [--dwell 300] [--headed]`):
+    a fresh browser context per group, then Next every `--dwell` ms against the
+    Top Charts, capturing the first `pageerror`. It found the SID voice-mask
+    regression (`Sequencer.playSongBuffer` on an undefined mask after a superseded
+    load) in 4 switches; 1000 switches run clean. Not in `run-tests.sh` (slow).
   - `dev/record/vid*.mjs` — page-delivery checks, all headless and none of them
     needed by `run-tests.sh`: `vidcheck` (one clip's media pipeline state),
     `vidall` (every clip, per-clip verdicts), `vidleak` (bytes pulled on load),
@@ -1307,6 +1313,15 @@ checks no longer work. Compare a live context to a stored one with
   promote's content can survive and get doubled by a replayed commit (seen once:
   two copies of `_mdx_get_loop_start_ms` in `scripts/build-chip-core.js`); a
   non-empty tree diff is a real finding to read, not noise to re-run away.
+- **`dev/rebase.sh` can die on a stale `.git/index.lock` (2026-10-14) — retry,
+  it is not a conflict.** An outside git process racing the ~200-commit replay
+  (here: the harness re-reading `AGENTS.md` on every rewrite, which takes the
+  index lock) makes the rebase stop with `fatal: Unable to create
+  '.git/index.lock'`. Abort and retry; it cleared on the next attempt. Short
+  loop until this is automatic: `git rebase --abort; rm -f .git/index.lock;
+  ./dev/rebase.sh`. (The script's `EXIT` trap used to delete `dev/.pre-rebase`
+  even on failure, so the tip it told you to restore from was already gone; the
+  trap now keeps it when the script exits non-zero.)
 - **Diagnosed defects from the feature-diff sweep (root-value verified; the rest
   were cosmetic or behind a zero-width window in this catalog).** Still true:
   - **DEAD (do not "fix"):** `XMPPlayer._loopCount` looks unreset on `loadData`,

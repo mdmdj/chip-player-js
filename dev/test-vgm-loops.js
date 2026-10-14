@@ -450,14 +450,15 @@ async function main() {
       `the engine must get a finite pass count, got ${core.lastLoopArg}`);
   });
 
-  await xcheck('setting off while repeat one is on does not latch a fade',
-    'confirmed in-app on "19 1st Place Name Registration.vgz": with repeat one on at curLoop 2, the song fades out ~3.5s later and ends. PlayerA::SetLoopCount() never clears _fadeSmplStart, and _lvgm_set_indefinite_playback(false) latches FadeOut() before applyLoopCount restores 0.', async () => {
+  await check('setting off while repeat one is on does not latch a fade', async () => {
     // Repeat one is the user's intent, so the "Indefinite Playback" setting
-    // turning off must not end the song: set_indefinite_playback(false)
-    // latches PlayerA::FadeOut(), and a later SetLoopCount(0) does not clear it.
+    // turning off must not end the song. The player therefore syncs the
+    // engine's indefinite flag at load while Repeat One owns the loop count
+    // (see setParameter), instead of letting it latch PlayerA::FadeOut(), which
+    // a later SetLoopCount(0) cannot clear.
     const { p, core } = await makePlayer();
     p.setLooping(true);
-    // Three loops in, so the setting's own "curLoop >= 2" fade latch fires.
+    // Three loops in, so the setting's own "curLoop >= 2" fade latch would fire.
     await seek(p, core, A + 3 * B + 500);
     p.setParameter('indefinitePlayback', false);
     assert.strictEqual(p.looping, true, 'repeat one is still on');

@@ -58,6 +58,12 @@ typedef struct _mdxmml_ym2151_instances {
   int all_track_finished;
   int fade_out_wait;
   int master_volume;
+
+  /* Song loop bookkeeping, recorded while parsing (see mdx_get_loop_*). */
+  int loop_min_seen;       /* last observed song-wide infinite-loop count */
+  int64_t loop_first_us;   /* elapsed at the 1st loop (intro + loop) */
+  int64_t loop_second_us;  /* elapsed at the 2nd loop (intro + 2 * loop) */
+  int loop_region_bad;     /* a non-looping track left the min: region invalid */
 } mdxmml_ym2151_instances;
 
 /* ------------------------------------------------------------------ */
@@ -258,6 +264,7 @@ mdx_parse_mml_ym2151_async_initialize(MDX_DATA *orig_mdx, PDX_DATA *orig_pdx, so
   /* start parsing */
 
   self->all_track_finished=FLAG_FALSE;
+  self->fade_out=0;
   self->fade_out_wait=0;
   self->master_volume=127;
 
@@ -287,10 +294,11 @@ mdx_parse_mml_ym2151_async(songdata *data, int track_mute_mask)
   }
 
   if ( self->fade_out > 0 ) {
+    if ( self->master_volume <= 0 ) { self->all_track_finished = FLAG_TRUE; return FLAG_FALSE; }
     if ( self->fade_out_wait==0 ) { self->fade_out_wait = self->fade_out; }
     self->fade_out_wait--;
     if ( self->fade_out_wait==0 ) { self->master_volume--; }
-    if ( self->master_volume==0 ) { return FLAG_FALSE; }
+    if ( self->master_volume==0 ) { self->all_track_finished = FLAG_TRUE; return FLAG_FALSE; }
   }
   ym2151_set_master_volume( self->master_volume * self->mdx->fm_volume / 127, data );
   pcm8_set_master_volume( self->master_volume * self->mdx->pcm_volume / 127, data );
@@ -329,6 +337,29 @@ mdx_parse_mml_ym2151_async(songdata *data, int track_mute_mask)
     if ( infinite_loops >= self->mdx->max_infinite_loops ) {
       self->fade_out = self->mdx->fade_out_speed;
     }
+  }
+
+  /* Record when the song as a whole completes its first and second loop
+     (infinite_loops is the minimum across tracks still playing). The
+     difference is the loop length; the first is intro + loop. */
+  if ( infinite_loops < 32767 ) {
+    /* A real crossing advances the song-wide count by one. A larger jump is a
+       non-looping track dropping out of the minimum (its infinite_loop_times
+       stays 0 until it ends), not a crossing: recording it would place the
+       first boundary on that tick and the second on the next, i.e. a one-tick
+       loop. Flag the region invalid instead so the getters report no region
+       (a wrong band is worse than none). */
+    int step = infinite_loops - self->loop_min_seen;
+    if ( step == 1 && !self->loop_region_bad ) {
+      if ( self->loop_first_us == 0 )
+        self->loop_first_us = self->mdx->elapsed_time;
+      else if ( self->loop_second_us == 0 )
+        self->loop_second_us = self->mdx->elapsed_time;
+    } else if ( step > 1 && self->loop_second_us == 0 ) {
+      self->loop_region_bad = 1;
+    }
+    if ( infinite_loops > self->loop_min_seen )
+      self->loop_min_seen = infinite_loops;
   }
 
   /* timer count */
@@ -389,6 +420,22 @@ mdx_parse_mml_get_tempo(void* in_self)
   mdxmml_ym2151_instances* self = (mdxmml_ym2151_instances *)in_self;
 
  return 1000*1024*(256 - self->mdx->tempo)/4000;
+}
+
+int64_t
+mdx_parse_mml_get_loop_first_us(void* in_self)
+{
+  if (!in_self) return 0;
+  if (((mdxmml_ym2151_instances *)in_self)->loop_region_bad) return 0;
+  return ((mdxmml_ym2151_instances *)in_self)->loop_first_us;
+}
+
+int64_t
+mdx_parse_mml_get_loop_second_us(void* in_self)
+{
+  if (!in_self) return 0;
+  if (((mdxmml_ym2151_instances *)in_self)->loop_region_bad) return 0;
+  return ((mdxmml_ym2151_instances *)in_self)->loop_second_us;
 }
 
 

@@ -1,10 +1,10 @@
-import React, { createContext, useCallback, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import debounce from 'lodash/debounce';
 import { getAuth, onAuthStateChanged, signInWithPopup, signOut, GoogleAuthProvider } from 'firebase/auth';
 import { initializeApp as firebaseInitializeApp } from 'firebase/app';
 import firebaseConfig from '../config/firebaseConfig';
 import { API_BASE, CATALOG_PREFIX } from '../config';
-import { pathJoin } from '../util';
+import { pathJoin, songRef } from '../util';
 import { getWithAuth, postWithAuth } from '../util';
 
 const UserContext = createContext({
@@ -27,7 +27,9 @@ const DEFAULT_SETTINGS = {
   showVisualizer: false,
   theme: 'msdos',
   silenceDuration: -1,
+  showLoopArea: true,
 };
+
 
 const UserProvider = ({ children }) => {
   // Use authState hook for user state
@@ -44,6 +46,8 @@ const UserProvider = ({ children }) => {
     }
   });
   const [loadingUser, setLoadingUser] = useState(true); // Manage loading state
+  // Monotonic token so stale favorites refreshes don't overwrite newer ones.
+  const favesRefreshToken = useRef(0);
   const [settings, setSettings] = useState(() => {
     // Restore settings from localStorage.
     try {
@@ -55,11 +59,14 @@ const UserProvider = ({ children }) => {
     }
   });
 
+
   useEffect(() => {
     // Initialize Firebase
     const firebaseApp = firebaseInitializeApp(firebaseConfig);
     const auth = getAuth(firebaseApp);
     onAuthStateChanged(auth, async user => {
+      // A user change invalidates any favorites refresh started for the old user.
+      favesRefreshToken.current++;
       setUser(user);
       console.log('Firebase auth state changed, user:', user);
       setLoadingUser(false);
@@ -88,8 +95,9 @@ const UserProvider = ({ children }) => {
     if (!user) return;
 
     try {
+      const token = ++favesRefreshToken.current;
       getWithAuth(user, `${API_BASE}/user/favorites`).then(favesRes => {
-        setFaves(favesRes.favorites);
+        if (token === favesRefreshToken.current) setFaves(favesRes.favorites);
       });
 
       getWithAuth(user, `${API_BASE}/user/settings`).then(settingsRes => {
@@ -117,6 +125,7 @@ const UserProvider = ({ children }) => {
     const auth = getAuth();
     try {
       await signOut(auth);
+      favesRefreshToken.current++;
       setUser(null);
       setFaves([]);
     } catch (error) {
@@ -124,20 +133,24 @@ const UserProvider = ({ children }) => {
     }
   };
 
-  const handleToggleFavorite = async (path, songId) => {
+  const handleToggleFavorite = async (path, subtune = 0, songId) => {
     if (user) {
+      // Invalidate any in-flight favorites refresh so an older response cannot
+      // drop this optimistic change; bumping at the refresh alone is too late.
+      favesRefreshToken.current++;
       const oldFaves = faves;
-      const isFavorite = faves.find(fave => fave.path === path);
+      const isFavorite = faves.find(fave => fave.path === path && (fave.subtune || 0) === subtune);
 
       const fave = {
         path,
+        subtune,
         songId,
         href: pathJoin(CATALOG_PREFIX, encodeURIComponent(path)),
         mtime: Math.floor(Date.now() / 1000),
       };
 
       const newFaves = isFavorite
-        ? faves.filter(fave => fave.path !== path)
+        ? faves.filter(fave => !(fave.path === path && (fave.subtune || 0) === subtune))
         : [...faves, fave];
       setFaves(newFaves);
 
@@ -150,6 +163,19 @@ const UserProvider = ({ children }) => {
       } catch (e) {
         setFaves(oldFaves);
         console.log('Couldn\'t update favorites in Firebase.', e);
+        return;
+      }
+      // The mutation is committed from here on, so a failed re-read must not
+      // roll the optimistic state back -- that would show the song as un-favorited
+      // until the next refresh, and a retry would then invert it.
+      try {
+        // Re-read so every entry carries the catalog's size and sub-tune title.
+        // Only apply the latest refresh: rapid toggles can resolve out of order.
+        const token = ++favesRefreshToken.current;
+        const res = await getWithAuth(user, `${API_BASE}/user/favorites`);
+        if (res && token === favesRefreshToken.current) setFaves(res.favorites);
+      } catch (e) {
+        console.log('Couldn\'t refresh favorites after updating Firebase.', e);
       }
     }
   };
@@ -186,9 +212,10 @@ const UserProvider = ({ children }) => {
     saveSettings(user, newSettings);
   }, [user, saveSettings]);
 
-  // We need to derive a list of paths to use as the play context.
+  // We need to derive a list of SongRefs to use as the play context. Old
+  // favorites have no subtune and resolve to the parent file (sub-tune 0).
   const favesContext = useMemo(() => {
-    return faves.map(fave => fave.path);
+    return faves.map(fave => songRef(fave.path, fave.subtune));
   }, [faves]);
 
   return (

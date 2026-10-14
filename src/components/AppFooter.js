@@ -78,6 +78,7 @@ function AppFooter(props) {
   const loopEnd = bandMs && currentSongDurationMs > 0
     ? Math.min(bandMs.endMs / currentSongDurationMs, 1)
     : null;
+  const isTracker = Boolean(songPath && /\.(mod|xm|s3m|it)$/i.test(songPath));
 
   const handleToggleInfo = useCallback((e) => {
     e.preventDefault();
@@ -184,7 +185,7 @@ function AppFooter(props) {
                   тхт
                 </a>
               }
-              {md5 &&
+              {md5 && isTracker &&
                 <a href={`https://modsamplemaster.thegang.nu/module.php?md5=${md5}`}
                    title="Look up this song on Mod Sample Master" target="_blank">
                   msm

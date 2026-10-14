@@ -817,7 +817,7 @@ function processFile(child, directoryId, dirEntries, dirImagePath, dirTextIds) {
       finalImageId,
       JSON.stringify(finalTextIds),
       soundfont,
-      md5 || meta.md5 || null,
+      md5,
       subtunes.length || 1,
       sortOrder
     );

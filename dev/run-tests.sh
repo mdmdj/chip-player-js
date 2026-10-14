@@ -44,3 +44,8 @@ node "$DIR/test-devtools.js" 2>/dev/null
 echo
 echo "== clip scenario registry =="
 node "$DIR/record/scenarios.check.mjs"
+echo
+echo "== seo (directory metadata) =="
+node "$DIR/fetch-seo-fixtures.mjs" --check \
+  || { echo "run-tests: test-seo cannot run until its catalog fixtures are fetched and indexed." >&2; exit 1; }
+node "$DIR/../scripts/test-seo.js"

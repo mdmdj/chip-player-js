@@ -13,6 +13,11 @@
 // re-run costs only the directory listings. Pass --force to re-fetch.
 //
 //   node dev/fetch-seo-fixtures.mjs [--delay 400] [--dry-run] [--force] [--base URL]
+//   node dev/fetch-seo-fixtures.mjs --check [--db server/catalog.db]
+//
+// `--check` writes nothing: it reports whether the catalog already has a row
+// for every seed directory (exit 1 with the fix if not), so dev/run-tests.sh
+// can gate test-seo on it.
 //
 // Then index the new files and check the test:
 //   node scripts/build-music.js -n && npm run test:seo
@@ -20,8 +25,10 @@
 import { mkdir, writeFile, readFile, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..');
+const require = createRequire(import.meta.url);
 const TEST_FILE = join(REPO, 'scripts', 'test-seo.js');
 const UA = 'chip-player-js-dev-catalog-fixture/1.0 (+https://github.com/mdmdj/chip-player-js; local test fixture)';
 
@@ -33,6 +40,8 @@ const opt = (name, def) => {
 const DELAY = Number(opt('--delay', 400)); // ms between network requests
 const DRY_RUN = args.includes('--dry-run');
 const FORCE = args.includes('--force');
+const CHECK = args.includes('--check');
+const DB_PATH = String(opt('--db', join(REPO, 'server', 'catalog.db')));
 const BASE = String(opt('--base', 'https://chiptune.app')).replace(/\/+$/, '');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -106,6 +115,30 @@ async function download(path, size, counters) {
 const main = async () => {
   const seeds = await seedPaths();
   if (!seeds.length) throw new Error(`no seed paths parsed from ${TEST_FILE}`);
+
+  if (CHECK) {
+    let missing;
+    try {
+      const Database = require('better-sqlite3');
+      const db = new Database(DB_PATH, { readonly: true });
+      const stmt = db.prepare('SELECT 1 FROM directories WHERE path = ?');
+      missing = seeds.filter((s) => !stmt.get(s));
+      db.close();
+    } catch (e) {
+      console.error(`fetch-seo-fixtures: cannot read ${DB_PATH} (${e.message})`);
+      missing = seeds;
+    }
+    if (missing.length) {
+      console.error(`test-seo needs ${seeds.length} catalog directories; the dev catalog is missing ${missing.length}:`);
+      for (const m of missing.slice(0, 6)) console.error('  - ' + m);
+      if (missing.length > 6) console.error(`  ... and ${missing.length - 6} more`);
+      console.error('Fix: node dev/fetch-seo-fixtures.mjs && node scripts/build-music.js -n');
+      process.exit(1);
+    }
+    console.log(`test-seo fixtures present: ${seeds.length}/${seeds.length} directories (${DB_PATH})`);
+    return;
+  }
+
   console.log(`seeds from test-seo.js: ${seeds.length} directories; delay ${DELAY}ms/request`
 
     + (DRY_RUN ? '; DRY RUN' : '') + (FORCE ? '; force' : ''));

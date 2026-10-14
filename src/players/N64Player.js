@@ -270,10 +270,17 @@ export default class N64Player extends Player {
     return this.looping || !!this.params.indefinitePlayback;
   }
 
-  stop() {
-    this.suspend();
+  // Cancel any in-flight incremental seek. `Sequencer.playSong` suspends the
+  // outgoing player on every switch, and a queued idle callback would otherwise
+  // keep seeking the shared core after another format has taken over.
+  suspend() {
+    super.suspend();
     cancelIdleCallback(this.seekRequestId);
     this.seekTargetMs = null;
+  }
+
+  stop() {
+    this.suspend();
     this.core._n64_shutdown();
     console.debug('N64Player.stop()');
     this.emit('playerStateUpdate', { isStopped: true });

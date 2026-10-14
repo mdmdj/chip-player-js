@@ -135,9 +135,9 @@ const UserProvider = ({ children }) => {
 
   const handleToggleFavorite = async (path, subtune = 0, songId) => {
     if (user) {
-      // Invalidate any in-flight favorites refresh so an older response cannot
-      // drop this optimistic change; bumping at the refresh alone is too late.
-      favesRefreshToken.current++;
+      // Claim this toggle's generation, so the fallback refresh below cannot
+      // drop a newer toggle's optimistic change.
+      const generation = ++favesRefreshToken.current;
       const oldFaves = faves;
       const isFavorite = faves.find(fave => fave.path === path && (fave.subtune || 0) === subtune);
 
@@ -154,11 +154,12 @@ const UserProvider = ({ children }) => {
         : [...faves, fave];
       setFaves(newFaves);
 
+      let addResult;
       try {
         if (isFavorite) {
           await removeFavorite(fave);
         } else {
-          await addFavorite(fave);
+          addResult = await addFavorite(fave);
         }
       } catch (e) {
         setFaves(oldFaves);
@@ -168,14 +169,30 @@ const UserProvider = ({ children }) => {
       // The mutation is committed from here on, so a failed re-read must not
       // roll the optimistic state back -- that would show the song as un-favorited
       // until the next refresh, and a retry would then invert it.
-      try {
-        // Re-read so every entry carries the catalog's size and sub-tune title.
-        // Only apply the latest refresh: rapid toggles can resolve out of order.
-        const token = ++favesRefreshToken.current;
-        const res = await getWithAuth(user, `${API_BASE}/user/favorites`);
-        if (res && token === favesRefreshToken.current) setFaves(res.favorites);
-      } catch (e) {
-        console.log('Couldn\'t refresh favorites after updating Firebase.', e);
+      // The add response carries this entry already decorated (size, sub-tune
+      // title, ...), so splice just that one in rather than re-reading the whole
+      // list -- which could otherwise drop a newer, still-pending toggle.
+      if (addResult && addResult.favorite) {
+        setFaves(prev => {
+          // A newer toggle may have removed this exact entry already; if so,
+          // leave it out instead of re-adding a stale one.
+          if (!prev.some(f => f.path === path && (f.subtune || 0) === subtune)) return prev;
+          return [
+            ...prev.filter(f => !(f.path === path && (f.subtune || 0) === subtune)),
+            addResult.favorite,
+          ];
+        });
+        return;
+      }
+      // Fallback for a server that returns only { success }: re-read the list,
+      // and apply it only if no newer toggle has happened since.
+      if (!isFavorite) {
+        try {
+          const refreshed = await getWithAuth(user, `${API_BASE}/user/favorites`);
+          if (refreshed && generation === favesRefreshToken.current) setFaves(refreshed.favorites);
+        } catch (e) {
+          console.log('Couldn\'t refresh favorites after updating Firebase.', e);
+        }
       }
     }
   };

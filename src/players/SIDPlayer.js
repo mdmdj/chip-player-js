@@ -103,6 +103,18 @@ export default class SIDPlayer extends Player {
           subtitle: `${author} - ${copyright}`,
         },
       };
+      // If this response outran loadData's timeout, playback already started on
+      // the default length. Redraw, and let the end detector recompute its trip
+      // gate from the real length -- otherwise Repeat One would restart near the
+      // default end. `stopped` stays set until loadData resumes, so the usual
+      // in-time path does not emit a second state here.
+      if (!this.stopped) {
+        this.resetEndDetector();
+        this.emit('playerStateUpdate', {
+          ...this.getBasePlayerState(),
+          isStopped: false,
+        });
+      }
     }).catch(e => {
       console.warn('SIDPlayer: HVSC metadata unavailable, using defaults.', e?.message);
     });

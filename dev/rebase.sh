@@ -38,8 +38,13 @@ STATE="dev/.pre-rebase"
 
 die() { echo "rebase: $*" >&2; exit 1; }
 
-cleanup() { rm -f "$STATE" "$STATE.mb"; }
-trap cleanup EXIT
+# Keep the recorded pre-rebase tip on failure: the die() messages above point at
+# it, and an aborted rebase is exactly when it is needed. Remove it only on a
+# clean exit.
+cleanup() {
+  if [ "${1:-0}" -eq 0 ]; then rm -f "$STATE" "$STATE.mb"; fi
+}
+trap 'cleanup $?' EXIT
 
 # Tracked changes only: untracked files (the dev shims, catalog/) are invisible
 # to the tree comparison below, and a rebase that would clobber one stops on

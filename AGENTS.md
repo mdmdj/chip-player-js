@@ -50,21 +50,35 @@ a list of commits to remember:
   tooling we need to work, layered on the reviewable feature. This is where the app
   is developed and run. Lives in our fork (`origin`); nothing here is part of the PR.
 
-Workflow: commit feature changes on the feature branch; commit dev/overlay changes
-only on `dev/overlay`; then, after a promote, pick up the feature moves with
-`./dev/rebase.sh` — which rebases (`-X theirs`, so DEV regions survive) **and
-verifies the tree did not move**, which a hand-run rebase cannot tell you. The
-rebase rewrites `dev/overlay`'s history, so publish it with
-`./dev/push-overlay.sh` (a `--force-with-lease` push) — never `git pull`
-`dev/overlay` after a rebase. Never rebase by hand; expect *duplicated* content
-in path-listed files, which is what
-the script's check is for (see the handoff notes). Note that "promote" is its own
-step and is **the user's to trigger** — see "Dev overlay & promotion" below
-before going near `dev/promote-apply.sh` or `dev/.promote-armed`. Never commit
-overlay changes to the
-feature branch, and never push either branch to `upstream` — everything stays in
-our fork (`origin`). The main worktree (`chip-player-js/`) runs `dev/overlay`; the
-feature branch is checked out in the sibling `chip-player-js-feature/` worktree.
+**The invariant:** `dev/overlay` is `feature/subtunes-as-first-class` plus
+overlay-only deltas (dev tooling, engine build, `DEV-BEGIN` regions, and the
+path-listed seams). Either side may move; `./dev/rebase.sh` reconciles them.
+
+**Primary workflow — develop on `dev/overlay`, promote feature work up.**
+`dev/overlay` is the branch the app runs from (the main worktree), so feature
+work is authored there. When a chunk is done, lift it to the PR branch with
+`./dev/promote.sh` (plan) → arm → `./dev/promote-apply.sh`; between promotes,
+catch overlay up to any feature-branch movement with `./dev/rebase.sh`.
+
+**The one exception — hand-carries.** `promote.sh` skips path-listed files
+(`server/index.js`, `scripts/build-chip-core.js`), so feature work in them is
+applied to the feature branch by hand (a commit on the
+`chip-player-js-feature/` worktree), and `./dev/rebase.sh` then brings overlay on
+top. That is the only case where a feature commit is authored on the feature
+branch directly.
+
+`./dev/rebase.sh` rebases (`-X theirs`, so DEV regions survive) **and verifies
+the tree did not move**, which a hand-run rebase cannot tell you. The rebase
+rewrites `dev/overlay`'s history, so publish it with `./dev/push-overlay.sh`
+(a `--force-with-lease` push) — never `git pull` `dev/overlay` after a rebase.
+Never rebase by hand; expect *duplicated* content in path-listed files, which the
+script's check is for (see the handoff notes). Never commit overlay content
+(dev shims, engine build tooling, `AGENTS.md`) to the feature branch, and never
+push either branch to `upstream` — everything stays in our fork (`origin`). The
+main worktree (`chip-player-js/`) runs `dev/overlay`; the feature branch is
+checked out in the sibling `chip-player-js-feature/` worktree. "Promote" is its
+own step and is **the user's to trigger** — see "Dev overlay & promotion" below
+before going near `dev/promote-apply.sh` or `dev/.promote-armed`.
 
 ## Dev overlay & promotion
 
@@ -1214,11 +1228,11 @@ checks no longer work. Compare a live context to a stored one with
   speed questions — at 2x the engine consumes *different material*, so it compares
   two different pieces of music. Use a fixed control in the song (the loop point) or
   an engine counter instead.
-- **Branch model:** see "Branches" above. `feature/subtunes-as-first-class` is
-  the PR (feature only); `dev/overlay` is stacked on it and holds the
-  audio/engine/build/dev work. There is no commit list to maintain — a change
-  either belongs to the feature branch or it does not. Run the app from the dev
-  branch.
+- **Branch model:** see "Branches" above. `dev/overlay` is the working branch
+  (the app runs there); feature work is authored there and promoted up to
+  `feature/subtunes-as-first-class` (the PR). `./dev/rebase.sh` reconciles the
+  two. Hand-carries (path-listed files) are the only feature work authored on
+  the feature branch directly. Run the app from the dev branch.
 - **Hand-carried fixes are committed.** `feature/subtunes-as-first-class` carries
   the hunks `promote.sh` can never deliver: P1 `__chipConfig.subtuneCount` in
   `server/index.js` (re-carried 2026-10-06 as an unconditional

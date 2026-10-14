@@ -11,9 +11,6 @@ const fileExtensions = [
 ];
 const MOUNTPOINT = '/n64';
 const INT16_MAX = 32767; // 2^15 - 1
-// N64 seek renders every sample up to the target on the main thread, so do it
-// in idle-time chunks (like GMEPlayer) instead of one long freeze.
-const SEEK_INCREMENT_MS = 1000;
 
 export default class N64Player extends Player {
   paramDefs = [
@@ -45,8 +42,6 @@ export default class N64Player extends Player {
     this.name = 'N64 Player';
     this.fileExtensions = fileExtensions;
     this.buffer = this.core._malloc(this.bufferSize * 4); // 2 ch, 16-bit
-    this.seekRequestId = null;
-    this.seekTargetMs = null;
     // Same tail detector as SID (see EndDetector); its levels have not been
     // verified on USF content, so quiet game mixes are the case to watch.
     this.endDetector = new EndDetector({
@@ -69,8 +64,6 @@ export default class N64Player extends Player {
   loadData(data, filename, persistedSettings) {
     // N64Player reads song data from the Emscripten filesystem,
     // rather than loading bytes from memory like other players.
-    cancelIdleCallback(this.seekRequestId);
-    this.seekTargetMs = null;
     this.resetEndDetector();
     let err;
     this.filepathMeta = Player.metadataFromFilepath(filename);
@@ -126,15 +119,6 @@ export default class N64Player extends Player {
       return;
     }
 
-    // A long seek timeslices through intermediate positions; those fragments
-    // are not the requested audio, so stay silent until it reaches the target.
-    if (this.seekTargetMs != null) {
-      for (let ch = 0; ch < channels.length; ch++) {
-        channels[ch].fill(0);
-      }
-      return;
-    }
-
     let samplesWritten = this.core._n64_render_audio(this.buffer, this.bufferSize);
     if (samplesWritten <= 0) {
       this.handleSongEnd();
@@ -183,11 +167,8 @@ export default class N64Player extends Player {
 
   // In-buffer restart for the Repeat One tail detector (like GME's
   // restartTrack): seek-to-0 re-runs the emulator from the top without
-  // refetching the miniusf/usflib. Synchronous -- an in-flight idle-callback
-  // seek is cancelled first so it cannot yank the position afterward.
+  // refetching the miniusf/usflib.
   restartTrack() {
-    cancelIdleCallback(this.seekRequestId);
-    this.seekTargetMs = null;
     this.silenceSamplesRemaining = 0;
     this.onSilenceEnd = null;
     this.resetEndDetector();
@@ -211,27 +192,10 @@ export default class N64Player extends Player {
   }
 
   seekMs(positionMs) {
-    cancelIdleCallback(this.seekRequestId);
-    this.seekTargetMs = positionMs;
+    // Same EndDetector contract as SID: reset on seek so quiet time from before
+    // it cannot trip the Repeat One tail restart at the new position.
     this.resetEndDetector();
-    if (positionMs < this.getPositionMs()) {
-      // Seeking backward restarts the tune; do that once up front.
-      this.core._n64_seek_ms(0);
-    }
-    this.doIncrementalSeek(SEEK_INCREMENT_MS);
-  }
-
-  doIncrementalSeek(incrementMs) {
-    this.seekRequestId = requestIdleCallback(() => {
-      const intermediateMs = Math.min(this.getPositionMs() + incrementMs, this.seekTargetMs);
-      this.core._n64_seek_ms(intermediateMs);
-      if (intermediateMs < this.seekTargetMs) {
-        this.doIncrementalSeek(incrementMs);
-      } else {
-        this.seekTargetMs = null;
-        this.seekRequestId = null;
-      }
-    });
+    this.muteAudioDuringCall(this.audioNode, () => this.core._n64_seek_ms(positionMs));
   }
 
   setParameter(id, value) {
@@ -268,15 +232,6 @@ export default class N64Player extends Player {
   // engine flag, so the base end detector must stay out of the way.
   isPlayingIndefinitely() {
     return this.looping || !!this.params.indefinitePlayback;
-  }
-
-  // Cancel any in-flight incremental seek. `Sequencer.playSong` suspends the
-  // outgoing player on every switch, and a queued idle callback would otherwise
-  // keep seeking the shared core after another format has taken over.
-  suspend() {
-    super.suspend();
-    cancelIdleCallback(this.seekRequestId);
-    this.seekTargetMs = null;
   }
 
   stop() {

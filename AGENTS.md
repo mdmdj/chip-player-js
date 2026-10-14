@@ -458,8 +458,10 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
 >   the wasm embeds its build path, so two checkouts give different bytes from
 >   identical sources. The pre-migration claim that a rebuild reproduced the
 >   frozen `94c17c93…` artifact exactly was a 2026-10-02 in-repo-tree result and
->   no longer describes the build. Pinning the siblings (a lock of repo+commit)
->   is the open reproducibility TODO — see `dev/UPSTREAMING_PLAN.md` §4.
+>   no longer describes the build. Pinning the siblings is the open
+>   reproducibility TODO: add a `dev/engines.lock` (repo + commit per sibling)
+>   and a checkout script, and diff it against the revisions `build-info.js`
+>   already records. Never build the dev core from an unpinned clone.
 > - **The engine-content gate** still refuses a silent version swap (it compares
 >   the recorded manifest; `CHIP_ALLOW_ENGINE_FALLBACK=1` accepts a deliberate
 >   change). With the siblings present `normalizeInput()` never falls back, so an
@@ -752,8 +754,16 @@ is older; the un-optimized wasm is valid and only ~600 KB larger, so no package
 fixes it), and an upstream pin move was once reverted on a `GetPlayer()` null drift
 that did **not** reproduce on 2026-10-08 (that commit builds and renders VGM) —
 treat the old "upstream HEAD is broken" note as unverified. (`parentIdx` was added
-upstream 2026-01-21, `57585ea`, if a different pin is needed.) See
-`dev/UPSTREAMING_PLAN.md`.
+upstream 2026-01-21, `57585ea`, if a different pin is needed.)
+
+**Engine-needs invariant — never edit a sibling repo.** Anything we need from an
+engine must be (a) an existing public API, (b) code in our wrapper that composes
+existing APIs, or (c) a patch to an in-repo tree (only `mdxmini`). If a need lands
+in "edit a sibling repo", reimplement it in our wrapper rather than forking the
+engine — that is how the libvgm loop feature works. Deleting the vendored
+subtrees (and the fluidlite include fixes that must ride with them) is offered as
+a suggestion on the changelog page, **not as a PR**: the feature branch keeps the
+subtrees exactly as `master` has them.
 
 ### Dev environment gotcha
 

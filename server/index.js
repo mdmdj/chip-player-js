@@ -788,7 +788,22 @@ router.post(
         subtune,
         now: mtime,
       });
-      res.json({ success: true });
+      // Return the entry already decorated, exactly as /user/favorites does, so
+      // the client can splice this one item in instead of re-reading the whole
+      // list (which could clobber a newer, still-pending toggle).
+      res.json({
+        success: true,
+        favorite: {
+          songId: song.song_id,
+          mtime,
+          path: song.path,
+          subtune,
+          href: `https://gifx.co/music/${song.path}`,
+          size: song.file_size,
+          subtuneCount: song.subtune_count || 1,
+          subtuneTitle: getSubtuneMetadataStmt.get(song.path, subtune)?.title ?? null,
+        },
+      });
     } catch (e) {
       console.error('Error adding favorite:', e);
       res.status(500).json({ error: 'Failed to add favorite' });

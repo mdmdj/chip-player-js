@@ -32,20 +32,23 @@ editing; mirror its style (comment tone, SQL formatting, naming, etc.).
 Two long-lived branches, one concern each. The PR is defined by topology, not by
 a list of commits to remember:
 
-- **`feature/subtunes-as-first-class`** — the PR. Based on `master` and contains
-  **only** the sub-tunes feature: `scripts/{build-music,metadata-parsers}.js`,
-  `server/{database,index,schemas}.js`, and the feature parts of `src/`
-  (components, `Sequencer`, `util`, plus the small `Player.handleSongEnd`
-  change). No `dev/` shims, no engine/build tooling, no `AGENTS.md`/`.nvmrc`.
+- **`feature/subtunes-as-first-class`** — the PR. Based on `master` and feature-only:
+  the sub-tune work (`scripts/{build-music,metadata-parsers,subtune-headers}.js`,
+  `server/{database,index,schemas}.js`, the feature parts of `src/`), **Repeat One**
+  (`src/players/*`, `src/players/midi/midi-helpers.js`, the new
+  `src/players/EndDetector.js`), the small engine surface that supports it
+  (`mdxmini/`, `src/bindings/{libvgm,libsidplayfp}-wrapper.cpp`, a few
+  `EXPORTED_FUNCTIONS` lines in `scripts/build-chip-core.js`), and the per-song
+  sitemap (`scripts/build-sitemap.js`). No `dev/` shims, no vendored-engine
+  *build* tooling, no `AGENTS.md`/`.nvmrc`.
   `git diff master..feature/subtunes-as-first-class` is the reviewable PR.
 - **`dev/overlay`** — stacked on top of the feature branch and holds everything
-  that must **not** be part of the PR: engine build scripts, `src/bindings/`,
-  `src/tinyplayer.c`, the audio parts of `src/players/*Player.js`, vendored-tree
-  fixes, `config/webpack.config.dev.js`, the `dev/` shims and browser test hooks,
-  `AGENTS.md`, `.nvmrc`, `.gitignore`. Think of it as our personal dev overlay:
-  the local setup and tooling we need to work, layered on the reviewable feature.
-  This is where the app is developed and run. Lives in our fork (`origin`);
-  nothing here is part of the PR.
+  that must **not** be part of the PR: our engine build scripts and core selection,
+  `src/tinyplayer.c`, the vendored-tree deletion, `AGENTS.md`, `.nvmrc`,
+  `.gitignore`, `config/webpack.config.dev.js`, and the `dev/` shims, harnesses and
+  browser test hooks. Think of it as our personal dev overlay: the local setup and
+  tooling we need to work, layered on the reviewable feature. This is where the app
+  is developed and run. Lives in our fork (`origin`); nothing here is part of the PR.
 
 Workflow: commit feature changes on the feature branch; commit dev/overlay changes
 only on `dev/overlay`; then, after a promote, pick up the feature moves with

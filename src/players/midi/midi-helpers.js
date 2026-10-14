@@ -8,18 +8,18 @@ const CC_64_SUSTAIN = 64;
 // repeat-off plays the two expanded passes, the two-pass libvgm compromise);
 // HMI (Descent) marks one loop track with CC110/CC111 (others carry CC108
 // alignment marks); a lone CC111 is the RPG Maker convention (loop to the end).
-const CC_102_N64_LOOP_START = 102;
-const CC_103_N64_LOOP_END = 103;
+const CC_102_TRACK_LOOP_START = 102;
+const CC_103_TRACK_LOOP_END = 103;
 const CC_110_HMI_LOOP_START = 110;
 const CC_111_LOOP_END = 111;
 const CC_123_ALL_NOTES_OFF = 123;
 
 function isLoopStartCC(cc) {
-  return cc === CC_102_N64_LOOP_START || cc === CC_110_HMI_LOOP_START;
+  return cc === CC_102_TRACK_LOOP_START || cc === CC_110_HMI_LOOP_START;
 }
 
 function isLoopEndCC(cc) {
-  return cc === CC_103_N64_LOOP_END || cc === CC_111_LOOP_END;
+  return cc === CC_103_TRACK_LOOP_END || cc === CC_111_LOOP_END;
 }
 
 function isLoopEvent(event) {
@@ -52,7 +52,7 @@ MIDIFile.prototype.findLoopRange = function (tracks) {
       if (event.type === EVENT_MIDI && event.subtype === EVENT_MIDI_CONTROLLER) {
         if (isLoopStartCC(event.param1)) {
           starts.push(tick);
-        } else if (event.param1 === CC_103_N64_LOOP_END) {
+        } else if (event.param1 === CC_103_TRACK_LOOP_END) {
           ends103.push(tick);
         } else if (event.param1 === CC_111_LOOP_END) {
           ends111.push(tick);

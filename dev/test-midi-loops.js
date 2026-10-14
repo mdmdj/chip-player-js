@@ -52,7 +52,7 @@ function stubSynth(silent = true) {
     log: [],
     noteOn(c, p, v) { this.log.push(['on', c, p]); },
     noteOff(c, p) { this.log.push(['off', c, p]); },
-    pitchBend() {}, controlChange() {}, programChange() {}, panic() {}, panicChannel() {},
+    pitchBend() {}, controlChange(c, cc, v) { this.log.push(['cc', c, cc, v]); }, programChange() {}, panic() {}, panicChannel() {},
     render() {},
     reset() {},
     getValue() { return silent ? 0 : 1; },
@@ -193,6 +193,24 @@ catalogCheck(DESCENT, 'Descent loads a loop and wraps too', () => {
   p.processPlaySynth(0, 2048);
   assert.strictEqual(p.position, p.loop.jumpIndex);
   assert.ok(!p.paused);
+});
+
+catalogCheck(DESCENT, 'a loop wrap releases the sustain pedal', () => {
+  // A note whose NOTE_OFF runs under the pedal is no longer tracked as ringing,
+  // so the wrap must release the pedal (CC 64 = 0) or it keeps sounding into
+  // later passes when the release falls outside the repeated region.
+  const mf = loadMidi(DESCENT);
+  const synth = stubSynth(true);
+  const p = makePlayer(synth);
+  p.load(mf, false);
+  p.play(() => {});
+  p.setLooping(true);
+  p.setPosition(p.getDuration() - 30);
+  synth.log.length = 0;
+  p.processPlaySynth(0, 2048);
+  assert.strictEqual(p.position, p.loop.jumpIndex, 'wrapped');
+  assert.ok(synth.log.some(([kind, , cc, v]) => kind === 'cc' && cc === 64 && v === 0),
+    'expected a sustain-off at the wrap: ' + JSON.stringify(synth.log.slice(0, 10)));
 });
 
 catalogCheck(DESCENT, 'setPosition still restores program state (seek regression)', () => {

@@ -113,6 +113,10 @@ export default class VGMPlayer extends Player {
     this.setTempo(persistedSettings.tempo || 1);
     this.fadeTailStartMs = null;
     this.durationExtended = false;
+    // Sync the engine's indefinite flag here, where the loop count is still 0
+    // (so it cannot latch a fade), in case a mid-play toggle was masked by
+    // Repeat One and skipped the native update.
+    this.core._lvgm_set_indefinite_playback(this.vgmCtx, !!this.params.indefinitePlayback);
     this.applyLoopCount(false);
     this.resume();
     this.emit('playerStateUpdate', {

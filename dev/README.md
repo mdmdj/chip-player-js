@@ -122,6 +122,16 @@ node scripts/build-music.js --filter <subdir>
 `game-music-emu/test.nsf` is a convenient multi-track NSF and is copied in
 automatically for a starter fixture.
 
+`scripts/test-seo.js` (upstream's SEO engine test) asserts against production
+directory paths, so it needs rows for 14 directories the dev catalog does not
+otherwise contain. Fetch them with a delay between each request, then index:
+
+```sh
+node dev/fetch-seo-fixtures.mjs   # 574 files under catalog/; re-runnable/idempotent
+node scripts/build-music.js -n
+npm run test:seo
+```
+
 ## Real audio (optional)
 
 By default the dev app uses a silent stub `chip-core.js`. To build a real one

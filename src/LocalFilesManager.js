@@ -46,14 +46,8 @@ export default class LocalFilesManager {
           };
         });
 
-      // Sort by mtime ascending, then by path ascending
-      filesInfo.sort((a, b) => {
-        if (a.mtime !== b.mtime) {
-          return a.mtime - b.mtime;
-        } else {
-          return a.path.localeCompare(b.path);
-        }
-      });
+      // Sort by path, so the Local Files view is a stable, predictable listing.
+      filesInfo.sort((a, b) => a.path.localeCompare(b.path));
 
       return filesInfo;
     }

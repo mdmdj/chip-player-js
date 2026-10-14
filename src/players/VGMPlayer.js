@@ -109,6 +109,10 @@ export default class VGMPlayer extends Player {
     this.setTempo(persistedSettings.tempo || 1);
     this.fadeTailStartMs = null;
     this.durationExtended = false;
+    // Sync the engine's indefinite flag here, where the loop count is still 0
+    // (so it cannot latch a fade), in case a mid-play toggle was masked by
+    // Repeat One and skipped the native update.
+    this.core._lvgm_set_indefinite_playback(this.vgmCtx, !!this.params.indefinitePlayback);
     this.applyLoopCount(false);
     this.resume();
     this.emit('playerStateUpdate', {
@@ -361,7 +365,12 @@ export default class VGMPlayer extends Player {
         this.params[id] = value;
         // Capture before the loop count changes (same as setLooping).
         this.syncFadeTailCapture(value || this.looping);
-        if (this.vgmCtx) this.core._lvgm_set_indefinite_playback(this.vgmCtx, value);
+        // While Repeat One owns the loop count, sync the engine's indefinite
+        // flag at load instead (loadData). Updating it here would make libvgm
+        // start a fade that a later SetLoopCount(0) cannot cancel, so the song
+        // would fade even though Repeat One is still on.
+        if (this.vgmCtx && !this.looping)
+          this.core._lvgm_set_indefinite_playback(this.vgmCtx, value);
         // Repeat-one owns the loop count while it is active.
         this.applyLoopCount(wasLooping);
         break;

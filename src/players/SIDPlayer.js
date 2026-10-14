@@ -13,6 +13,10 @@ const fileExtensions = [
 ];
 
 const DEFAULT_SONG_LENGTH_MS = 2.5 * 60 * 1000;
+// The /hvsc request supplies lengths and titles and is optional; cap the wait
+// so a stalled request cannot leave the tune silent. Defaults are already in
+// place and late metadata still applies (see getSidMetadata).
+const METADATA_TIMEOUT_MS = 2500;
 
 // Convert song length to milliseconds. Each song length is of format:
 // mm:ss[.SSS]
@@ -126,11 +130,15 @@ export default class SIDPlayer extends Player {
     this.metadata = { title: pathe.basename(filepath) };
 
     // Resolve HVSC lengths/names before the first state emit, so duration
-    // and titles arrive together (no default-then-real flicker). Audio
-    // starts right after, delayed only by this fetch.
+    // and titles arrive together (no default-then-real flicker). Audio starts
+    // right after, delayed only by this fetch, capped so a stalled request
+    // cannot hold playback silent.
     const ptr = this.core._sid_get_song_md5();
     const md5 = this.core.UTF8ToString(ptr);
-    await this.getSidMetadata(md5, generation);
+    await Promise.race([
+      this.getSidMetadata(md5, generation),
+      new Promise(resolve => setTimeout(resolve, METADATA_TIMEOUT_MS)),
+    ]);
     // A newer load took over while we fetched; it owns the core and the state
     // emit now, so stop here rather than resuming this song over the top of it.
     if (generation !== this.loadGeneration) return;

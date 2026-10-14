@@ -535,6 +535,13 @@ MIDIPlayer.prototype.loopJump = function () {
       this.send([(MIDIEvents.EVENT_MIDI_NOTE_OFF << 4) + (key >> 7), key & 0x7f, 0],
         this.lastSendTimestamp);
     }
+    // Release pedal-held notes before restoring the next pass's controller
+    // state: a note whose NOTE_OFF already ran is no longer in `ringing`, but
+    // keeps sounding while sustain is on, and the restore would leave it on.
+    for (let ch = 0; ch < 16; ch++) {
+      this.send([(MIDIEvents.EVENT_MIDI_CONTROLLER << 4) + ch, CC_SUSTAIN_PEDAL, 0],
+        this.lastSendTimestamp);
+    }
     for (const event of eventList) {
       let message = null;
       if (event.subtype === MIDIEvents.EVENT_MIDI_PROGRAM_CHANGE) {
@@ -550,7 +557,11 @@ MIDIPlayer.prototype.loopJump = function () {
     for (const key of ringing) {
       if (this.synth) this.synth.noteOff(key >> 7, key & 0x7f);
     }
-    if (this.synth) this.setPositionSynth(eventList);
+    if (this.synth) {
+      // Same release on the synth, then restore the second pass's state.
+      for (let ch = 0; ch < 16; ch++) this.synth.controlChange(ch, CC_SUSTAIN_PEDAL, 0);
+      this.setPositionSynth(eventList);
+    }
   }
   // The clock can be up to a processing block past the band end when the wrap
   // is detected (the synth renders whole buffers; Web MIDI is called on a

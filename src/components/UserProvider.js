@@ -65,6 +65,8 @@ const UserProvider = ({ children }) => {
     const firebaseApp = firebaseInitializeApp(firebaseConfig);
     const auth = getAuth(firebaseApp);
     onAuthStateChanged(auth, async user => {
+      // A user change invalidates any favorites refresh started for the old user.
+      favesRefreshToken.current++;
       setUser(user);
       console.log('Firebase auth state changed, user:', user);
       setLoadingUser(false);
@@ -93,8 +95,9 @@ const UserProvider = ({ children }) => {
     if (!user) return;
 
     try {
+      const token = ++favesRefreshToken.current;
       getWithAuth(user, `${API_BASE}/user/favorites`).then(favesRes => {
-        setFaves(favesRes.favorites);
+        if (token === favesRefreshToken.current) setFaves(favesRes.favorites);
       });
 
       getWithAuth(user, `${API_BASE}/user/settings`).then(settingsRes => {
@@ -122,6 +125,7 @@ const UserProvider = ({ children }) => {
     const auth = getAuth();
     try {
       await signOut(auth);
+      favesRefreshToken.current++;
       setUser(null);
       setFaves([]);
     } catch (error) {
@@ -131,6 +135,9 @@ const UserProvider = ({ children }) => {
 
   const handleToggleFavorite = async (path, subtune = 0, songId) => {
     if (user) {
+      // Invalidate any in-flight favorites refresh so an older response cannot
+      // drop this optimistic change; bumping at the refresh alone is too late.
+      favesRefreshToken.current++;
       const oldFaves = faves;
       const isFavorite = faves.find(fave => fave.path === path && (fave.subtune || 0) === subtune);
 

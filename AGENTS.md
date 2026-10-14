@@ -1108,8 +1108,11 @@ because `Sequencer` copies its context).
   is unavailable (plain-http remote hosts).
 - `getFavoritesStmt` decorates each item with `href`, `path`, `size`,
   `subtuneCount`, and `subtuneTitle` (looked up by `(music_id, subtune)`). The
-  Favorites list shows the label, or `Tune N` when unlabeled; toggling
-  re-fetches so optimistic entries get the same decoration.
+  Favorites list shows the label, or `Tune N` when unlabeled. `POST
+  /user/favorites/add` returns the decorated entry, so the client splices that
+  one in and never re-reads the whole list (a stale whole-list response could
+  drop a newer toggle); a server that returns only `{success}` falls back to a
+  guarded refetch.
 - **Testing favorites in the dev app:** the server auth bypass makes the API
   usable, but the client's own `user` state (Firebase) stays null. The dev
   webpack config sets `REACT_APP_DEV_USER`, which `UserProvider`'s single
@@ -1237,8 +1240,11 @@ checks no longer work. Compare a live context to a stored one with
   the hunks `promote.sh` can never deliver: P1 `__chipConfig.subtuneCount` in
   `server/index.js` (re-carried 2026-10-06 as an unconditional
   `subtuneCount: song.subtune_count || 1`, together with the whole `/shuffle`
-  rewrite; S4 `cache1Hour` stays restored to master), and P2
-  `engine->load(currentTune)` in `libsidplayfp-wrapper.cpp`'s `sid_set_subtune`.
+  rewrite; S4 `cache1Hour` stays restored to master), and P3 the decorated
+  `favorite` the `POST /user/favorites/add` handler returns (2026-10-14), so the
+  client needn't re-read the whole list. P2 (`sid_set_subtune`) is no longer
+  hand-carried — `libsidplayfp-wrapper.cpp` promotes with the rest (see "No
+  longer hand-carried" above).
   **P1 is why the feature branch used to be broken** — its client half
   (`App.js`) promotes, so without the server half every `?play=…&subtune=N`
   share link fell back to the containing directory. Both files are path-listed
@@ -1452,9 +1458,10 @@ checks no longer work. Compare a live context to a stored one with
   built-in loop (see "MDX (mdxmini)").
 - **Still broken / missing:** SID `seek()` to a non-zero position (fork WIP and
   tune-dependent: some tunes resume after a brief dip, others stay silent; a
-  seek before first render hangs; seek-to-0 works); N64 seek freezes ~5s while
-  timeslicing lands (pre-existing, unrelated to the feature). See "Audio engine
-  roadmap" for the ordered plan.
+  seek before first render hangs; seek-to-0 works); N64 seek freezes ~5s
+  (master's synchronous `seekMs` — a timesliced version was tried and reverted
+  as out of scope; parity with prod). See "Audio engine roadmap" for the ordered
+  plan.
 
 ## Remaining TODO / roadmap
 
@@ -1565,9 +1572,11 @@ checks no longer work. Compare a live context to a stored one with
      the `~DosBoxOPL3` abort is avoided by building Nuked instead (see
      "libADLMIDI" above). Isolation (step 3) would still shrink the blob and
      contain its OPL cores, but is no longer required to ship OPL3 MIDI.
-   - **(5) N64 seek freeze — done.** `N64Player.seekMs` now timeslices
-      `_n64_seek_ms` in idle callbacks like GMEPlayer (pre-existing bug,
-      unrelated to the feature; committed separately).
+   - **(5) N64 seek freeze — out of scope / reverted.** A timesliced
+      `N64Player.seekMs` (idle-callback chunks, like `GMEPlayer`) was tried but
+      dropped: it is unrelated to the sub-tunes feature and, being no faster than
+      master's blocking seek, was not worth the risk. N64 keeps master's
+      synchronous `seekMs` (a pre-existing freeze, parity with prod).
    - **(6) MDX loop region, native Repeat One, seek accuracy — done.**
       `mdxmini` records exact loop points and loops natively via
       `mdx_set_max_loop`; the fade end is now latched and `position_ms`

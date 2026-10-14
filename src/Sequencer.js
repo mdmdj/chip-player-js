@@ -270,6 +270,9 @@ export default class Sequencer extends EventEmitter {
       this.handlePlayerError(`Unable to play ${filepath} (${e.message}).`);
       return;
     }
-    player.getVoiceMask().fill(true);
+    // A superseded load can resolve without initialising a voice mask; never
+    // let that crash the load path (see SIDPlayer.loadData's generation guard).
+    const voiceMask = player.getVoiceMask();
+    if (voiceMask) voiceMask.fill(true);
   }
 }

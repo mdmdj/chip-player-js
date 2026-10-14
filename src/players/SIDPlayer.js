@@ -121,6 +121,10 @@ export default class SIDPlayer extends Player {
     const err = this.core._sid_load_data(dataPtr, data.byteLength);
     this.core._free(dataPtr);
     this.subtuneDurations = Array(this.getNumSubtunes()).fill(DEFAULT_SONG_LENGTH_MS);
+    // Set the mask synchronously, before the metadata await below: a superseded
+    // load returns early, and it must still leave `getVoiceMask()` an array or
+    // Sequencer.playSongBuffer crashes on `.fill(true)`.
+    this.mask = Array(18).fill(true);
     this.resetEndDetector();
 
     if (err !== 0) {
@@ -143,7 +147,6 @@ export default class SIDPlayer extends Player {
     // emit now, so stop here rather than resuming this song over the top of it.
     if (generation !== this.loadGeneration) return;
 
-    this.mask = Array(18).fill(true);
     this.core._sid_set_voice_mask(0);
     // Start on the requested sub-tune (each sub-tune is its own SongRef).
     this.playSubtune(subtune);

@@ -188,6 +188,34 @@ check('a seek past the loop still learns when the loop start was played', () => 
   assert.deepStrictEqual(p.getLoopBandMs(), { startMs: 16000, endMs: 200000 });
 });
 
+check('a snapped seek times the order it landed in', () => {
+  const { p } = makePlayer(200000);
+  let emits = 0;
+  p.on('playerStateUpdate', (s) => { if (!s.isStopped) emits++; });
+  // Ask for 100000 and have the engine put us at 96000 -- a 4s move, which is
+  // what libxmp's xmp_seek_time does when it snaps to an order boundary. That
+  // point is a real start, so unlike a mid-order landing it can be timed, and
+  // the band it yields is the boundary's.
+  p.seekMs(100000);
+  drive(p, p.core, orders([12, 13, 14, 15, 12, 13], 8000)
+    .map((f, i) => ({ ...f, time: 96000 + i * 8000 })));
+  assert.strictEqual(p.metadata.intro_length, 96000);
+  assert.strictEqual(p.metadata.loop_length, 104000);
+  assert.deepStrictEqual(p.getLoopBandMs(), { startMs: 96000, endMs: 200000 });
+  assert.strictEqual(emits, 1);
+});
+
+check('a landing within the read jitter is still not timed', () => {
+  const { p } = makePlayer(200000);
+  // 200ms off the request: a frame-accurate seek's jitter, not a reposition.
+  // Nothing here may become a loop start.
+  p.seekMs(100000);
+  drive(p, p.core, orders([12, 13, 14, 15, 12, 13], 8000)
+    .map((f, i) => ({ ...f, time: 100200 + i * 8000 })));
+  assert.strictEqual(p.metadata.intro_length, undefined);
+  assert.strictEqual(p.getLoopBandMs(), null);
+});
+
 check('a seek past the loop, then a pass through it, then a seek to the end learns', () => {
   const { p } = makePlayer(200000);
   let emits = 0;

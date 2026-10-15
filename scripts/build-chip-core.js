@@ -368,8 +368,6 @@ const chipModules = [
       '_mdx_set_max_loop',
       '_mdx_get_loop_start_ms',
       '_mdx_get_loop_length_ms',
-      '_mdx_get_section_loop_limit',
-      '_mdx_get_loops_per_section',
       '_mdx_get_tracks',
       '_mdx_get_current_notes',
       '_mdx_set_speed',

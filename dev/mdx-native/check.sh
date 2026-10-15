@@ -72,4 +72,33 @@ check_sections VAL5.MDX     6  "one section = 6 repeats"
 check_sections 27_CLEAR.MDX 8  "one section = 8 repeats"
 check_sections MTS2_32.MDX  16 "one section = 16 repeats"
 
+# mdx_get_length must report the length the engine actually plays under the same
+# finite limit. The length parse and playback gate the fade on the same quantity
+# (mdxmml_ym2151.c's loop_gate_value, joint sections), so the two must agree. The
+# length parse resolves loops_per_section *after* its pass, so for per > 1 it used
+# to gate on the raw per-track minimum -- a section's worth early -- and report a
+# figure short of the section end: MDXPlayer armed its end detector there and the
+# song stopped mid-fade. len is whole seconds, so allow 1 s (plus a tick) of
+# truncation; the pre-fix shortfall is whole sections (>> 1 s).
+check_length() { # file  limit  note
+  f="$catalog/$1"
+  if [ ! -f "$f" ]; then printf 'skip  %s (%s)\n' "$1" "$3"; return; fi
+  row=$(printf '%s\n' "$f" | ./region --length-check "$2")
+  len=$(printf '%s' "$row" | cut -f2)
+  ended=$(printf '%s' "$row" | cut -f3)
+  d=$(printf '%s' "$row" | cut -f4)
+  if [ "$d" -ge 0 ] && [ "$d" -lt 1100 ]; then
+    printf 'ok    %s limit=%s len=%s ended=%s delta=%s  %s\n' \
+      "$1" "$2" "$len" "$ended" "$d" "$3"
+  else
+    printf 'FAIL  %s limit=%s len=%s ended=%s delta=%s  %s\n' \
+      "$1" "$2" "$len" "$ended" "$d" "$3"
+    status=1
+  fi
+}
+
+check_length DES_80.MDX  2 "per=2: the length must reach the section-grid fade"
+check_length MTS2_32.MDX 2 "per=16: the shortfall was a whole section (16 repeats)"
+check_length G2MST6.MDX  2 "per=1 must not move"
+
 exit $status

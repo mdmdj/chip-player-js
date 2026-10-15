@@ -229,16 +229,12 @@ export default class MDXPlayer extends Player {
         const curLoop = this.getCurLoop();
         this._maxLoopCount = Math.max(DEFAULT_LOOP_COUNT, curLoop + 1);
         // Leaving always stands the base end detector down: the engine's own
-        // fade has to end the song. _durationMs comes from mdx_get_length's
-        // parse, which runs the fade gate before loops_per_section is resolved
-        // (the region is measured after that parse), so the gate there counts
-        // raw per-track loops while playback counts joint sections. With mixed
-        // periods one section is several per-track loops, so the reported length
-        // is short by whole sections and the detector would cut the audible
-        // fade; when the periods agree the gap is only the whole-second
-        // truncation. The engine's end is never before _durationMs, so the flag
-        // is unconditional: it stands the detector down without cutting the fade
-        // and without hanging, since the finite count still ends the song.
+        // fade has to end the song. _durationMs is the parse's length at the
+        // default two-pass count, measured on the same joint-section grid
+        // playback gates on, so a deep leave (curLoop >= 2) is already at or
+        // past it and the re-scheduled fade starts where the detector's gate
+        // would cut. The engine's finite count still ends the song, so standing
+        // the detector down cannot hang; a shallow leave is the same path.
         this.durationExtended = true;
       } else {
         // No measured loop region: finish the pass and fade.

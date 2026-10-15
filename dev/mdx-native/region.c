@@ -8,8 +8,16 @@
  * intro_ms / loop_ms are exactly what mdx_get_loop_start_ms and
  * mdx_get_loop_length_ms return -- the values MDXPlayer maps onto
  * metadata.intro_length / loop_length, i.e. the slider band. length_s is
- * mdx_get_length() in seconds -- the parse's length under the per-track fade
- * gate, which is short of the section end when per > 1.
+ * mdx_get_length() in seconds -- the parse's length under the same fade gate
+ * playback uses (the joint-section grid; see --length-check).
+ *
+ * With --length-check <limit> it prints the length claim directly:
+ *
+ *     <path>  <len_ms>  <ended_ms>  <delta_ms>
+ *
+ * len_ms is mdx_get_length() under that limit, and ended_ms is where the engine
+ * actually stops when rendered from the start under the same limit; the two
+ * must agree, and delta_ms is their gap.
  *
  * With --play <ms> it renders that much audio first and appends fields:
  *
@@ -47,6 +55,7 @@
 
 static int play_ms = 0;
 static int limit_arg = 0;
+static int len_check_limit = 0;
 
 /* One rendered block (mdx_calc_sample's 1024 samples): its position on the
  * engine clock and its RMS. The fade is a gain on every sample, so the RMS
@@ -119,6 +128,34 @@ static int engine_min_loops(t_mdxmini *d) {
   return min;
 }
 
+/* The length mdx_get_length() reports must be the length the engine plays under
+ * the same finite limit: both gate the fade on the quantity loop_gate_value
+ * returns. A joint section that is several repeats of the longest track (per >
+ * 1) used to be measured on the raw per-track minimum, which turns a section's
+ * worth early, so the parse reported a figure short of the section end and the
+ * app armed its end detector there and stopped the song mid-fade.
+ *
+ * Renders from the start with the limit so the engine's own clock says when it
+ * ends; len is truncated to whole seconds, so a small positive delta is
+ * expected -- the bug is a delta of whole sections. */
+static void length_check(const char *path, const char *dir, int limit) {
+  t_mdxmini d;
+  blk *b = NULL;
+  int n = 0, cap = 0;
+  memset(&d, 0, sizeof d);
+  if (mdx_open(&d, (char *)path, (char *)dir) != 0) {
+    printf("%s\tOPEN_FAIL\t0\t0\n", path);
+    return;
+  }
+  mdx_set_max_loop(&d, limit);
+  int len = mdx_get_length(&d) * 1000;
+  render(&d, &b, &n, &cap, len + 120000, limit);
+  int ended = d.mdx ? (int)(d.mdx->elapsed_time / 1000) : 0;
+  printf("%s\t%d\t%d\t%d\n", path, len, ended, ended - len);
+  free(b);
+  mdx_close(&d);
+}
+
 static void one(const char *path) {
   /* mdx_open wants a directory to look for the PDX samples in; they are
    * optional for the region (it comes from the MML data), so a miss is fine. */
@@ -126,6 +163,8 @@ static void one(const char *path) {
   strcpy(dir, path);
   char *slash = strrchr(dir, '/');
   if (slash) *slash = 0; else strcpy(dir, ".");
+
+  if (len_check_limit > 0) { length_check(path, dir, len_check_limit); return; }
 
   t_mdxmini d;
   memset(&d, 0, sizeof d);
@@ -143,11 +182,9 @@ static void one(const char *path) {
     /* The same call the player makes, so the track counters advance the way
      * they do in the app; the engine's own clock decides when to stop.
      *
-     * Loop forever first: a section-2 position is usually *past* the parsed
-     * length (the parse gates on per-track loops, so its figure is short of the
-     * section end when per > 1), and under Repeat One the player is in exactly
-     * that state -- with the default limit the engine would fade, end, and stop
-     * advancing the clock. */
+     * Loop forever first: under Repeat One the player is in exactly that state,
+     * and a default limit would let the engine fade, end, and stop advancing
+     * the clock before play_ms. */
     blk *fb = NULL;
     int fn = 0, fcap = 0;
 
@@ -194,6 +231,7 @@ int main(int argc, char **argv) {
   for (i = 1; i < argc; i++) {
     if (!strcmp(argv[i], "--play")) play_ms = atoi(argv[++i]);
     else if (!strcmp(argv[i], "--limit")) limit_arg = atoi(argv[++i]);
+    else if (!strcmp(argv[i], "--length-check")) len_check_limit = atoi(argv[++i]);
     else { fprintf(stderr, "region: unknown argument %s\n", argv[i]); return 2; }
   }
   while (fgets(path, sizeof path, stdin)) {

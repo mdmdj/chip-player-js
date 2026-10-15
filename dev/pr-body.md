@@ -1,12 +1,14 @@
 # First Class Sub-Tunes and More Powerful Looping
 
-A file that holds several songs (NSF/NSFE, SID, GBS, AY) becomes a **song folder**, and every sub-tune is an ordinary song: favoritable, searchable, shufflable, charted, shareable, and loopable. On top of that, **Repeat One** is implemented for every engine.
+A file that holds several songs (NSF/NSFE, SID, GBS, AY) becomes a **song folder**, and every sub-tune is an ordinary song. **Repeat One** is implemented for every engine.
 
-Sub-tunes: each is its own song (`{path, sub-tune}`), with its own favorites, share link, chart rank, shuffle slot, search hit, and SEO page; local files get the same treatment, read from their own header. Repeat One: native region looping where the engine exposes one (VGM/VGZ, MDX, MIDI, MOD/XM/IT/S3M), a tail detector where it doesn't (NSFE, SID, N64), a drawn loop band, and no jump on toggle.
+**Sub-tunes** are each their own song (`{path, sub-tune}`), with its own favorites, share link, chart rank, shuffle slot, search hit, and SEO page; local files get the same treatment, read from their own header.
+
+**Repeat One** is improved: native region looping where the engine exposes one (VGM/VGZ, MDX, MIDI, MOD/XM/IT/S3M), an ending detector where it doesn't (NSFE, SID, N64), a drawn loop band, and no jumps when toggling.
 
 **Full write-up with video for every behaviour: https://mdm.dj/dev/chip-player-js/subtunes-as-first-class/**
 
-## It's a big diff — suggested review order
+## Suggested Review Phases
 
 1. **Catalog:** `scripts/build-music.js`, `scripts/metadata-parsers.js`, `scripts/subtune-headers.js`
 2. **API:** `server/database.js`, `server/index.js`, `server/schemas.js`

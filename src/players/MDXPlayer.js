@@ -218,50 +218,33 @@ export default class MDXPlayer extends Player {
     // the song but leaves metadata set -- so gate on `songOpen`, set by
     // mdx_open and cleared by stop().
     if (!this.mdxCtx || !this.songOpen || typeof this.core._mdx_set_max_loop !== 'function') return;
-    // The two units agree by default; only a core that reports per>1 sections
-    // overrides the engine's value below. Deriving it here keeps the no-op and
-    // pre-load calls (which never enter a branch) sending the joint count, as
-    // they always did, instead of an unset field.
-    this._engineMaxLoop = this._maxLoopCount;
     const hasLoop = this.metadata && this.metadata.loop_length > 0;
     if (this.looping) {
       this._maxLoopCount = 0;
-      this._engineMaxLoop = 0;
     } else if (wasLooping) {
       // Only re-derive when actually leaving a looping state. A false-to-false
       // toggle (Repeat Off <-> All) must not reset a count already extended for
       // a deep pass, or the engine fades the pass short.
       if (hasLoop) {
-        // Two units, two fields. `_maxLoopCount` stays the *joint-section* count
-        // the slider band and the reported duration are drawn from; the engine's
-        // own limit counts each track's repeat, so with tracks of different
-        // periods it is a different number (see the getters). Keeping them apart
-        // is what stops _fadeStartMs() from placing the fade at the wrong time,
-        // and what lets the two-pass floor stay expressed in sections.
         const curLoop = this.getCurLoop();
         this._maxLoopCount = Math.max(DEFAULT_LOOP_COUNT, curLoop + 1);
-        const sectionLimit = typeof this.core._mdx_get_section_loop_limit === 'function'
-          ? this.core._mdx_get_section_loop_limit(this.mdxCtx) : 0;
-        const perSection = typeof this.core._mdx_get_loops_per_section === 'function'
-          ? this.core._mdx_get_loops_per_section(this.mdxCtx) : 0;
-        this._engineMaxLoop = (sectionLimit > 0 && perSection > 0)
-          ? Math.max(DEFAULT_LOOP_COUNT * perSection, sectionLimit)
-          : this._maxLoopCount;
         // Leaving after passing the default fade: the position is already past
         // the reported duration, so the base end detector must stand down and
         // let the engine's fade end the song (the display runs its tail from
         // here). Deliberately *not* widened to "the engine's limit reaches the
         // duration": that fires in the first pass for every song, including the
         // per=1 files the suite pins, so it is a behaviour change rather than a
-        // consequence of the unit split.
+        // consequence of the count.
         if (curLoop >= DEFAULT_LOOP_COUNT) this.durationExtended = true;
       } else {
         // No measured loop region: finish the pass and fade.
         this._maxLoopCount = DEFAULT_LOOP_COUNT;
-        this._engineMaxLoop = DEFAULT_LOOP_COUNT;
       }
     }
-    this.core._mdx_set_max_loop(this.mdxCtx, this._engineMaxLoop);
+    // One unit: the engine counts joint sections itself (mdxmml_ym2151.c's
+    // loop_gate_value projects each track's repeats onto the section the band
+    // is drawn from), so _maxLoopCount is what it is handed -- no conversion.
+    this.core._mdx_set_max_loop(this.mdxCtx, this._maxLoopCount);
   }
 
   // Which pass of the built-in loop we are in (0 during the intro/first pass).

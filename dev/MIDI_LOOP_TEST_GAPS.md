@@ -113,8 +113,27 @@ This is deliberate and conventional:
   MIDI spec calls invalid (Ardour, "Handling Overlapping Notes").
 
 A file whose loop marker sits mid-note is an authoring error — the loop should
-be placed where voices resolve — and cutting is what we do. Not planned to
-change; there is no note-tracking to add.
+be placed where voices resolve — and cutting is what we do.
+
+**Corrected 2026-10-15 (greptile's `midi-helpers.js:176`).** This section used to
+end "there is no note-tracking to add", reasoning that a release "looks the same
+to that test" as padding. That holds only when the track has no note-on past the
+loop end: the collapse is gated on `!postHasNotes`, so with a composed ending the
+release keeps its deferred position and the note is *not* cut — and the replay
+then sends a second NoteOn for a still-sounding note, the very thing this
+decision calls invalid. Measured on a synthetic shape (release one tick past the
+end, plus a composed ending): `on@0 off@500 on@2000 on@4000 off@6500` — the note
+running underneath its own re-trigger. `EventIterator` now tracks the notes
+ringing at the loop end (`seamReleases`) and releases them at every *replay*
+boundary, so the expanded two-pass list cuts the way the Repeat One wrap
+(`loopJump`) already does.
+
+The cut is still **not** applied at the loop → *outro* transition. There the
+release is the composer's own and the note rings into the ending as written —
+`off@6500` in the same measurement — which is what "a composed ending keeps its
+exact timing" means. Pinned by `dev/test-midi-loops.js` ("a note crossing the
+seam is cut at the replay, composed ending or not"), which fails with the cut
+disabled.
 
 ## Decision: the wrap restores the state at the jump target, not at the loop entry (2026-10-15)
 

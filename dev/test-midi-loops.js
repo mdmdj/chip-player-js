@@ -707,4 +707,52 @@ check('multi-track: a track replayed after an in-loop tempo change keeps that te
     `the replayed note keeps its length: pass1 ${gap1.toFixed(1)}ms vs pass2 ${gap2.toFixed(1)}ms`);
 });
 
+// A note that starts inside the loop and is released past its end crosses the
+// seam. The noteless path cuts it when it collapses the outro to the boundary;
+// a composed ending keeps its own timing, so the release is *not* moved -- and
+// without an explicit cut the replay re-triggers the same pitch while the first
+// note is still sounding, which the MIDI spec calls invalid (a second NoteOn for
+// a sounding note). EventIterator releases the crossing notes at every replay
+// boundary (greptile, midi-helpers.js:176, 2026-10-15). The final pass is not
+// cut: it plays out into the ending with the composer's own release.
+function noteCrossingTheSeam(composedEnding) {
+  const list = [
+    tempo(),
+    noteOnAt(0), noteOffAt(TPQ),          // intro note, ticks 0..120
+    ccAt(TPQ * 3, 110),                   // loop start at tick 480
+    noteOnAt(0),                          // the crossing note starts here
+    ccAt(TPQ * 4, 111),                   // loop end at tick 960
+    noteOffAt(TPQ),                       // its release: tick 1080, past the end
+  ];
+  if (composedEnding) list.push(noteOnAt(TPQ * 3), noteOffAt(TPQ));
+  return parseBytes(buildMidi(list));
+}
+
+check('a note crossing the seam is cut at the replay, composed ending or not', () => {
+  const NOTE_OFF = MIDIEvents.EVENT_MIDI_NOTE_OFF;
+  for (const composedEnding of [false, true]) {
+    const mf = noteCrossingTheSeam(composedEnding);
+    const { events, loopEndMs } = mf.getPlaybackEvents(false);
+    let sounding = false;
+    let overlaps = 0;
+    let releasesAtBoundary = 0;
+    for (const e of events) {
+      if (e.type !== EVENT_MIDI || e.param1 !== 60) continue;
+      const isOn = e.subtype === EVENT_MIDI_NOTE_ON && e.param2 > 0;
+      const isOff = e.subtype === NOTE_OFF || (e.subtype === EVENT_MIDI_NOTE_ON && e.param2 === 0);
+      if (isOn) {
+        if (sounding) overlaps++;
+        sounding = true;
+      } else if (isOff) {
+        sounding = false;
+        if (Math.abs(e.playTime - loopEndMs) < 2) releasesAtBoundary++;
+      }
+    }
+    assert.strictEqual(overlaps, 0,
+      `composedEnding=${composedEnding}: re-triggered while still sounding`);
+    assert.strictEqual(releasesAtBoundary, 1,
+      `composedEnding=${composedEnding}: expected one release at the boundary (${Math.round(loopEndMs)}ms)`);
+  }
+});
+
 console.log(`\n${passed} checks passed${process.exitCode ? ' (WITH FAILURES)' : ''}.`);

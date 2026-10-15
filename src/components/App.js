@@ -876,6 +876,23 @@ class App extends React.Component {
       this.sequencer.context = refs;
       let idx = -1;
       if (currRef) idx = refs.findIndex(r => songRefKey(r) === songRefKey(currRef));
+      if (currRef && idx < 0) {
+        // The playing song is gone from the rebuilt list (its file was deleted).
+        // Move to the survivor now at that position -- the clamp lands on the row
+        // that followed it -- or eject when nothing survives. This lives in the
+        // rebuild, not in handleLocalFileDelete, so that whichever update wins
+        // handles it; a superseded caller cannot strand the deleted song playing.
+        if (refs.length > 0) {
+          this.sequencer.currIdx = Math.max(0, Math.min(this.sequencer.currIdx, refs.length - 1));
+          if (this.sequencer.shuffle) this.sequencer.setShuffle(this.sequencer.shuffle);
+          this.sequencer.playCurrentSong();
+        } else {
+          // Empty context: advanceSong stops the player and ejects, rather than
+          // leaving the deleted buffer playing -- forever, under Repeat One.
+          this.sequencer.nextSong();
+        }
+        return;
+      }
       // If the current song survived, re-anchor on it; otherwise clamp. With
       // Shuffle on, currIdx indexes shuffleOrder, so rebuilding it for the new
       // list is required or advancing can pick a stale/out-of-range entry.
@@ -949,49 +966,14 @@ class App extends React.Component {
     if (!Array.isArray(filePaths)) filePaths = [filePaths];
     // One file can span several sub-tune rows; delete each file once.
     filePaths = [...new Set(filePaths)];
-    const onLocal = songRefListsEqual(this.sequencer?.getCurrContext(), this.playContexts['local']);
-    // Capture the now-playing song and, from the pre-delete order, the next song
-    // that will survive. Track the surviving SongRef, not a slot index: removed
-    // rows shift the rebuilt list, so a clamped old index lands on a later song.
-    const playing = onLocal ? this.sequencer.getCurrSongRef() : null;
-    const deletedPlaying = !!(playing && filePaths.includes(playing.path));
-    const oldRefs = onLocal ? (this.playContexts['local'] || []) : [];
-    const oldIdx = onLocal ? this.sequencer.getCurrIdx() : 0;
-    const survives = (r) => r && !filePaths.includes(r.path);
-    let successor = null;
-    if (deletedPlaying) {
-      successor = oldRefs.find((r, i) => i > oldIdx && survives(r))
-        || [...oldRefs].reverse().find((r) => survives(r) && songRefKey(r) !== songRefKey(playing))
-        || null;
-    }
-
     filePaths.forEach(filePath => this.localFilesManager.delete(filePath));
-    // updateLocalFiles() parses headers asynchronously; await the rebuild before
-    // advancing, or nextSong() runs against the old context and steps into
-    // another tune of the file just deleted. A superseded rebuild returns false:
-    // a newer updateLocalFiles owns the context and runs its own continuation, so
-    // this one must not act on the stale list.
-    const rebuilt = await this.updateLocalFiles();
-    if (!rebuilt) return;
-
-    if (deletedPlaying) {
-      // The header parse above is async, so only act if playback is still this
-      // deleted local song -- the user may have selected another song meanwhile.
-      const current = this.sequencer.getCurrSongRef();
-      if (!current || songRefKey(current) !== songRefKey(playing)) return;
-      const refs = this.playContexts['local'] || [];
-      const next = successor ? refs.findIndex(r => songRefKey(r) === songRefKey(successor)) : -1;
-      if (next < 0) {
-        // Nothing survives: eject (advanceSong off the empty context stops the
-        // player), rather than leaving the deleted buffer playing -- forever,
-        // under Repeat One.
-        this.sequencer.nextSong();
-        return;
-      }
-      this.sequencer.currIdx = next;
-      if (this.sequencer.shuffle) this.sequencer.setShuffle(this.sequencer.shuffle);
-      this.sequencer.playCurrentSong();
-    }
+    // applyLocalFiles() rebuilds the context and, if the playing song was among
+    // the deleted files, moves playback to the surviving song or ejects -- see
+    // applyLocalFiles. Owning the removal in the rebuild, rather than in a
+    // continuation here, is what makes a superseding update safe: whoever
+    // rebuilds last handles it, and a cancelled continuation cannot leave the
+    // deleted song playing.
+    await this.updateLocalFiles();
   }
 
   handleCopyLink = (url) => {

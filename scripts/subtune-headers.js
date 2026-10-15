@@ -250,7 +250,10 @@ function readAyStringAt(buf, fieldPos) {
   const offset = i16be(buf, fieldPos);
   if (!offset) return null;
   const start = fieldPos + offset;
-  if (start >= buf.length) return null;
+  // The offset is signed (backward pointers are legal), so a value pointing
+  // before byte zero is invalid: subarray() would read it relative to the end
+  // and hand back unrelated trailing bytes as the string.
+  if (start < 0 || start >= buf.length) return null;
   let end = start;
   while (end < buf.length && buf[end] !== 0) end++;
   return decodeBuffer(buf.subarray(start, end));

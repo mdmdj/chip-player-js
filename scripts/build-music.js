@@ -81,6 +81,15 @@ db.pragma('journal_mode = WAL');
 
 process.on('SIGINT', () => {
   console.log(chalk.yellow('\n\nScript interrupted! Closing database...'));
+  // Leave the search index consistent with what was committed before the
+  // interrupt, same as the finally does for an aborted run.
+  if (!options.dryrun) {
+    try {
+      rebuildSongs();
+    } catch (err) {
+      // ignore
+    }
+  }
   try {
     db.close();
   } catch (err) {
@@ -101,6 +110,8 @@ try {
 if (options.resetDb) {
   if (options.verbose) console.log(chalk.yellow('Resetting database tables...'));
   db.exec(`
+    DROP TABLE IF EXISTS song_fts;
+    DROP TABLE IF EXISTS song;
     DROP TABLE IF EXISTS subtune;
     DROP TABLE IF EXISTS subtune_fts;
     DROP TABLE IF EXISTS music;
@@ -115,6 +126,19 @@ if (options.resetDb) {
 
 // 1. Create Tables
 db.exec(`
+  -- The song index supersedes the per-table FTS pair (music_fts/subtune_fts):
+  -- /search reads one index over songs, so a file and its sub-tunes rank in one
+  -- list. Drop the old tables and their triggers so an existing catalog migrates
+  -- in place.
+  DROP TRIGGER IF EXISTS music_ai;
+  DROP TRIGGER IF EXISTS music_ad;
+  DROP TRIGGER IF EXISTS music_au;
+  DROP TRIGGER IF EXISTS subtune_ai;
+  DROP TRIGGER IF EXISTS subtune_ad;
+  DROP TRIGGER IF EXISTS subtune_au;
+  DROP TABLE IF EXISTS music_fts;
+  DROP TABLE IF EXISTS subtune_fts;
+
   CREATE TABLE IF NOT EXISTS images (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     path TEXT UNIQUE
@@ -184,50 +208,32 @@ db.exec(`
     FOREIGN KEY(music_id) REFERENCES music(id) ON DELETE CASCADE
   );
 
-  -- FTS Virtual Table
-  CREATE VIRTUAL TABLE IF NOT EXISTS music_fts USING fts5(
-    title, artist, game, system, filename, path, 
-    content='music', content_rowid='id', 
-    prefix='1 2 3'
+  -- Every playable song, one row each: a single-song file is one row, a "song
+  -- folder" is one row per sub-tune. Rebuilt from music + subtune at the end of
+  -- a run (rebuildSongs) and the single index /search reads, so a file and its
+  -- sub-tunes are ranked in one list.
+  CREATE TABLE IF NOT EXISTS song (
+    id INTEGER PRIMARY KEY,      -- the FTS rowid
+    music_id INTEGER NOT NULL,
+    subtune INTEGER NOT NULL,    -- 0-based, matches the player's subtune index
+    path TEXT NOT NULL,
+    song_id TEXT,
+    title TEXT,                  -- the sub-tune's own label (NULL when unlabelled)
+    file_title TEXT,             -- the parent file's title, so its name matches every song it holds
+    artist TEXT,
+    game TEXT,
+    system TEXT,
+    filename TEXT,
+    subtune_count INTEGER NOT NULL DEFAULT 1,  -- the file's count: >1 = a song folder
+    UNIQUE(music_id, subtune),
+    FOREIGN KEY(music_id) REFERENCES music(id) ON DELETE CASCADE
   );
 
-  -- Sub-tune titles are searchable just like file titles.
-  CREATE VIRTUAL TABLE IF NOT EXISTS subtune_fts USING fts5(
-    title, 
-    content='subtune', content_rowid='id', 
+  CREATE VIRTUAL TABLE IF NOT EXISTS song_fts USING fts5(
+    title, file_title, artist, game, system, filename, path,
+    content='song', content_rowid='id',
     prefix='1 2 3'
   );
-  
-  -- Triggers
-  CREATE TRIGGER IF NOT EXISTS music_ai AFTER INSERT ON music BEGIN
-    INSERT INTO music_fts(rowid, title, artist, game, system, filename, path) 
-    VALUES (new.id, new.title, new.artist, new.game, new.system, new.filename, new.path);
-  END;
-
-  CREATE TRIGGER IF NOT EXISTS music_ad AFTER DELETE ON music BEGIN
-    INSERT INTO music_fts(music_fts, rowid, title, artist, game, system, filename, path) 
-    VALUES ('delete', old.id, old.title, old.artist, old.game, old.system, old.filename, old.path);
-  END;
-
-  CREATE TRIGGER IF NOT EXISTS music_au AFTER UPDATE ON music BEGIN
-    INSERT INTO music_fts(music_fts, rowid, title, artist, game, system, filename, path) 
-    VALUES ('delete', old.id, old.title, old.artist, old.game, old.system, old.filename, old.path);
-    INSERT INTO music_fts(rowid, title, artist, game, system, filename, path) 
-    VALUES (new.id, new.title, new.artist, new.game, new.system, new.filename, new.path);
-  END;
-
-  CREATE TRIGGER IF NOT EXISTS subtune_ai AFTER INSERT ON subtune BEGIN
-    INSERT INTO subtune_fts(rowid, title) VALUES (new.id, new.title);
-  END;
-
-  CREATE TRIGGER IF NOT EXISTS subtune_ad AFTER DELETE ON subtune BEGIN
-    INSERT INTO subtune_fts(subtune_fts, rowid, title) VALUES ('delete', old.id, old.title);
-  END;
-
-  CREATE TRIGGER IF NOT EXISTS subtune_au AFTER UPDATE ON subtune BEGIN
-    INSERT INTO subtune_fts(subtune_fts, rowid, title) VALUES ('delete', old.id, old.title);
-    INSERT INTO subtune_fts(rowid, title) VALUES (new.id, new.title);
-  END;
 
   CREATE INDEX IF NOT EXISTS idx_directories_parent ON directories(parent_id);
   CREATE INDEX IF NOT EXISTS idx_music_directory ON music(directory_id);
@@ -235,7 +241,27 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_music_songid ON music(song_id);
   CREATE INDEX IF NOT EXISTS idx_subtune_music ON subtune(music_id);
   CREATE INDEX IF NOT EXISTS idx_directories_sort ON directories(sort_order);
+  CREATE INDEX IF NOT EXISTS idx_song_music ON song(music_id);
 `);
+
+// The song index is rebuilt from music + subtune on every run rather than kept
+// incrementally: it is the only thing /search reads, and a build is the only
+// time the set of songs changes. `song.title` is the sub-tune's own label (NULL
+// for a single-song file or an unlabelled tune, so the client falls back to
+// `Tune N`); `file_title` carries the parent's name so a file-name query matches
+// every song the file holds -- a song folder's name finds its songs.
+function rebuildSongs() {
+  db.exec(`
+    DELETE FROM song;
+    INSERT INTO song (music_id, subtune, path, song_id, title, file_title, artist, game, system, filename, subtune_count)
+      SELECT id, 0, path, song_id, NULL, title, artist, game, system, filename, COALESCE(subtune_count, 1)
+        FROM music WHERE subtune_count <= 1;
+    INSERT INTO song (music_id, subtune, path, song_id, title, file_title, artist, game, system, filename, subtune_count)
+      SELECT m.id, st.subtune, m.path, m.song_id, NULLIF(st.title, ''), m.title, m.artist, m.game, m.system, m.filename, COALESCE(m.subtune_count, 1)
+        FROM subtune st JOIN music m ON m.id = st.music_id;
+    INSERT INTO song_fts(song_fts) VALUES('rebuild');
+  `);
+}
 
 // Additive migrations for databases created before these columns existed.
 // Returns true when the column was just added.
@@ -251,6 +277,7 @@ const addedSubtuneCount = ensureColumn('music', 'subtune_count', 'INTEGER DEFAUL
 ensureColumn('music', 'release_date', 'TEXT');
 ensureColumn('music', 'contributor', 'TEXT');
 ensureColumn('subtune', 'date', 'TEXT');
+ensureColumn('song', 'subtune_count', 'INTEGER DEFAULT 1');
 
 // A catalog created before sub-tunes existed has no sub-tune rows, so unchanged
 // multi-song files get skipped and never gain them. "Does this catalog still
@@ -956,6 +983,18 @@ processDirectory(CATALOG_DIR, '')
     console.error(chalk.red('Error during scan:'), err);
   })
   .finally(() => {
+    // Rebuild the search index last, here rather than in the happy path: a run
+    // that aborts part way still leaves `song`/`song_fts` consistent with
+    // music + subtune, the way the triggers this replaced kept the index in sync
+    // at every write. A dry run only writes to a throwaway copy, and a rebuild
+    // failure must not mask whatever error brought us here.
+    if (!options.dryrun) {
+      try {
+        rebuildSongs();
+      } catch (e) {
+        console.error(chalk.red('Could not rebuild the song index:'), e.message);
+      }
+    }
     db.pragma('wal_checkpoint(TRUNCATE)'); // Forces all WAL data into the .db file
     db.close();
     if (dryRunDbPath) {

@@ -387,29 +387,56 @@ int mdx_parse_mml_ym2151_async_get_length(songdata *data)
   
   sec = (int)self->mdx->elapsed_time / 1000000;
 
-  /* Resolve the loop region from the tracks that loop. The first boundary is
-     the last track to complete its 1st loop; the second is the last to complete
-     its 2nd. Require every looping track to have reached the 2nd loop, so a
-     partial measurement cannot report a short region -- a wrong band is worse
-     than none, and the getters then report no region. */
+  /* Resolve the loop region from the tracks that loop. The region is the mix's
+     repeat: the first boundary is the last track to complete its 1st loop, and
+     the length L is the joint period -- the smallest multiple of the longest
+     track period that every looping track also hits. Tracks that loop together
+     differ by a tick or two, so a small tolerance absorbs the measurement slack
+     instead of demanding equality. If no small common multiple exists the
+     tracks are incommensurate: report no region (the getters return 0 and the
+     app shows the blind-loop UI) rather than fold the head into a made-up
+     boundary -- a wrong band is worse than none. Every looping track must also
+     have reached its 2nd loop, or its period is not measurable. */
   {
-    int64_t first = 0, second = 0;
-    int loopers = 0, all_second = 1;
+    int64_t first = 0, pmax = 0, tol = 0, L = 0;
+    int loopers = 0, all_second = 1, periods = 0, k = 0;
     for ( i = 0; i < self->mdx->tracks; i++ ) {
+      int64_t p;
       if ( self->mdx->track[i].infinite_loop_times <= 0 )
         continue;
       loopers++;
       if ( self->track_first_us[i] > first )
         first = self->track_first_us[i];
-      if ( self->track_second_us[i] == 0 )
+      if ( self->track_second_us[i] == 0 ) {
         all_second = 0;
-      else if ( self->track_second_us[i] > second )
-        second = self->track_second_us[i];
+        continue;
+      }
+      p = self->track_second_us[i] - self->track_first_us[i];
+      if ( periods == 0 || p > pmax ) pmax = p;
+      periods++;
+    }
+    tol = pmax / 50;            /* ~2% of the longest period */
+    if ( tol < 200000 ) tol = 200000;  /* 200 ms floor */
+    if ( periods > 0 ) {
+      for ( k = 1; k <= 16 && L == 0; k++ ) {
+        int64_t cand = pmax * k, ok = 1;
+        for ( i = 0; i < self->mdx->tracks; i++ ) {
+          int64_t p, r, d;
+          if ( self->mdx->track[i].infinite_loop_times <= 0 ) continue;
+          if ( self->track_second_us[i] == 0 ) continue;
+          p = self->track_second_us[i] - self->track_first_us[i];
+          if ( p <= 0 ) { ok = 0; break; }
+          r = ( cand + p / 2 ) / p;
+          d = cand - r * p; if ( d < 0 ) d = -d;
+          if ( d > tol ) { ok = 0; break; }
+        }
+        if ( ok ) L = cand;
+      }
     }
     self->loop_first_us  = first;
-    self->loop_second_us = second;
+    self->loop_second_us = ( L > 0 ) ? first + L : first;
     self->loop_region_bad =
-      ( loopers == 0 || !all_second || first <= 0 || second <= first ) ? 1 : 0;
+      ( loopers == 0 || !all_second || periods == 0 || L <= 0 || first <= 0 ) ? 1 : 0;
   }
 
   /* stop */

@@ -140,7 +140,10 @@ MIDIPlayer.prototype.processPlaySynth = function (buffer, bufferSize) {
   const msPerBatch = this.speed * 1000 * (batchSize / this.sampleRate) / 2;
   // With Repeat One, events at or past the band end belong to the outro; stop
   // applying them here so the wrap below fires at the band end, not the list end.
-  const loopEndIdx = (this.looping && this.loop) ? this.loop.endIndex : Infinity;
+  // Auditioning (the piano roll's preview) disables both wrap paths below, so
+  // the cap must come off with it or events past the band end -- the outro's
+  // note-offs included -- are never applied while auditioning.
+  const loopEndIdx = (this.looping && this.loop && !this.isAuditioning) ? this.loop.endIndex : Infinity;
 
   for (let samplesRemaining = bufferSize * 2;
        samplesRemaining > 0;

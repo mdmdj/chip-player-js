@@ -48,6 +48,14 @@ const UserProvider = ({ children }) => {
   const [loadingUser, setLoadingUser] = useState(true); // Manage loading state
   // Monotonic token so stale favorites refreshes don't overwrite newer ones.
   const favesRefreshToken = useRef(0);
+  // Whether the list has been hydrated from the server at least once. A toggle
+  // before the initial GET lands bumps the token and invalidates that GET, so a
+  // still-cold list is re-read once the toggle completes.
+  const favesHydrated = useRef(false);
+  // Toggles whose request is still in flight. A whole-list refresh is deferred
+  // while any is outstanding, so the snapshot cannot drop a mutation that has
+  // not landed yet; the last toggle to land then hydrates.
+  const pendingFaveToggles = useRef(0);
   const [settings, setSettings] = useState(() => {
     // Restore settings from localStorage.
     try {
@@ -97,7 +105,10 @@ const UserProvider = ({ children }) => {
     try {
       const token = ++favesRefreshToken.current;
       getWithAuth(user, `${API_BASE}/user/favorites`).then(favesRes => {
-        if (token === favesRefreshToken.current) setFaves(favesRes.favorites);
+        if (token === favesRefreshToken.current) {
+          setFaves(favesRes.favorites);
+          favesHydrated.current = true;
+        }
       });
 
       getWithAuth(user, `${API_BASE}/user/settings`).then(settingsRes => {
@@ -155,6 +166,8 @@ const UserProvider = ({ children }) => {
       setFaves(newFaves);
 
       let addResult;
+      let committed = true;
+      pendingFaveToggles.current++;
       try {
         if (isFavorite) {
           await removeFavorite(fave);
@@ -162,16 +175,17 @@ const UserProvider = ({ children }) => {
           addResult = await addFavorite(fave);
         }
       } catch (e) {
+        committed = false;
         setFaves(oldFaves);
         console.log('Couldn\'t update favorites in Firebase.', e);
-        return;
       }
+      pendingFaveToggles.current--;
       // The mutation is committed from here on, so a failed re-read must not
       // roll the optimistic state back -- that would show the song as un-favorited
-      // until the next refresh, and a retry would then invert it.
-      // The add response carries this entry already decorated (size, sub-tune
-      // title, ...), so splice that one in optimistically to avoid a flicker.
-      if (addResult && addResult.favorite) {
+      // until the next refresh, and a retry would then invert it. The add response
+      // carries this entry already decorated (size, sub-tune title, ...), so splice
+      // that one in optimistically to avoid a flicker.
+      if (committed && addResult && addResult.favorite) {
         setFaves(prev => {
           // A newer toggle may have removed this exact entry already; if so,
           // leave it out instead of re-adding a stale one.
@@ -182,17 +196,20 @@ const UserProvider = ({ children }) => {
           ];
         });
       }
-      // Re-read the list for adds and apply it only if no newer toggle has
-      // happened since. The splice above cannot restore favorites the server
-      // already had when this toggle landed -- notably a star placed before the
-      // initial GET finished, which this toggle invalidated. The generation guard
-      // drops the response if a newer toggle happened meanwhile, so a stale
-      // whole-list response can never undo a pending change. A server that
-      // returns only { success } is covered by this same path.
-      if (!isFavorite) {
+      // Hydrate the list if it is still cold. This toggle invalidated the initial
+      // GET, so the server favorites it would have brought -- and this toggle's
+      // own result, for a removal -- are not in `faves` yet, and the splice above
+      // cannot restore them. Deferred while another toggle is in flight, or the
+      // whole-list snapshot could drop a mutation that has not landed; the last
+      // toggle to land then hydrates. The generation guard drops the response if a
+      // newer toggle has started since.
+      if (!favesHydrated.current && pendingFaveToggles.current === 0) {
         try {
           const refreshed = await getWithAuth(user, `${API_BASE}/user/favorites`);
-          if (refreshed && generation === favesRefreshToken.current) setFaves(refreshed.favorites);
+          if (refreshed && generation === favesRefreshToken.current) {
+            setFaves(refreshed.favorites);
+            favesHydrated.current = true;
+          }
         } catch (e) {
           console.log('Couldn\'t refresh favorites after updating Firebase.', e);
         }

@@ -25,22 +25,17 @@ if (playbackColumns.length > 0 && !playbackColumns.some(c => c.name === 'subtune
 
 const dbStatements = {
   // Catalog
-  searchStmt: db.prepare(`
-      SELECT music_fts.path as file, song_id
-      FROM music_fts
-      JOIN music m ON m.id = music_fts.rowid
-      WHERE music_fts MATCH ?
-      ORDER BY rank
-      LIMIT ?
-  `),
-  // Search within sub-tune titles. Returned rows carry the parent file's path
-  // and song_id plus the 0-based subtune, so results are playable directly.
-  searchSubtuneStmt: db.prepare(`
-      SELECT m.path as file, m.song_id as song_id, st.subtune as subtune, st.title as title
-      FROM subtune_fts
-      JOIN subtune st ON st.id = subtune_fts.rowid
-      JOIN music m ON m.id = st.music_id
-      WHERE subtune_fts MATCH ?
+  // One index over songs: a single-song file is one row, a song folder is one
+  // row per sub-tune, so a file and its sub-tunes rank in a single list. Rows
+  // carry the parent file's path and song_id plus the 0-based subtune, so each
+  // result is playable directly; `title` is the sub-tune's own label (NULL when
+  // it has none).
+  searchSongStmt: db.prepare(`
+      SELECT s.path as file, s.song_id as song_id, s.subtune as subtune, s.title as title,
+             s.subtune_count as subtuneCount
+      FROM song_fts
+      JOIN song s ON s.id = song_fts.rowid
+      WHERE song_fts MATCH ?
       ORDER BY rank
       LIMIT ?
   `),

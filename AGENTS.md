@@ -431,9 +431,10 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
     `vidall` (every clip, per-clip verdicts), `vidleak` (bytes pulled on load),
     `vidgeom`/`vidcap`/`vidsharp` (what `recordVideo` and a window size actually
     produce — see `dev/record/FINDINGS.md`).
-  - `dev/record/check-faves-hydration.mjs`, `dev/record/check-faves-cache.mjs` —
-    the favorites-list checks behind the UserProvider hydration fix (PR #10,
-    macroscope `UserProvider.js:208` / greptile P1). The first reproduces the
+  - `dev/record/check-faves-hydration.mjs`, `dev/record/check-faves-cache.mjs`,
+    `dev/record/check-faves-account-switch.mjs` — the favorites-list checks behind
+    the UserProvider fixes (PR #10). The first two are the hydration fix
+    (macroscope `UserProvider.js:208` / greptile P1): the first reproduces the
     race deliberately — the first GET and POST are held, the second POST is
     allowed to finish, then the first POST is released, so the *older* toggle
     lands last — and asserts the server-only favorite reaches the Favorites page;
@@ -442,6 +443,12 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
     the localStorage seed anyway: the fast path the fix must not clear. Both
     navigate client-side on purpose, because a `page.goto` reloads the app, which
     re-hydrates and hides the bug ("missing until another toggle or reload").
+    The third is the account-switch fix (macroscope `UserProvider.js:225`): the
+    initial GET and the toggle's POST are held, the identity is then dropped via
+    the dev hook `window.__cpDevSetUser`, and only then is the POST released —
+    asserting no second list GET is issued and no server favorite reaches the
+    fresh context's localStorage (which starts empty, so anything there is the
+    leak). Fails unguarded with `GETs=2` plus the witness path in localStorage.
     Not in `run-tests.sh`: they need a browser and a saved favorite, and skip
     (exit 2) without one.
   - `dev/record/check-local-delete.mjs` — deleting the *playing* local file hands
@@ -1486,9 +1493,23 @@ checks no longer work. Compare a live context to a stored one with
     `shuffle === SHUFFLE_ON`, a non-empty order, and a `currContextRef()` that
     still names the playing song. Note our delete/rebuild paths *depend on* the
     flag staying a mode number.
-  - **Open (not fixed on purpose):** the `UserProvider` optimistic-favorite
-    *failure* path is not token-guarded, so a late rejection can revert a
-    different song's favorite. Judged not worth speculative defensive code blind.
+  - **FIXED (2026-10-15): a toggle that lands after its account went away.**
+    macroscope's `UserProvider.js:225` report on PR #10, and it is the *success*
+    path that leaks, not the rejection one this note used to track as "open".
+    The sign-out bumps `favesRefreshToken`, but the post-toggle hydration claims
+    a *fresh* token when it issues, so that invalidation cannot cover it -- and
+    its GET runs with the `user` the toggle's closure captured, so it paints the
+    old account's list onto the cleared (or the new account's) state and into
+    localStorage. Guarded with `lastUid.current === user.uid`, computed once as
+    `sameAccount` and applied to all three landing sites: the failure rollback,
+    the decorated splice, and the refresh. The dev-user effect now sets
+    `lastUid.current` (prod gets it from `onAuthStateChanged`, which the injected
+    user never passes through) and exposes `window.__cpDevSetUser`, so
+    `dev/record/check-faves-account-switch.mjs` can perform the identity switch
+    prod performs -- pinned by that check (10 assertions), which fails against
+    the unguarded code with `GETs=2` and the witness path in localStorage. The
+    `handleLogout` window before the auth callback lands needs no extra guard:
+    the refresh's token is bumped by that callback, so the response is dropped.
   - **Speeding a take up is available** as a devtools-only technique (drive
     `player.processAudio` in a time-budgeted loop; do *not* raise the sample rate —
     song-time-per-buffer is `bufferSize / rate`). Unneeded once an assertion checks

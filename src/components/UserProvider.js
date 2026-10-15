@@ -92,8 +92,25 @@ const UserProvider = ({ children }) => {
   // DEV-BEGIN (stripped for promotion; inject the dev user and skip Firebase)
   useEffect(() => {
     if (!DEV_USER) return;
+    // The favorites guards below compare against lastUid, which the Firebase
+    // callback maintains; the injected user never passes through it.
+    lastUid.current = DEV_USER.uid;
     setUser(DEV_USER);
     setLoadingUser(false);
+    // Let a browser check perform the identity switch that onAuthStateChanged
+    // does in prod (and dev skips), with the same effect on the favorites state,
+    // so the account guards can be exercised:
+    // dev/record/check-faves-account-switch.mjs
+    window.__cpDevSetUser = next => {
+      favesRefreshToken.current++;
+      const uid = next ? next.uid : null;
+      if (lastUid.current && lastUid.current !== uid) {
+        setFaves([]);
+        setFavesHydratedFor(null);
+      }
+      lastUid.current = uid;
+      setUser(next);
+    };
   }, []);
   // DEV-END
 

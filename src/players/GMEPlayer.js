@@ -107,7 +107,7 @@ export default class GMEPlayer extends Player {
 
     // Repeat-one behaves like "Indefinite Playback": GME has no native loop
     // control, so we skip the JS fadeout and keep rendering the looped track.
-    const playIndefinitely = !!this.params.indefinitePlayback || this.looping;
+    const playIndefinitely = this.isPlayingIndefinitely();
 
     if (!playIndefinitely && this.getDurationMs() > 0 && this.getPositionMs() >= this.getDurationMs() && this.fadingOut === false) {
       console.log('[GMEPlayer] Starting JS fadeout at %d ms.', this.getPositionMs());
@@ -333,8 +333,7 @@ export default class GMEPlayer extends Player {
     const band = this.getLoopBandMs();
     if (band) {
       if (abs <= band.startMs) return abs;
-      const looping = this.looping || !!this.params.indefinitePlayback;
-      if (!looping) return abs;
+      if (!this.isPlayingIndefinitely()) return abs;
       const loopLength = band.endMs - band.startMs;
       if (loopLength <= 0) return abs;
       return band.startMs + ((abs - band.startMs) % loopLength);
@@ -376,7 +375,14 @@ export default class GMEPlayer extends Player {
           this.fadeStartMs = null;
           this.fadeFinished = false;
         } else {
-          if (this.getDurationMs() > 0 && this.getPositionMs() >= this.getDurationMs() && this.fadingOut === false) {
+          // Only when nothing else is holding the track up: with Repeat One on,
+          // this setting is not what is playing it on, and fading here silenced a
+          // song that is supposed to keep looping (the VGM analogue of this is a
+          // known engine limit; this one was ours). processAudio asks the same
+          // question, which is why this calls the hook instead of repeating the
+          // predicate. Repeat One going off later re-arms the fade there.
+          if (!this.isPlayingIndefinitely() &&
+              this.getDurationMs() > 0 && this.getPositionMs() >= this.getDurationMs() && this.fadingOut === false) {
             console.log('[GMEPlayer] Starting JS fadeout via setParameter at', this.getPositionMs());
             this.fadeStartMs = this.getPositionMs();
             this.fadingOut = true;

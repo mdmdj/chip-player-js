@@ -48,14 +48,22 @@ const UserProvider = ({ children }) => {
   const [loadingUser, setLoadingUser] = useState(true); // Manage loading state
   // Monotonic token so stale favorites refreshes don't overwrite newer ones.
   const favesRefreshToken = useRef(0);
-  // Whether the list has been hydrated from the server at least once. A toggle
-  // before the initial GET lands bumps the token and invalidates that GET, so a
-  // still-cold list is re-read once the toggle completes.
-  const favesHydrated = useRef(false);
+  // The account whose server list we already have, as its uid. Keyed by the
+  // account rather than held as a page-lifetime boolean, so signing in as
+  // someone else re-opens the cold path by itself: the check below simply stops
+  // matching. A toggle before the initial GET lands bumps the token and
+  // invalidates that GET, so a still-cold list is re-read once it completes.
+  const [favesHydratedFor, setFavesHydratedFor] = useState(null);
   // Toggles whose request is still in flight. A whole-list refresh is deferred
   // while any is outstanding, so the snapshot cannot drop a mutation that has
   // not landed yet; the last toggle to land then hydrates.
   const pendingFaveToggles = useRef(0);
+  // The identity the favorites in state were last resolved against. The
+  // localStorage seed is trusted on the first resolution -- it is what paints
+  // favorites without waiting for the GET, and it is nearly always the same
+  // user -- but once the identity changes underneath it, the old account's list
+  // must not stand in for the new one.
+  const lastUid = useRef(null);
   const [settings, setSettings] = useState(() => {
     // Restore settings from localStorage.
     try {
@@ -75,6 +83,17 @@ const UserProvider = ({ children }) => {
     onAuthStateChanged(auth, async user => {
       // A user change invalidates any favorites refresh started for the old user.
       favesRefreshToken.current++;
+      // It also makes the list itself the wrong account's. Don't clear on the
+      // *first* resolution (that is the localStorage seed doing its job); clear
+      // when the identity actually changes, including to signed-out. The latch
+      // goes with the list -- a later sign-in of the same account is a new
+      // session, and a still-set latch would leave its favorites cold.
+      const uid = user ? user.uid : null;
+      if (lastUid.current && lastUid.current !== uid) {
+        setFaves([]);
+        setFavesHydratedFor(null);
+      }
+      lastUid.current = uid;
       setUser(user);
       console.log('Firebase auth state changed, user:', user);
       setLoadingUser(false);
@@ -107,7 +126,7 @@ const UserProvider = ({ children }) => {
       getWithAuth(user, `${API_BASE}/user/favorites`).then(favesRes => {
         if (token === favesRefreshToken.current) {
           setFaves(favesRes.favorites);
-          favesHydrated.current = true;
+          setFavesHydratedFor(user.uid);
         }
       });
 
@@ -146,9 +165,10 @@ const UserProvider = ({ children }) => {
 
   const handleToggleFavorite = async (path, subtune = 0, songId) => {
     if (user) {
-      // Claim this toggle's generation, so the fallback refresh below cannot
-      // drop a newer toggle's optimistic change.
-      const generation = ++favesRefreshToken.current;
+      // Invalidate any read in flight: this toggle's optimistic state is newer
+      // than anything a GET issued before it can report. The fallback refresh
+      // below claims its own token when it is issued, so it is not affected.
+      favesRefreshToken.current++;
       const oldFaves = faves;
       const isFavorite = faves.find(fave => fave.path === path && (fave.subtune || 0) === subtune);
 
@@ -201,14 +221,19 @@ const UserProvider = ({ children }) => {
       // own result, for a removal -- are not in `faves` yet, and the splice above
       // cannot restore them. Deferred while another toggle is in flight, or the
       // whole-list snapshot could drop a mutation that has not landed; the last
-      // toggle to land then hydrates. The generation guard drops the response if a
-      // newer toggle has started since.
-      if (!favesHydrated.current && pendingFaveToggles.current === 0) {
+      // toggle to land then hydrates.
+      if (favesHydratedFor !== user.uid && pendingFaveToggles.current === 0) {
+        // Claim the token here, at issue, instead of reusing this toggle's. The
+        // read is taken after every in-flight toggle has landed, so only a
+        // toggle that starts *after* this point should invalidate it -- reusing
+        // the older token dropped the response whenever a later-started toggle
+        // had already finished, which left the list cold for the session.
+        const token = ++favesRefreshToken.current;
         try {
           const refreshed = await getWithAuth(user, `${API_BASE}/user/favorites`);
-          if (refreshed && generation === favesRefreshToken.current) {
+          if (refreshed && token === favesRefreshToken.current) {
             setFaves(refreshed.favorites);
-            favesHydrated.current = true;
+            setFavesHydratedFor(user.uid);
           }
         } catch (e) {
           console.log('Couldn\'t refresh favorites after updating Firebase.', e);

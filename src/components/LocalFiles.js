@@ -77,7 +77,7 @@ function LocalFiles(props) {
         />
       </h3>
       {loading ?
-        "Loading local files..."
+        <div className='LocalFiles-message'>Loading local files...</div>
         :
         listing.length === 0 ?
           <div>

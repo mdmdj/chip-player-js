@@ -216,8 +216,10 @@ class App extends React.Component {
         console.log('Error populating FS from indexeddb.', err);
       }
       players.forEach(player => player.handleFileSystemReady());
+      // updateLocalFiles() owns the loading flag: parsing the sub-tune headers is
+      // async, and clearing it here (before the parse) showed the empty-library
+      // message to someone who had files.
       this.updateLocalFiles();
-      this.setState({ loadingLocalFiles: false });
     });
 
     this.sequencer = new Sequencer(players, this.localFilesManager, () => this.props.userContext.settings);
@@ -816,8 +818,21 @@ class App extends React.Component {
   }
 
   async updateLocalFiles() {
-    const localFiles = this.localFilesManager.readAll();
     const generation = ++this.localFilesGeneration;
+    // The panel shows a loading state until applyLocalFiles() applies the listing
+    // below. It has to be cleared there, in the same setState: the parse is async,
+    // and clearing it a step earlier -- as the syncfs callback used to -- renders
+    // once with no files and no loading state, i.e. the empty-library message, to
+    // users who do have local files.
+    this.setState({ loadingLocalFiles: true });
+    // A read that throws leaves nothing to list, so the panel falls through to
+    // the empty-library message rather than staying on the loading state.
+    let localFiles = [];
+    try {
+      localFiles = this.localFilesManager.readAll();
+    } catch (e) {
+      console.error('Could not list local files:', e);
+    }
     // Sub-tune counts come from the file headers, parsed by a lazily-loaded,
     // cached module (see ../localFilesSubtunes). On any failure we fall back to
     // one row per file, i.e. the old behavior.
@@ -868,7 +883,9 @@ class App extends React.Component {
       }
     }
     this.playContexts['local'] = refs;
-    this.setState({ localFiles: listing });
+    // The listing and the loading state land together, so there is no render in
+    // between where the panel is neither loading nor populated.
+    this.setState({ localFiles: listing, loadingLocalFiles: false });
 
     // Keep the transport on the same song across the index shift the expansion
     // causes (sub-tune 0 of a file is still sub-tune 0 after expanding).
@@ -878,12 +895,22 @@ class App extends React.Component {
       if (currRef) idx = refs.findIndex(r => songRefKey(r) === songRefKey(currRef));
       if (currRef && idx < 0) {
         // The playing song is gone from the rebuilt list (its file was deleted).
-        // Move to the survivor now at that position -- the clamp lands on the row
-        // that followed it -- or eject when nothing survives. This lives in the
-        // rebuild, not in handleLocalFileDelete, so that whichever update wins
-        // handles it; a superseded caller cannot strand the deleted song playing.
+        // Move to the song that followed it -- by identity, not by the old index:
+        // a multi-song file is several rows, so removing them shifts every later
+        // row left by the number removed, and clamping the old index landed past
+        // the follower. If nothing after it survives (the follower's file went
+        // too -- "Clear" removes several at once) step back to the nearest row
+        // before it, or to the top if none of the old rows matched at all; an
+        // empty context ejects below. This lives in the rebuild, not in
+        // handleLocalFileDelete, so that whichever update wins handles it; a
+        // superseded caller cannot strand the deleted song playing.
         if (refs.length > 0) {
-          this.sequencer.currIdx = Math.max(0, Math.min(this.sequencer.currIdx, refs.length - 1));
+          const at = new Map(refs.map((r, i) => [songRefKey(r), i]));
+          const oldPos = prevRefs.findIndex(r => songRefKey(r) === songRefKey(currRef));
+          let next = -1;
+          for (let i = oldPos + 1; i < prevRefs.length && next < 0; i++) next = at.get(songRefKey(prevRefs[i])) ?? -1;
+          for (let i = oldPos - 1; i >= 0 && next < 0; i--) next = at.get(songRefKey(prevRefs[i])) ?? -1;
+          this.sequencer.currIdx = next >= 0 ? next : 0;
           if (this.sequencer.shuffle) this.sequencer.setShuffle(this.sequencer.shuffle);
           this.sequencer.playCurrentSong();
         } else {

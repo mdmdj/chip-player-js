@@ -820,6 +820,18 @@ button.IconButton {
     white-space: nowrap;
 }
 
+/* The Local Files panel while its listing is being built: centred, and tall
+   enough to read as the panel's own placeholder rather than a first row. Sized
+   in charH like the rest of the sheet -- the panel has no definite height to
+   centre a full-height box against. */
+.LocalFiles-message {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: calc(20 * var(--charH));
+    text-align: center;
+}
+
 
 [data-theme="msdos"] .message-box-button {
     background: var(--background);

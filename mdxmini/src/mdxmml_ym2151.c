@@ -608,6 +608,7 @@ mdx_parse_mml_get_loop_second_us(void* in_self)
   return ((mdxmml_ym2151_instances *)in_self)->loop_second_us;
 }
 
+// DEV-BEGIN (stripped for promotion; harness-only getters)
 /* Floor division, for projecting a count over a track's own zero. */
 static int64_t
 mdx_floor_div(int64_t a, int64_t b)
@@ -689,6 +690,7 @@ mdx_parse_mml_get_loops_per_section(void* in_self)
   if (self->loop_region_bad) return 0;
   return self->loops_per_section;
 }
+// DEV-END
 
 
 

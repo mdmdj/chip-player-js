@@ -225,6 +225,10 @@ extern int mdx_parse_mml_ym2151_make_samples(short *buffer,int buffer_size, song
 extern int mdx_parse_mml_get_tempo(void* in_self);
 extern int64_t mdx_parse_mml_get_loop_first_us(void* in_self);
 extern int64_t mdx_parse_mml_get_loop_second_us(void* in_self);
+// DEV-BEGIN (stripped for promotion; harness-only, read by dev/mdx-native/region.c)
+extern int  mdx_parse_mml_get_section_loop_limit(void* in_self);
+extern int  mdx_parse_mml_get_loops_per_section(void* in_self);
+// DEV-END
 
 extern int mdx_parse_mml_ym2151_async_get_length(songdata *data);
 

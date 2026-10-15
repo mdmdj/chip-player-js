@@ -188,17 +188,19 @@ async function main() {
     }
   });
 
-  await check('a sub-tune title is searchable, and not double-counted', async () => {
+  await check('a sub-tune title is searchable, and listed once', async () => {
     if (!labeled) throw skip('no labeled sub-tune in the catalog');
-    const res = await get(`/api/search?query=${enc(labeled.title.split(/\s+/)[0])}`);
+    // Search a distinctive part of the label, not its first word: /search is
+    // one ranked list over songs now, so a common word ("The") can push a tune
+    // past `limit`. dev/test-search.js covers the ranking in more depth.
+    const res = await get(`/api/search?query=${enc(labeled.title)}&limit=200`);
     const hits = res.items.filter(i => i.file === labeled.path);
-    assert.ok(hits.length >= 1, `"${labeled.title}" is findable`);
-    const first = res.items.findIndex(i => i.file === labeled.path);
-    assert.ok(!res.items.slice(0, first).some(i => i.file === labeled.path),
-      'a file is never listed twice (file-level match wins)');
-    if (hits[0].subtune !== undefined) {
-      assert.ok(Number.isInteger(hits[0].subtune), 'a sub-tune hit carries its index');
-    }
+    const mine = hits.find(i => i.subtune === labeled.subtune);
+    assert.ok(mine, `"${labeled.title}" returns its own tune`);
+    assert.strictEqual(mine.title, labeled.title, 'the label is returned');
+    assert.ok(Number.isInteger(mine.subtune), 'a sub-tune hit carries its index');
+    const keys = hits.map(i => `${i.file}\u0000${i.subtune}`);
+    assert.strictEqual(new Set(keys).size, keys.length, 'a song is listed once');
   });
 
   await check('/metadata resolves subtuneCount and subtuneTitle', async () => {

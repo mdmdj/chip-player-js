@@ -126,7 +126,7 @@ export const summary = {
       id: 'database',
       title: 'Database: Rebuild the Catalog Before Deploying',
       body: [
-        '<strong>An old catalog breaks the server at require time.</strong> The new statements reference <code>subtune</code>, <code>subtune_fts</code> and <code>music.subtune_count</code>, so startup throws <code>SqliteError: no such table: subtune</code> and takes down <code>/top</code>, <code>/search</code>, <code>/browse</code> and <code>/user/favorites</code>.',
+        '<strong>An old catalog breaks the server at require time.</strong> The new statements reference <code>subtune</code>, <code>song_fts</code> and <code>music.subtune_count</code>, so startup throws <code>SqliteError: no such table: subtune</code> and takes down <code>/top</code>, <code>/search</code>, <code>/browse</code> and <code>/user/favorites</code>.',
         '<strong>Fix: run <code>node scripts/build-music.js</code></strong> (no <code>--reset-db</code>, no <code>-n</code>). It creates the tables, adds the column, and re-parses every file to backfill counts and labels; a <code>user_version</code> marker records that the backfill ran. On 6,787 files this took <strong>11.7 s</strong>.',
         '<strong><code>playbacks.subtune</code> and favorites need no step.</strong> Boot adds the column with an idempotent <code>ALTER TABLE … DEFAULT 0</code>, and a favorite’s missing <code>subtune</code> means 0.',
         '<strong>Two effects on existing data are unavoidable.</strong> A file’s prior play count lands on its <strong>first</strong> sub-tune, because nothing recorded which one was playing, and charts re-rank because they now group by <code>(song_id, sub-tune)</code> and one file’s total splits across rows.',
@@ -140,7 +140,7 @@ export const summary = {
         '<strong>Seven exports are added to <code>scripts/build-chip-core.js</code>:</strong> <code>_lvgm_get_cur_loop</code>, <code>_lvgm_get_fade_start_ms</code>, <code>_lvgm_get_loop_start_ms</code>, <code>_lvgm_get_loop_end_ms</code>, <code>_lvgm_set_loop_count</code>, <code>_mdx_get_loop_start_ms</code>, <code>_mdx_get_loop_length_ms</code>. They are plain getters and setters, and every call site feature-detects, so a core without them falls back to the blind-loop UI rather than breaking. (Production exports none of them.)',
         '<strong>One engine change is crucial for sub-tunes.</strong> <code>libsidplayfp-wrapper.cpp</code> reloads the tune after selecting it; without that, the wrapper reports the requested sub-tune while every one plays song 0. The full explanation is in the code section.',
         '<strong>The only vendored engine source in the diff is <code>mdxmini/</code></strong> (4 files):',
-        '<ul><li>A fade that reaches zero now stops there. Before, it counted into negative numbers and could leave a song that never ended.</li><li>Position is counted in microseconds (<code>int64_t position_us</code>) instead of whole milliseconds per frame. The discarded remainder (up to a third of a frame) made the count run slow, so seeks overshot and could start a fade early. It is 64-bit because <code>long</code> is 32-bit under wasm and would wrap negative after about 35 minutes.</li><li>The loop region is measured from the tracks that actually loop. A track that never loops (a one-shot) used to hold the song-wide minimum at 0, so its end was misread as the first loop and the band started late — or, past a full pass, vanished entirely.</li></ul>',
+        '<ul><li>A fade that reaches zero now stops there. Before, it counted into negative numbers and could leave a song that never ended.</li><li>Position is counted in microseconds (<code>int64_t position_us</code>) instead of whole milliseconds per frame. The discarded remainder (up to a third of a frame) made the count run slow, so seeks overshot and could start a fade early. It is 64-bit because <code>long</code> is 32-bit under wasm and would wrap negative after about 35 minutes.</li><li>The loop region is measured from the tracks that loop, as the mix&rsquo;s joint repeat period. A track that never loops (a one-shot) used to hold the song-wide minimum at 0, so its end was misread as the first loop and the band started late — or, past a full pass, vanished entirely. Tracks whose loop lengths share no small common multiple report no region rather than a made-up band.</li></ul>',
         '<strong>Checked in-app on <code>G2MST6.MDX</code>:</strong> position tracks real time, seeks land within one frame, and it never goes negative. On <code>DTWNB18.MDX</code> (Detana Twinbee) the band moved from <code>[5078, 12403]</code> to <code>[0, 14942]</code> — the tracks\' real loop point. Every other vendored tree is build-only and absent from the PR.',
         '<strong>If your build differs, the loop policy is still portable.</strong> The two wrappers that changed carry only the loop getters and the SID reload; the loop policy is JS under <code>src/players/</code>, and only the region getters are engine-specific.',
       ],
@@ -278,18 +278,21 @@ export const snippets = [
   },
   {
     id: 'schema-subtune',
-    title: 'Sub-tunes are rows, and they are searchable',
+    title: 'Songs are rows, and they are searchable',
     file: 'scripts/build-music.js',
     from: /^  -- Each row is a playable sub-tune/,
-    before: /^  -- Triggers/,
-    expect: 'UNIQUE(music_id, subtune)',
+    before: /^  CREATE INDEX IF NOT EXISTS idx_directories_parent/,
+    expect: "content='song'",
     // The file is JS, but this excerpt is the DDL inside its template literal, so
     // highlight it as SQL rather than as the JS that wraps it.
     lang: 'sql',
-    why: `One table, one <code>UNIQUE(music_id, subtune)</code>, an fts5 mirror so
-      sub-tune titles are searchable, and <code>subtune_count</code> on the file row.
-      Only multi-song files get rows, so a sub-tune and a single-song file are the
-      same to the client.`,
+    why: `<code>subtune</code> gives each sub-song a row
+      (<code>UNIQUE(music_id, subtune)</code>), and <code>song</code>
+      materialises every <em>playable song</em> -- a single-song file is one row,
+      a song folder is one row per sub-tune -- over a single <code>song_fts</code>
+      index, so a file and its sub-tunes are searched and ranked in one list.
+      Only multi-song files get <code>subtune</code> rows, so a sub-tune and a
+      single-song file are the same to the client.`,
   },
   {
     id: 'songref',

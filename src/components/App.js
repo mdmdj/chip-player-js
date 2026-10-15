@@ -890,7 +890,9 @@ class App extends React.Component {
       }
     }
     this.playContexts['local'] = refs;
-    this.setState({ localFiles: listing });
+    // The listing and the loading state land together, so there is no render in
+    // between where the panel is neither loading nor populated.
+    this.setState({ localFiles: listing, loadingLocalFiles: false });
 
     // Keep the transport on the same song across the index shift the expansion
     // causes (sub-tune 0 of a file is still sub-tune 0 after expanding).

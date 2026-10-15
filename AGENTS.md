@@ -1432,6 +1432,34 @@ checks no longer work. Compare a live context to a stored one with
     played on camera).
     **Changelog: done** — the `percent-filename` snippet in `dev/record/site.mjs` says
     so, with the search link.
+  - **FIXED (2026-10-15): Repeat One + the Indefinite Playback setting off
+    silenced GME.** `processAudio` skips the JS fade when
+    `isPlayingIndefinitely()` (the setting OR `looping`), but `setParameter`'s
+    `indefinitePlayback = false` branch started that fade with no `looping`
+    check, so toggling the *setting* off under Repeat One faded a song that was
+    supposed to keep looping to silence -- and, the fade being latched,
+    permanently (`isPlayingIndefinitely()` kept the end detector away too).
+    Both sites now ask the hook, which is the predicate's one home; the third
+    copy in `getDisplayPositionMs` went with them. Pinned by a pair of checks in
+    `dev/test-gme-loops.js` (full-scale samples vs an attenuated mix, since a
+    fresh fade is only ~1% down); the negative control fails only the first.
+  - **Deferred as legacy (2026-10-15): `toggleShuffle` passes a boolean to
+    `setShuffle`, which takes a mode.** `SHUFFLE_ON`/`SHUFFLE_OFF` are `1`/`0`
+    and `setShuffle` tests them with `===`, so `toggleShuffle()`'s
+    `!this.shuffle` sets `shuffle: true`, never builds the order, and drives
+    `currIdx` to `undefined` via the `else if (this.shuffleOrder)` branch (then
+    `NaN` on the first advance) -- `currContextRef()` has nothing to play.
+    Master's code, verbatim (lines 106/112, and the truthy test at 188 in
+    `master:src/Sequencer.js`), and **uncalled in master and here**: the app
+    goes through `handleCycleShuffle`, which passes the mode number, and the
+    local-files rebuild paths feed the flag back (a number by that invariant).
+    So it has no user-visible effect and fails the "improves the UX" test for
+    riding along. The one-line fix if it is ever reached:
+    `setShuffle(this.shuffle ? SHUFFLE_OFF : SHUFFLE_ON)`, with a check in
+    `dev/test-sequencer.js` (real `Sequencer` + `FakePlayer`) asserting
+    `shuffle === SHUFFLE_ON`, a non-empty order, and a `currContextRef()` that
+    still names the playing song. Note our delete/rebuild paths *depend on* the
+    flag staying a mode number.
   - **Open (not fixed on purpose):** the `UserProvider` optimistic-favorite
     *failure* path is not token-guarded, so a late rejection can revert a
     different song's favorite. Judged not worth speculative defensive code blind.

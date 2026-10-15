@@ -6,8 +6,11 @@
 //   * the song has its own infinite loop, so length(k) = intro + k*loop + fade
 //     -- which is why _readLoopRegion() measures the region from two recorded
 //     passes instead of guessing a fade
-//   * mdx_set_max_loop(n) caps passes (0 = forever), and the engine's own fade
-//     runs out after the capped pass, then calc_sample returns 0
+//   * mdx_set_max_loop(n) caps joint sections (0 = forever), and the engine's own
+//     fade runs out after the capped section, then calc_sample returns 0
+//   * mdx_get_length measures before that region is resolved, so its fade gate
+//     counts per-track loops while playback counts joint sections, and it reports
+//     whole seconds -- the two disagree when loops_per_section > 1
 //   * the built-in loop jumps are seamless: no fade, no reload, no jump in the
 //     absolute clock
 // Run: node dev/test-mdx-loops.js
@@ -64,8 +67,9 @@ function makeFS() {
 }
 
 function makeCore({ introMs = A, loopMs = B, withLoopGetters = true, perSection = 0, sectionLimit = 0 } = {}) {
+  const per = perSection > 0 ? perSection : 1;   // per-track repeats in one section
   const core = {
-    introMs, loopMs,
+    introMs, loopMs, per,
     maxLoop: 0,
     abs: 0,
     fadeStartedAtMs: null, // mdxmini latches fade_out; only reinit (a seek) clears it
@@ -75,11 +79,8 @@ function makeCore({ introMs = A, loopMs = B, withLoopGetters = true, perSection 
     FS: makeFS(),
   };
 
-  // length(k) = intro + k*loop + fade, and 0 passes means forever.
-  core.lengthMs = (passes) => (passes === 0
-    ? Infinity
-    : core.introMs + passes * core.loopMs + FADE_MS);
-  // Where the fade for a given pass count begins: the end of that pass.
+  // Where the fade for a given section count begins: the end of that section.
+  // The playback end is that plus FADE_MS (see core.step).
   core.fadeStartMs = (passes) => core.introMs + passes * core.loopMs;
 
   Object.assign(core, {
@@ -110,7 +111,13 @@ function makeCore({ introMs = A, loopMs = B, withLoopGetters = true, perSection 
 
   // _mdx_get_length is upstream and _readLoopRegion() calls it unconditionally;
   // only the two region getters are feature-detected.
-  core._mdx_get_length = () => core.lengthMs(core.maxLoop) / 1000;
+  //
+  // It is not the section-gated playback length: mdx_get_length's parse runs the
+  // fade gate before loops_per_section is resolved, so the gate counts raw
+  // per-track loops (one section is `per` of them) and the return is whole
+  // seconds. per == 1 leaves only the truncation.
+  core._mdx_get_length = () => Math.floor(
+    (core.introMs + (core.maxLoop / core.per) * core.loopMs + FADE_MS) / 1000);
   if (withLoopGetters) {
     core._mdx_get_loop_start_ms = () => core.introMs;
     core._mdx_get_loop_length_ms = () => core.loopMs;
@@ -253,7 +260,48 @@ async function main() {
     p.setLooping(false);
     assertNoJump(p, 'disable inside the band', before, p.getDisplayPositionMs());
     assert.strictEqual(core.lastMaxLoopArg, 2, 'max(2, curLoop+1) with curLoop 1');
-    assert.strictEqual(p.durationExtended, false);
+    // Every leave hands the end to the engine, not only a deep one: the reported
+    // duration is measured under a different gate (and truncated to whole
+    // seconds), so the engine's fade can run past it and the base detector must
+    // stand down here too.
+    assert.strictEqual(p.durationExtended, true, 'the engine owns the end on any leave');
+  });
+
+  await check('a sub-second gap alone still lets the engine finish (per=1)', async () => {
+    // With the periods equal the two gates agree apart from mdx_get_length's
+    // whole-second return: 2 x 20123ms + fade = 44246ms reads as 44s, 246ms
+    // short. Small, but the detector would still clamp the engine's fade to it.
+    const loop = 20123;
+    const { p, core } = await makePlayer({ introMs: 0, loopMs: loop });
+    assert.strictEqual(p.getDurationMs(), 44000, 'whole-second truncated length');
+    p.setSilenceDuration(0);
+    p.setLooping(true);
+    core.advanceTo(loop + 1000);
+    p.setLooping(false);
+    await driveToEnd(p, core, loop + 1000, 60000);
+    assert.strictEqual(p.stopped, true, 'the engine ends the song itself');
+    assert.ok(p.getPositionMs() > 44100,
+      `engine end ${p.getPositionMs()}ms truncated to the reported 44s`);
+    assert.strictEqual(p.durationExtended, true);
+  });
+
+  await check('leaving shallow still outruns a short reported duration (mixed periods)', async () => {
+    // Where the two gates disagree: mdx_get_length reports the per-track figure
+    // (2 x 10s loops + fade = 24s) while playback fades at the joint section end
+    // (2 x 20s + fade = 44s). Leaving at curLoop 1 schedules a fade past the
+    // reported duration, so a detector that trusted 24s would cut 20s of music.
+    const { p, core } = await makePlayer({ perSection: 2, sectionLimit: 7 });
+    assert.strictEqual(p.getDurationMs(), 24000, 'per-track-gated reported length');
+    p.setSilenceDuration(0);   // arm the base detector so the truncation is observable
+    p.setLooping(true);
+    core.advanceTo(BAND_START + 1000);
+    p.setLooping(false);
+    assert.strictEqual(core.lastMaxLoopArg, 2, 'max(2, curLoop+1) with curLoop 1');
+    await driveToEnd(p, core, BAND_START + 1000, 60000);
+    assert.strictEqual(p.stopped, true, 'the engine ends the song itself');
+    assert.ok(p.getPositionMs() >= BAND_END,
+      `ran past the reported 24s to ${p.getPositionMs()}ms`);
+    assert.strictEqual(p.durationExtended, true, 'the engine owns the end');
   });
 
   await check('leaving deep extends the fade and the engine ends the song', async () => {

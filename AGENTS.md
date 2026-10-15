@@ -407,7 +407,7 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
     N64's config-default length for untagged `.miniusf`, and the tuning layers
     (module defaults, and a player override replacing only named fields).
   - `node dev/test-subtunes-server.js` — the sub-tune API over HTTP against the
-    running dev server (song folders, sub-song rows, search union, metadata,
+    running dev server (song folders, sub-song rows, song search, metadata,
     shuffle/random/playback/top, and per-sub-tune favorites including a legacy
     row with no sub-tune). It mutates the dev user's favorites and undoes them.
     Skips cleanly if the server or the catalog is absent.
@@ -992,8 +992,15 @@ CREATE INDEX idx_subtune_music ON subtune(music_id);
 - `subtune.title` is set only when the format provides a label; otherwise it is
   `NULL` and clients fall back to `Tune N`. (`describeSubtunes` no longer invents
   a `Song N` placeholder — that was inconsistent with the fallback.)
-- `subtune_fts` (fts5, `content='subtune'`) + `ai/ad/au` triggers mirror
-  `music_fts`, making sub-song titles searchable.
+- `song` is one row per **playable song** — a single-song file is one row, a song
+  folder is one row per sub-tune — built from `music` + `subtune` by
+  `rebuildSongs()` at the end of every run, with `song_fts` (fts5,
+  `content='song'`) as its index. `/search` is a single `MATCH` over it, so a
+  file and its sub-tunes rank in one list and `limit` bounds the whole response
+  (the old per-table `music_fts`/`subtune_fts` pair and its triggers are dropped
+  by the build). `song.file_title` carries the file's name, so a folder-name
+  query finds every song the file holds; `title` is the sub-tune's own label,
+  `NULL` when it has none (the client shows `Tune N`).
 - `processFile` clears a file's old sub-tune rows **before** the
   `INSERT OR REPLACE` on `music` (foreign keys are enforced, so the replace
   would otherwise fail). A `ensureColumn` shim adds `release_date`/`date` to
@@ -1021,9 +1028,12 @@ Verified on the real catalog: 6758 files, 1140 subtune rows, 87 multi-song files
     `durationMs`, `url = /?play=<songId>&subtune=N`. Each row reuses the parent
     file's `size`, and `mtime` resolves **subtune date -> file `release_date` ->
     file system mtime** (as Unix seconds).
-- `/search` unions `searchStmt` (file titles) and `searchSubtuneStmt`
-  (sub-song titles); sub-song hits carry `subtune` + `title`, and files already
-  matched at file level are de-duplicated.
+- `/search` is **one** `searchSongStmt` over `song_fts` (see the schema above),
+  ranked together, so a file and its sub-tunes are peers in one list and `limit`
+  bounds the response. Every hit carries `subtune` (0 for a single-song file) and
+  `title` (the sub-tune's label, or null), so each result is playable directly;
+  a file's name matches every song it holds. Search terms are quoted for FTS5
+  (`ftsQueryFor`), so punctuation in a title cannot break the query.
 - `/metadata?path=...&subtune=N` returns `subtuneTitle`.
 - `/shuffle` and `/random` return `{path, subtune}`, **one item per playable
   song**: a multi-song file is expanded into *all* of its sub-tunes (a
@@ -1130,9 +1140,9 @@ because `Sequencer` copies its context).
 
 **Done and verified:**
 1. Parsers (NSF/NSFE/SID/GBS/AY) with sub-tune counts/labels — tested.
-2. Normalized schema (`subtune` table, `subtune_count`, `subtune_fts`) —
+2. Normalized schema (`subtune` table, `subtune_count`, `song` + `song_fts`) —
    rebuilt and verified against the real catalog.
-3. Server API: `/browse` songfolder + sub-tune listing, `/search` union,
+3. Server API: `/browse` songfolder + sub-tune listing, `/search` over the song index,
    `/metadata` subtune title — verified via curl.
 4. `SongRef` helpers in `util.js`; `Sequencer` migrated to SongRef contexts.
    Sub-tune navigation is sequencer-owned: the player plays one song and stops,
@@ -1846,11 +1856,18 @@ only armed when `silenceDuration >= 0`, and both arms must end the song):
   more than one — the old guard dropped the band entirely, even on songs with a
   clear loop (`DTWNB18.MDX`, a Detana Twinbee file, moved from a band of
   `[5078, 12403]` to `[0, 14942]`). Fixed in `mdxmini/src/mdxmml_ym2151.c`
-  (commit `c66e78832`): each track's 1st/2nd loop time is recorded and the region
-  is resolved from the tracks that loop, so a one-shot cannot gate the boundary.
-  The engine's pass/fade minimum is untouched, so repeat-off timing is unchanged;
-  the fix only affects the region the band is drawn from. Measured over 4,706
-  candidate MDX: **4,347 unchanged, 311 corrected**. The fix reuses one context
+  (`c66e78832`): each track's 1st/2nd loop time is recorded and the region is
+  resolved from the tracks that loop, so a one-shot cannot gate the boundary.
+  The region is the mix's **joint repeat**: the first boundary is the last track
+  to complete its first loop, and the length is the smallest multiple of the
+  longest track period that every looping track also hits (within a tick). Tracks
+  that loop together differ by a tick or two, so the check is a tolerance, not
+  equality; tracks with no small common multiple are **incommensurate** and get
+  **no region** (blind-loop UI) rather than a made-up band. The engine's
+  pass/fade minimum is untouched, so repeat-off timing is unchanged; the fix only
+  affects the region the band is drawn from. Measured over 4,706 candidate MDX:
+  **4,201 unchanged, 435 corrected, 29 lost their band** (incommensurate).
+  The fix reuses one context
   across songs, so `mdx_get_length` clears the per-track times each run.
   Rebuild the core to pick it up (`node scripts/build-chip-core.js`).
   - **The corpus and the harness live in the dev space.** `dev/mdx-corpus/`

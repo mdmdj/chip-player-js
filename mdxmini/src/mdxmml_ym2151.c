@@ -690,17 +690,6 @@ mdx_parse_mml_get_loops_per_section(void* in_self)
   return self->loops_per_section;
 }
 
-// DEV-BEGIN (dev-only: dev/mdx-native/region.c reads the fade onset to prove the
-// gate lands on the joint section boundary; no shipped caller, so it does not
-// belong in the PR)
-int
-mdx_parse_mml_get_fade_out(void* in_self)
-{
-  if (!in_self) return 0;
-  return ((mdxmml_ym2151_instances *)in_self)->fade_out;
-}
-// DEV-END
-
 
 
 

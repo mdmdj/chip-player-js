@@ -1000,7 +1000,10 @@ CREATE INDEX idx_subtune_music ON subtune(music_id);
   (the old per-table `music_fts`/`subtune_fts` pair and its triggers are dropped
   by the build). `song.file_title` carries the file's name, so a folder-name
   query finds every song the file holds; `title` is the sub-tune's own label,
-  `NULL` when it has none (the client shows `Tune N`).
+  `NULL` when it has none (the client shows `Tune N`). `rebuildSongs()` runs in
+  the build's `finally` and on SIGINT, so a run that aborts part way still leaves
+  the index consistent with music + subtune -- the property the dropped triggers
+  provided at write time.
 - `processFile` clears a file's old sub-tune rows **before** the
   `INSERT OR REPLACE` on `music` (foreign keys are enforced, so the replace
   would otherwise fail). A `ensureColumn` shim adds `release_date`/`date` to

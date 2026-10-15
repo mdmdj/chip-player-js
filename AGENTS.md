@@ -458,6 +458,13 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
     loading to the empty message), and a failed parse (the panel still leaves the
     loading state). The first case's `empty: true` is the reported symptom, and it
     fails against the pre-fix code.
+  - `dev/record/check-xmp-passcount.mjs` — the XMP pass-target contract on a real
+    engine: a seek must not leave an armed target describing a different pass than
+    the one the engine is in (libxmp's frame-accurate seek zeroes its completed-loop
+    counter by forcing an `xmp_play_buffer` refresh). It asserts the *relation*
+    rather than a number, so it is engine-version-agnostic, and it fails against
+    the pre-fix code (`target=2 curLoop=0`). Needs the dev server and
+    `mods/TECHTRIS.MOD`; skips (exit 2) without it.
   - `./dev/run-tests.sh` — runs all of the above. Dev-only, not part of the PR.
   - `dev/README.md` documents the shims.
   - Two tracked seams keep the untracked overrides loadable without touching
@@ -1443,26 +1450,25 @@ checks no longer work. Compare a live context to a stored one with
     copy in `getDisplayPositionMs` went with them. Pinned by a pair of checks in
     `dev/test-gme-loops.js` (full-scale samples vs an attenuated mix, since a
     fresh fade is only ~1% down); the negative control fails only the first.
-  - **Measured and closed (2026-10-15): the XMP "a seek re-arms the pass count"
-    report does not reproduce.** `_loopCount` is a *total* pass target compared
-    against libxmp's completed-loop counter (`player.c:2233`, `fi.loop_count >=
-    loop`), and only two things reset that counter -- `xmp_restart_module`
-    (`control.c:237`) and the explicit `xmp_play_buffer(ctx, NULL, ...)` reset
-    (`player.c:2216`); neither seek path touches it. Probed in the app on
-    `mods/TECHTRIS.MOD`: `getCurLoop()` stayed 0 through seeks forward past the
-    loop end and backward into the intro, with repeat on and off, on the
-    frame-accurate API and (deleting the export at runtime) the snapping
-    fallback; it went 0 -> 1 only when a loop completed by *playing* (position
-    5400..7920 with one drop), which is the intended behaviour. A source-reading
-    hypothesis of my own -- that the frame-accurate seek walks by calling
-    `xmp_play_frame` (`control.c`), which is where the counter increments, so the
-    seek itself could satisfy the target -- also failed to reproduce. Candidate
-    fix if some future engine vintage does show it: re-derive in `seekMs`,
-    `if (!this.looping && this._loopCount > 0) this._loopCount =
-    Math.max(1, this.getCurLoop() + 1)`, which can only raise the target and is a
-    no-op on the snapping API. A fake-core check cannot pin this (the harness
-    drives the loop counter itself, so it would only assert its own fake); the
-    measurement above is the record.
+  - **FIXED (2026-10-15): a seek under a pass target gave one pass too many
+    (XMP).** macroscope's `XMPPlayer.js:339` report, which I dismissed twice and
+    was wrong both times: a source reading concluded "no seek resets the counter",
+    and a first probe appeared to confirm it because it never had a target armed
+    *and* a counter above zero at the same time. The reset is one line of libxmp:
+    `xmp_seek_time_frame` ends with "Force an xmp_play_buffer refresh", and
+    `xmp_play_buffer(ctx, NULL, ...)` is where `p->loop_count = 0`
+    (`player.c:2216`). So with Repeat One off -- target = "finish the pass you're
+    in" -- a seek zeroed the counter and the armed target then promised that many
+    passes *from zero*: measured on `mods/TECHTRIS.MOD`, target 2 and `curLoop`
+    1 -> 0 across a mid-loop seek. `seekMs` now re-derives the target from the
+    counter the seek left, reading the frame info afresh (the cached copy is
+    pre-seek) and doing nothing on the snapping fallback, which never touches the
+    counter. Pinned by `dev/record/check-xmp-passcount.mjs`, which asserts the
+    *relation* (an armed target always describes the pass the engine is in)
+    rather than a number, so it holds whatever a future engine's seek does; it
+    fails against the pre-fix code with `target=2 curLoop=0`. The lesson is why
+    that check exists: two source readings and one probe all said "not a bug", and
+    only an assertion caught it.
   - **Deferred as legacy (2026-10-15): `toggleShuffle` passes a boolean to
     `setShuffle`, which takes a mode.** `SHUFFLE_ON`/`SHUFFLE_OFF` are `1`/`0`
     and `setShuffle` tests them with `===`, so `toggleShuffle()`'s

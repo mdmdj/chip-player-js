@@ -112,11 +112,12 @@ check('single subtune', () => {
   assert.strictEqual(m.artist, 'Rob Hubbard');
   assert.strictEqual(m.system, 'C64');
 });
-check('multi subtune + packed PAL speed bits', () => {
-  // Song 0 and 2 are PAL, song 1 and 3 are NTSC.
+check('multi subtune count', () => {
   const m = parseMetadata(buildSID({ numSongs: 4, name: 'M', author: 'A', released: 'R', speedBits: 0b0101 }), 'sid');
   assert.strictEqual(m.numSongs, 4);
-  assert.deepStrictEqual(m.speeds, ['PAL', 'NTSC', 'PAL', 'NTSC']);
+  // The per-song PAL/NTSC table (in the 32-bit field at 0x12) is not exposed:
+  // nothing consumes it, and the old offset sat inside the title.
+  assert.strictEqual(m.speeds, undefined);
 });
 check('rejects missing signature', () => {
   const m = parseMetadata(Buffer.alloc(0x100), 'sid');
@@ -228,10 +229,9 @@ realTest('SID files have plausible metadata', 'sid', 'sid', (m, f) => {
   // artist may be unknown; a bare "<?>"/"?" is normalized to absent by cleanString.
 });
 
-realTest('RSID files parse like PSID (counts + speeds)', 'sid', 'sid', (m, f) => {
+realTest('RSID files parse like PSID (counts)', 'sid', 'sid', (m, f) => {
   if (!f.startsWith('RSID_')) return;
   assert.ok(m.numSongs > 1, `${f}: expected multi-song RSID, got ${m.numSongs}`);
-  assert.ok(Array.isArray(m.speeds) && m.speeds.length === m.numSongs, `${f}: speed table mismatch`);
 });
 
 realTest('NSF files have plausible metadata', 'nsf', 'nsf', (m, f) => {

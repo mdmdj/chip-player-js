@@ -254,7 +254,11 @@ export default class XMPPlayer extends Player {
           // become the loop start. Learning simply never fires here.
           this._skipOrder = pos;
         } else {
-          seen.set(pos, this._positionMs);
+          // Order 0's first visit is the song's start; _positionMs has already
+          // advanced by a buffer, so record 0 rather than a small nonzero intro
+          // (which would pass the loopStartMs > 0 test and draw a false band for
+          // a track that loops from its end back to the start).
+          seen.set(pos, pos === 0 && seen.size === 0 ? 0 : this._positionMs);
         }
       } else if (pos < this._lastPos && this.metadata && this.metadata.intro_length == null) {
         const loopStartMs = seen.get(pos);

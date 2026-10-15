@@ -382,28 +382,31 @@ async function main() {
     assertDisplay(p, BAND_START, 'folds into the band again');
   });
 
-  // The engine's fade limit counts per-track loops, while the band counts joint
-  // sections -- the same unit only when every track shares a period. MDXPlayer
-  // must hand the engine a limit in the engine's own unit (greptile,
-  // MDXPlayer.js:228).
-  await check('leaving repeat hands the engine its own section limit', async () => {
+  // The engine's fade limit is the joint-section count the band is drawn from,
+  // even when one section is several repeats of the longest track. MDXPlayer
+  // hands it that count directly (mdxmml_ym2151.c's loop_gate_value does the
+  // projection per track), so the old per-track projection must not reappear.
+  await check('leaving repeat hands the engine the joint section count', async () => {
     const { p, core } = await makePlayer({ perSection: 2, sectionLimit: 7 });
     p.setLooping(true);
     await drive(p, core, [BAND_END + 1000]);
     p.setLooping(false);
-    assert.strictEqual(core.lastMaxLoopArg, 7,
-      `expected the engine's own limit 7, got ${core.lastMaxLoopArg}`);
+    // The projection getters would say 7 (the old per-track limit); the joint
+    // sections completed here are 2, so the floor makes it 3.
+    assert.strictEqual(core.lastMaxLoopArg, 3,
+      `expected the joint section count 3, got ${core.lastMaxLoopArg}`);
   });
 
-  await check('the two-pass floor stays in sections when the units differ', async () => {
-    // A limit of 3 is behind the floor of two sections (2 sections x 3 counters),
-    // so the floor wins: the fade must not land inside the first pass.
+  await check('the two-pass floor is the same number with mixed periods', async () => {
+    // A projection of 3 is behind the floor of two sections (2 sections x 3
+    // counters), but the engine reads sections now, so the floor is two and the
+    // pass in progress makes three.
     const { p, core } = await makePlayer({ perSection: 3, sectionLimit: 3 });
     p.setLooping(true);
     await drive(p, core, [BAND_END + 1000]);
     p.setLooping(false);
-    assert.strictEqual(core.lastMaxLoopArg, 6,
-      `expected the section floor 2*3, got ${core.lastMaxLoopArg}`);
+    assert.strictEqual(core.lastMaxLoopArg, 3,
+      `expected the section floor 3, got ${core.lastMaxLoopArg}`);
   });
 
   await check('a core without the getters keeps the joint-count behaviour', async () => {
@@ -417,17 +420,17 @@ async function main() {
       `expected the joint fallback, got ${core.lastMaxLoopArg}`);
   });
 
-  // The engine's limit and the slider's pass count are different units; the
-  // display must keep using the joint section count or the band folds straight
-  // through the audible fade (greptile P2, macroscope MDXPlayer.js:193).
-  await check('the display stays in sections while the engine gets counters', async () => {
+  // The engine's limit and the slider's pass count are the same unit now, so the
+  // display cannot fold the band through the audible fade (greptile P2,
+  // macroscope MDXPlayer.js:193).
+  await check('the display and the engine agree on the joint section count', async () => {
     const { p, core } = await makePlayer({ perSection: 2, sectionLimit: 7 });
     p.setLooping(true);
     await drive(p, core, [BAND_END + 1000]);
     p.setLooping(false);
-    assert.strictEqual(core.lastMaxLoopArg, 7, `engine limit=${core.lastMaxLoopArg}`);
     const curLoop = Math.max(0, Math.floor((core.abs - A) / B));
     const sections = Math.max(2, curLoop + 1);
+    assert.strictEqual(core.lastMaxLoopArg, sections, `engine limit=${core.lastMaxLoopArg}`);
     assert.strictEqual(p._maxLoopCount, sections, `display passes=${p._maxLoopCount}`);
     assert.strictEqual(p._fadeStartMs(), A + sections * B, `fadeStartMs=${p._fadeStartMs()}`);
   });

@@ -26,6 +26,24 @@ find catalog/mdx -iname '*.MDX' | dev/mdx-native/region
 puts on `metadata.intro_length` / `loop_length`, i.e. the slider band. It forks
 per file, so a malformed MDX cannot abort a corpus run.
 
+With `--play <ms>` it first renders that much audio (with `mdx_set_max_loop(0)`,
+as Repeat One does), then appends:
+
+```
+<per_section>  <limit>  <played_ms>  <ended_ms>  <engine_min>
+<section_end_ms>  <fade_onset_ms>
+```
+
+`per_section` is `mdx_get_loops_per_section()` — how many per-track repeats one
+joint section is worth. `--sections` hands the engine the joint-section count
+(the unit `MDXPlayer` uses now) and sets `section_end_ms` to the boundary that
+count names, `intro + limit * loop`; without it `limit` is the old
+`mdx_get_section_loop_limit()` projection and `section_end_ms` is the next
+boundary. `fade_onset_ms` is the elapsed time the engine actually starts its
+fade (a dev-only getter, `mdx_parse_mml_get_fade_out`), or -1 if it never did
+inside the render bound. `--limit N` overrides what is applied, which is the
+negative control.
+
 Golden fixtures (skipped when `catalog/mdx` is absent — `catalog/` is
 gitignored):
 
@@ -33,8 +51,29 @@ gitignored):
 make -C dev/mdx-native check
 # ok    G2MST6.MDX -> [34603  34603]  verified-good; the fix must not move it
 # ok    DTWNB18.MDX -> [0      14942]  one-shot held the min; band was [5078, 12403]
-# ok    FACE04.MDX -> [182452 22806]  two loop periods; one-shot delayed the first
+# ok    FACE04.MDX -> [182452 45613]  two period groups, entering their loops 22.8s apart
+# ok    DES_80.MDX per=2 limit=2 fade=11097 vs section_end=11058  one section = 2 repeats
+# ...
 ```
+
+## The fade gate counts sections, not tracks (fixed 2026-10-16)
+
+`mdx_set_max_loop(N)` is compared against the engine's pass counter, which is
+the **smallest per-track loop count**. The band, though, is the *joint* section:
+when the tracks differ in period one section is several repeats of the longest
+track (`loops_per_section > 1`), so a limit in sections fired a whole section
+early. `loop_gate_value` (in `mdxmml_ym2151.c`) reduces each live track's count
+to the sections it has finished and takes the smallest, which turns exactly on
+the joint boundary; `loops_per_section <= 1` keeps the raw minimum, so the per=1
+path is untouched.
+
+`check_sections` in `check.sh` is the evidence: with the section count handed to
+the engine, the fade must begin at `intro + limit * loop`. Against the pre-fix
+engine the same rows fail by 20-90% of the loop (e.g. `RANCE11.MDX`
+`fade=67429 vs section_end=695598`). The onset can only land on a tick and the
+joint period is measured, so the check allows 1% of the loop, floor 500 ms.
+Fixtures for `per` 2/3/5/6/8/16 are in `catalog/mdx/` (see `curate-sample.js`
+below); `dev/test-mdx-loops.js` pins the player half against a fake core.
 
 ## What it found — the loop-region bug (fixed 2026-10-15)
 

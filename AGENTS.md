@@ -2090,27 +2090,42 @@ only armed when `silenceDuration >= 0`, and both arms must end the song):
     present. A sample of the corpus (37 MDX + their PDX, incl. the trigger
     fixtures) is in `catalog/mdx/` — note the app uppercases the PDX name it
     fetches, so companions must be uppercase on a case-sensitive filesystem.
-- **The limit's unit: per-track counters, not sections (greptile, 2026-10-15).**
-  `mdx_set_max_loop(N)` is compared against the *smallest per-track* loop counter
-  (`mdxmml_ym2151.c`'s fade test: `infinite_loops` = the min over live tracks),
-  while `MDXPlayer.getCurLoop()` counts the **joint** section the band is drawn
-  from. Those are the same only when every track shares a period: 4 s and 6 s
-  tracks make a 12 s section, so at 30 s the counters read 7 and 5 while the
-  section count is 2, and `max(2, curLoop+1)` is already exceeded — the fade
-  starts at once instead of finishing the section. Two new getters close it:
-  `mdx_get_section_loop_limit()` (the engine's own counter at the first boundary
-  at/after the section now playing) and `mdx_get_loops_per_section()` (how many
-  counters one section is worth, so the two-pass floor can stay in sections).
-  `applyLoopCount` uses them when present and keeps the joint count otherwise.
-  **Coverage, measured:** `per > 1` is what makes the two units differ, and it is
-  rare — **0 of 37** catalog MDX and **0 of 140** sampled corpus files have it
-  (`dev/mdx-native/region --play` prints the columns). So this is a
-  latent-correctness fix, not a reproduction of shipped behaviour: the app is
-  unaffected on every file measured, and the wiring is pinned in
-  `dev/test-mdx-loops.js` (3 checks; the fixture core reports the two units
-  separately, and forcing the player to ignore the getters fails two of them).
-  Worth re-running the `per` scan (see region.c's header) if a file that needs it
-  ever turns up.
+- **The limit's unit — the engine counts sections now (2026-10-16).** Superseded
+  the 2026-10-15 two-getter projection below. `mdx_set_max_loop(N)` used to be
+  compared against the *smallest per-track* loop counter (`mdxmml_ym2151.c`'s
+  fade test: `infinite_loops` = the min over live tracks) while the band counts
+  the **joint** section — the same unit only when every track shares a period.
+  `mdx_get_section_loop_limit()` (the projection) compensated, but only by
+  `ceil`-ing the section end onto the next per-track boundary, so measurement
+  jitter rounded a near-boundary up by a whole period: `MTS2_32.MDX` (per=16)
+  faded at 233586 against a section end of 226688, one slowest-track period
+  late, and every `per>1` file measured was off by 20–90% of the loop in one
+  direction or the other.
+  Now the engine does the projection itself: `loop_gate_value`
+  (`mdxmml_ym2151.c`) reduces each live track's count to the sections it has
+  finished (`infinite_loop_times / round(L / p_track)`) and takes the smallest,
+  which turns exactly on the joint boundary; `loops_per_section <= 1` returns
+  the raw minimum, so the per=1 path is untouched. `MDXPlayer.applyLoopCount`
+  therefore hands the engine `_maxLoopCount` directly — one number, one unit
+  (the `_engineMaxLoop` field is gone). `mdx_get_section_loop_limit()` and
+  `mdx_get_loops_per_section()` stay exported and unchanged, now used only by
+  `dev/mdx-native/region.c` (the native harness) — **candidates for removal at
+  promotion** if nothing else wants them.
+  **Coverage, measured:** `per > 1` is what makes the units differ, and it is
+  still rare in the wild (**0 of 37** catalog MDX beyond the fixtures below, **0
+  of 140** sampled corpus files), so this is latent correctness, not a
+  reproduction of shipped behaviour. `catalog/mdx/` now carries the shapes
+  (`per` = 2/3/5/6/8/16, via `dev/mdx-native/curate-sample.js`; `MTS2_32.MDX`
+  needs its hand-copied uppercase `MOTOS.PDX`). Evidence: `check_sections` in
+  `dev/mdx-native/check.sh` — with the section count handed to the engine the
+  fade begins at `intro + limit*loop`, within 1% of the loop (the onset can only
+  land on a tick and the joint period is measured); against the pre-fix engine
+  the same six rows fail, e.g. `RANCE11.MDX` `fade=67429 vs section_end=695598`.
+  `dev/test-mdx-loops.js` pins the player half (3 checks fail against the old
+  `_engineMaxLoop` projection). Fixtures: `DES_80`(2) `ran321`(3) `NOS123`(5)
+  `VAL5`(6) `27_CLEAR`(8) `MTS2_32`/`RANCE11`/`M9`/`v8`(16). **Note the wasm is
+  not rebuilt for this**: `node scripts/build-chip-core.js` before judging the
+  app on a per>1 file (none are in the catalog, so nothing visible moves).
 - **Player.** `MDXPlayer` mirrors `VGMPlayer`: `setLooping` drives
   `_mdx_set_max_loop` (0 while repeating, else `max(2, curLoop+1)` when actually
   leaving so the current pass finishes and the engine fades), `getDisplayPositionMs`

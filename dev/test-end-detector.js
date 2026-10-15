@@ -359,6 +359,19 @@ async function main() {
     assert.ok(core.state.seeks.includes(0), 'restartTrack() seeks back to zero');
   });
 
+  await check('indefinite playback (repeat off) restarts a silent tail too', async () => {
+    // Not a bug, pinned so it stays that way: detectSongEnd is not scoped to
+    // Repeat One. The Indefinite Playback setting free-runs the engine the same
+    // way, so a one-shot whose content has ended must be re-run rather than left
+    // silent forever -- the same policy SIDPlayer uses.
+    const { p, core } = await makeN64Player({ durationMs: 0 });
+    p.setLooping(false);
+    p.setParameter('indefinitePlayback', true);
+    assert.strictEqual(p.isPlayingIndefinitely(), true, 'the setting owns indefinite playback');
+    runN64(p, core, Array(14).fill(second(TAIL_LEVEL)));
+    assert.ok(core.state.zeroSeeks >= 1, 'the tail is detected and the tune re-run');
+  });
+
   await check('repeat one reaches the N64 engine as indefinite playback', async () => {
     const { p, core } = await makeN64Player({ durationMs: 60000 });
     p.setLooping(false);

@@ -450,6 +450,14 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
     rows). `--subtune=N`, `--single` and `--shuffle` cover the neighbours the fix
     must not disturb; the default and `--shuffle` fail against the pre-fix code
     and the other two pass against it, so a failure means a regression.
+  - `dev/record/check-local-loading.mjs` — the Local Files panel says it is
+    loading instead of claiming the library is empty while it is still being read
+    (PR #10, macroscope `App.js:826`). It holds the lazy `subtune-headers` chunk
+    open to make that window deterministic, and covers three cases: files present
+    (loading text, no empty message, then the listing), nothing to load (through
+    loading to the empty message), and a failed parse (the panel still leaves the
+    loading state). The first case's `empty: true` is the reported symptom, and it
+    fails against the pre-fix code.
   - `./dev/run-tests.sh` — runs all of the above. Dev-only, not part of the PR.
   - `dev/README.md` documents the shims.
   - Two tracked seams keep the untracked overrides loadable without touching

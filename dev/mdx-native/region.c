@@ -76,6 +76,10 @@ static void one(const char *path) {
   int loop = mdx_get_loop_length_ms(&d);
   int per = 0, limit = 0, played = 0, ended = 0, engine_min = 0;
 
+  /* Measured at parse time, so it is readable without playback: this is the
+     column a corpus-wide "how many files have per > 1" scan reads. */
+  per = mdx_get_loops_per_section(&d);
+
   if (play_ms > 0) {
     /* The same call the player makes, so the track counters advance the way
      * they do in the app; the engine's own clock decides when to stop.
@@ -94,7 +98,6 @@ static void one(const char *path) {
       if (d.mdx->elapsed_time == last && ++stalled > 1000) break;   /* engine ended */
     }
     played = d.mdx ? (int)(d.mdx->elapsed_time / 1000) : 0;
-    per = mdx_get_loops_per_section(&d);
     limit = mdx_get_section_loop_limit(&d);
     engine_min = engine_min_loops(&d);
 

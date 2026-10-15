@@ -1443,6 +1443,26 @@ checks no longer work. Compare a live context to a stored one with
     copy in `getDisplayPositionMs` went with them. Pinned by a pair of checks in
     `dev/test-gme-loops.js` (full-scale samples vs an attenuated mix, since a
     fresh fade is only ~1% down); the negative control fails only the first.
+  - **Measured and closed (2026-10-15): the XMP "a seek re-arms the pass count"
+    report does not reproduce.** `_loopCount` is a *total* pass target compared
+    against libxmp's completed-loop counter (`player.c:2233`, `fi.loop_count >=
+    loop`), and only two things reset that counter -- `xmp_restart_module`
+    (`control.c:237`) and the explicit `xmp_play_buffer(ctx, NULL, ...)` reset
+    (`player.c:2216`); neither seek path touches it. Probed in the app on
+    `mods/TECHTRIS.MOD`: `getCurLoop()` stayed 0 through seeks forward past the
+    loop end and backward into the intro, with repeat on and off, on the
+    frame-accurate API and (deleting the export at runtime) the snapping
+    fallback; it went 0 -> 1 only when a loop completed by *playing* (position
+    5400..7920 with one drop), which is the intended behaviour. A source-reading
+    hypothesis of my own -- that the frame-accurate seek walks by calling
+    `xmp_play_frame` (`control.c`), which is where the counter increments, so the
+    seek itself could satisfy the target -- also failed to reproduce. Candidate
+    fix if some future engine vintage does show it: re-derive in `seekMs`,
+    `if (!this.looping && this._loopCount > 0) this._loopCount =
+    Math.max(1, this.getCurLoop() + 1)`, which can only raise the target and is a
+    no-op on the snapping API. A fake-core check cannot pin this (the harness
+    drives the loop counter itself, so it would only assert its own fake); the
+    measurement above is the record.
   - **Deferred as legacy (2026-10-15): `toggleShuffle` passes a boolean to
     `setShuffle`, which takes a mode.** `SHUFFLE_ON`/`SHUFFLE_OFF` are `1`/`0`
     and `setShuffle` tests them with `===`, so `toggleShuffle()`'s

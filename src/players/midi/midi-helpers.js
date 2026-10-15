@@ -1,6 +1,6 @@
 import MIDIEvents from './MIDIEvents';
 import MIDIFile from './MIDIFile';
-const { EVENT_MIDI, EVENT_MIDI_CONTROLLER, EVENT_MIDI_NOTE_ON } = MIDIEvents;
+const { EVENT_MIDI, EVENT_MIDI_CONTROLLER, EVENT_MIDI_NOTE_ON, EVENT_MIDI_NOTE_OFF } = MIDIEvents;
 
 const CC_64_SUSTAIN = 64;
 // Loop-point controllers. N64 marks a CC102 (start) / CC103 (end) pair on
@@ -158,10 +158,47 @@ class EventIterator {
           this.absTicks[idx] > loop.endTick &&
           e.type === EVENT_MIDI && e.subtype === EVENT_MIDI_NOTE_ON && e.param2 > 0);
       }
+      // Notes that cross the seam, released at every replay boundary (see
+      // rebaseReplay). A release sitting past the loop end is still pending when
+      // the replay re-triggers the same pitch, and a second NoteOn for a
+      // sounding note is invalid; the noteless path gets the same cut for free
+      // when it collapses the outro, but a composed ending keeps its own timing,
+      // so the crossing notes have to be tracked and cut explicitly. Nothing is
+      // cut when the loop *plays out* into that ending -- there the release is
+      // the composer's, and the note rings on as written.
+      this.pendingReleases = null;
+      this.seamReleases = [];
+      const ringing = new Map();
+      for (let i = 0; i < this.events.length && this.absTicks[i] <= endTick; i++) {
+        const e = this.events[i];
+        if (e.type !== EVENT_MIDI) continue;
+        if (e.subtype === EVENT_MIDI_NOTE_ON && e.param2 > 0) {
+          ringing.set(`${e.channel}-${e.param1}`, { channel: e.channel, pitch: e.param1 });
+        } else if (e.subtype === EVENT_MIDI_NOTE_OFF ||
+                   (e.subtype === EVENT_MIDI_NOTE_ON && e.param2 === 0)) {
+          ringing.delete(`${e.channel}-${e.param1}`);
+        }
+      }
+      for (const note of ringing.values()) {
+        this.seamReleases.push({
+          delta: 0,
+          type: EVENT_MIDI,
+          subtype: EVENT_MIDI_NOTE_OFF,
+          channel: note.channel,
+          param1: note.pitch,
+          param2: 0,
+          absTick: endTick,
+        });
+      }
     }
   }
 
   next() {
+    // A crossing note's release, queued by the replay that triggered it (see
+    // rebaseReplay), is emitted before the replayed pass resumes.
+    if (this.pendingReleases && this.pendingReleases.length) {
+      return this.pendingReleases.shift();
+    }
     // A track that runs past the loop end — or ends exactly on it — replays
     // the loop segment until its passes run out. Anything past the loop end
     // then plays once as the outro.
@@ -174,6 +211,11 @@ class EventIterator {
         this.elapsedLoops++;
         this.rebaseReplay();
         this.pos = this.startIdx;
+        // The releases queued by rebaseReplay come first: the replay's own
+        // events start on the following call, with replayDelta already set.
+        if (this.pendingReleases && this.pendingReleases.length) {
+          return this.pendingReleases.shift();
+        }
       } else {
         if (this.passesLeft > 1) {
           // Nothing inside the loop to replay (this track's first event is past
@@ -211,6 +253,11 @@ class EventIterator {
         this.elapsedLoops++;
         this.rebaseReplay();
         this.pos = this.startIdx;
+        // The releases queued by rebaseReplay come first: the replay's own
+        // events start on the following call, with replayDelta already set.
+        if (this.pendingReleases && this.pendingReleases.length) {
+          return this.pendingReleases.shift();
+        }
       } else {
         return null;
       }
@@ -245,8 +292,19 @@ class EventIterator {
   // per pass. The event's own delta would instead be the gap from its pre-loop
   // neighbor, which shifts every repeat by that intro gap.
   rebaseReplay() {
-    this.replayDelta = (this.boundaryTick - this.curTick) +
-      (this.absTicks[this.startIdx] - this.loop.startTick);
+    // The pass that just ended left its crossing notes sounding (seamReleases):
+    // release them at the boundary, before the replay re-triggers the same
+    // pitch. The first release carries the gap to the boundary, and the
+    // replay's own first event then starts one loop length from there -- where
+    // it would have started anyway -- so only the cut is new.
+    const gap = this.boundaryTick - this.curTick;
+    const replay = this.absTicks[this.startIdx] - this.loop.startTick;
+    if (this.seamReleases && this.seamReleases.length) {
+      this.pendingReleases = this.seamReleases.map((event, i) => ({ ...event, delta: i === 0 ? gap : 0 }));
+      this.replayDelta = replay;
+    } else {
+      this.replayDelta = gap + replay;
+    }
     this.boundaryTick += this.loopLength;
   }
 }

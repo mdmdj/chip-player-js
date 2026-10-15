@@ -224,8 +224,23 @@ export default class MDXPlayer extends Player {
       // toggle (Repeat Off <-> All) must not reset a count already extended for
       // a deep pass, or the engine fades the pass short.
       if (hasLoop) {
+        // The engine compares max_infinite_loops against the *smallest
+        // per-track* loop counter (mdxmml_ym2151.c, the fade test), while
+        // getCurLoop() counts the joint section the slider band is drawn from.
+        // Those are the same unit only when every track shares a period: with
+        // 4 s and 6 s tracks the section is 12 s, so a limit taken from the
+        // section count is already exceeded and the fade starts at once. Ask
+        // the engine for the limit that ends the section now playing, and for
+        // how many counters one section is worth so the two-pass floor can stay
+        // in sections. A core built before those getters keeps the joint count.
+        const sectionLimit = typeof this.core._mdx_get_section_loop_limit === 'function'
+          ? this.core._mdx_get_section_loop_limit(this.mdxCtx) : 0;
+        const perSection = typeof this.core._mdx_get_loops_per_section === 'function'
+          ? this.core._mdx_get_loops_per_section(this.mdxCtx) : 0;
         const curLoop = this.getCurLoop();
-        this._maxLoopCount = Math.max(DEFAULT_LOOP_COUNT, curLoop + 1);
+        this._maxLoopCount = (sectionLimit > 0 && perSection > 0)
+          ? Math.max(DEFAULT_LOOP_COUNT * perSection, sectionLimit)
+          : Math.max(DEFAULT_LOOP_COUNT, curLoop + 1);
         // Leaving after passing the default fade: the position is already past
         // the reported duration, so the base end detector must stand down and
         // let the engine's fade end the song (the display runs its tail from

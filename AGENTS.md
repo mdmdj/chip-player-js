@@ -1199,6 +1199,19 @@ checks no longer work. Compare a live context to a stored one with
 
 ## Session hand-off notes (read me first)
 
+- **MDX loop-region fix + corpus (2026-10-15).** `mdxmini`'s region recording
+  took the min `infinite_loop_times` across *playing* tracks, so a one-shot track
+  (one that never loops) held it at 0 and its dropout was read as the first loop:
+  the slider band started late, or was dropped entirely. Fixed in
+  `mdxmini/src/mdxmml_ym2151.c` (`c66e78832`) by resolving the region from the
+  tracks that loop; details under "MDX (mdxmini)". The reference corpus is
+  `dev/mdx-corpus/` (gitignored — NFG's *MXDRV Complete* + Eidis, ~67k MDX) and
+  the native harness is `dev/mdx-native/` — the only way to test the C, since the
+  JS harnesses fake the region getters (`make -C dev/mdx-native check` runs golden
+  fixtures). A 37-file sample, incl. the trigger fixtures, is in `catalog/mdx/`.
+  Two gotchas: rebuild the core (`node scripts/build-chip-core.js`) after touching
+  `mdxmini`, and the running WDS will **not** re-emit a changed
+  `chip-core.<hash>.wasm` — restart `npm run dev` or you keep testing the old core.
 - **VGM position is song-time (verified 2026-10-09).** If the footer head ever
   jumps when the Speed slider changes, check that the linked libvgm's
   `PlayerA::GetCurTime` scales by `GetPlaybackSpeed()` (it does unless
@@ -1809,9 +1822,9 @@ only armed when `silenceDuration >= 0`, and both arms must end the song):
   **two passes** (`DEFAULT_LOOP_COUNT = 2`) — the library default is three, but
   two matches libvgm and the app's `getLoopBandMs` model, so MDX reuses the
   generic band/fold.
-- **Exact region, no guessing.** The parser records the engine's `elapsed_time`
-  when the song as a whole completes its 1st and 2nd loop (min
-  `infinite_loop_times` across tracks still playing). New getters
+- **Exact region, no guessing.** The parser records each track's `elapsed_time`
+  when it completes its 1st and 2nd loop; the song region is resolved from those
+  using only the tracks that loop at all (see the fix below). New getters
   `mdx_get_loop_start_ms` / `mdx_get_loop_length_ms` expose intro/loop in ms
   (valid only immediately after `mdx_get_length`, which is what runs the parse
   and then resets playback state). `_readLoopRegion` reads them once at load and
@@ -1819,6 +1832,33 @@ only armed when `silenceDuration >= 0`, and both arms must end the song):
   `VGMPlayer` maps libvgm. An earlier idea — deriving the region from
   `get_length(k)` differences plus a fade estimate — was abandoned: the fade
   length depends on the end tempo, so the intro would be off by many seconds.
+- **Loop-region bug fixed 2026-10-15 (min-over-playing → tracks that loop).**
+  The recorder took the minimum `infinite_loop_times` across tracks *still
+  playing*. A track that never loops (a one-shot) stays at 0, so it held the
+  minimum until it ended, and its dropout was then read as the first loop: the
+  band started late, or — if it outlived a full pass, so the minimum jumped by
+  more than one — the old guard dropped the band entirely, even on songs with a
+  clear loop (`DTWNB18.MDX`, a Detana Twinbee file, moved from a band of
+  `[5078, 12403]` to `[0, 14942]`). Fixed in `mdxmini/src/mdxmml_ym2151.c`
+  (commit `c66e78832`): each track's 1st/2nd loop time is recorded and the region
+  is resolved from the tracks that loop, so a one-shot cannot gate the boundary.
+  The engine's pass/fade minimum is untouched, so repeat-off timing is unchanged;
+  the fix only affects the region the band is drawn from. Measured over 4,706
+  candidate MDX: **4,347 unchanged, 311 corrected**. The fix reuses one context
+  across songs, so `mdx_get_length` clears the per-track times each run.
+  Rebuild the core to pick it up (`node scripts/build-chip-core.js`).
+  - **The corpus and the harness live in the dev space.** `dev/mdx-corpus/`
+    (gitignored) holds the reference archives — NFG's *MXDRV Complete*
+    (`MDXO_-_MXDRV_Complete_.7z`, 54,738 MDX) and Eidis's `MDX.zip` (12,310), from
+    `nfggames.com/X68000/Music/`; `dev/mdx-native/` builds mdxmini as a normal
+    Linux binary and runs `region.c` over a file list (the JS harnesses cannot
+    reach the C), plus an optional mdxtools-based `scan-tracks` that lists each
+    track's end command (`0xF1 00` = one-shot, `0xF1 nn` = loop) — the tool that
+    found the trigger shape. `make -C dev/mdx-native check` runs the golden
+    fixtures (G2MST6 unchanged, DTWNB18/FACE04 corrected) when `catalog/mdx` is
+    present. A sample of the corpus (37 MDX + their PDX, incl. the trigger
+    fixtures) is in `catalog/mdx/` — note the app uppercases the PDX name it
+    fetches, so companions must be uppercase on a case-sensitive filesystem.
 - **Player.** `MDXPlayer` mirrors `VGMPlayer`: `setLooping` drives
   `_mdx_set_max_loop` (0 while repeating, else `max(2, curLoop+1)` when actually
   leaving so the current pass finishes and the engine fades), `getDisplayPositionMs`

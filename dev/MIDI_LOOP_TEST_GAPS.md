@@ -87,7 +87,10 @@ Everything else (20 files) has no loop markers.
   once.
 3. **The #4 latch/restore is barely touched by real data**: all looped files
    have a single tempo event at tick 0, so "tempo in force at `startTick`" is
-   only meaningfully exercised by the synthetic check.
+   only meaningfully exercised by the synthetic check. The multi-track merge's
+   restore is per pass (see the check "the tempo restore repeats on a third and
+   later pass"); that check is the only one asking for more than two passes, so
+   it is what keeps a third-pass regression from going unnoticed.
 4. **Durability caveat.** Because `catalog/` is gitignored, the real-file checks
    are opportunistic; the synthetic checks are what always runs.
 

@@ -444,6 +444,12 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
     re-hydrates and hides the bug ("missing until another toggle or reload").
     Not in `run-tests.sh`: they need a browser and a saved favorite, and skip
     (exit 2) without one.
+  - `dev/record/check-local-delete.mjs` — deleting the *playing* local file hands
+    the transport to the song that followed it (PR #10, macroscope `App.js:886`:
+    the old clamp landed past the follower because a multi-song file is several
+    rows). `--subtune=N`, `--single` and `--shuffle` cover the neighbours the fix
+    must not disturb; the default and `--shuffle` fail against the pre-fix code
+    and the other two pass against it, so a failure means a regression.
   - `./dev/run-tests.sh` — runs all of the above. Dev-only, not part of the PR.
   - `dev/README.md` documents the shims.
   - Two tracked seams keep the untracked overrides loadable without touching

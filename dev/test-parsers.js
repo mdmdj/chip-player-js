@@ -177,6 +177,20 @@ check('single track still yields its label as title', () => {
   assert.strictEqual(m.numSongs, 1);
   assert.strictEqual(m.title, 'Only');
 });
+check('an offset pointing before the buffer is treated as absent', () => {
+  const bytes = buildAY({ numSongs: 2, author: 'Tim Follin', comment: 'Game', labels: ['Menu', 'Level 1'] });
+  // The author field (0x0C) and each track entry's name offset are signed and
+  // relative to their own position. -0x400 points before byte 0; subarray() used
+  // to resolve that from the buffer's end and return trailing bytes as the
+  // string, so the tail's text could surface as the author or a sub-tune label.
+  bytes.writeInt16BE(-0x400, 0x0C);
+  const tracksPos = 0x12 + bytes.readInt16BE(0x12);
+  bytes.writeInt16BE(-0x400, tracksPos);
+  const m = parseMetadata(bytes, 'ay');
+  assert.strictEqual(m.artist, undefined, `author came from the tail: ${JSON.stringify(m.artist)}`);
+  assert.strictEqual(m.trackLabels[0], null, 'the invalid label is absent, not the tail');
+  assert.strictEqual(m.title, undefined, 'no title is taken from an invalid label');
+});
 check('rejects missing signature', () => {
   const m = parseMetadata(Buffer.alloc(0x40), 'ay');
   assert.strictEqual(m.system, 'ZX Spectrum');

@@ -37,8 +37,10 @@ public/sitemap*.xml
 dev/nes-audio-tests/
 dev/.promote-armed
 
-# dev/rebase.sh's scratch state: the pre-rebase tip, kept for the failure path.
+# dev/rebase.sh's scratch state: the pre-rebase tip and the merge base it is
+# checked against, both kept for the failure path (cleaned on a clean run).
 dev/.pre-rebase
+dev/.pre-rebase.mb
 
 # dev/fetch-seo-fixtures.mjs's file list, regenerated on each run.
 dev/.seo-fixtures.manifest

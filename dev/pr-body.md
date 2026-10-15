@@ -34,7 +34,7 @@ Sub-tunes: each is its own song (`{path, sub-tune}`), with its own favorites, sh
 
 ## Chip Core Reproducibility Is A Risk
 
-My dev wasm is built from **un-pinned sibling clones** (`../libvgm`, etc.), the way the README describes, so I can't prove funcitonality against the exact libvgm tree you build. Particularly, the libvgm loop math is speed-invariant by construction, but it assumes `Tick2Second` divides by the speed factor.
+My dev wasm is built from **un-pinned sibling clones** (`../libvgm`, etc.), the way the README describes, so I can't prove functionality against the exact libvgm tree you build. Particularly, the libvgm loop math is speed-invariant by construction, but it assumes `Tick2Second` divides by the speed factor.
 
 Very excited to contribute and happy to receive comments.
 

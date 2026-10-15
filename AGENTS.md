@@ -1030,9 +1030,11 @@ Verified on the real catalog: 6758 files, 1140 subtune rows, 87 multi-song files
     file system mtime** (as Unix seconds).
 - `/search` is **one** `searchSongStmt` over `song_fts` (see the schema above),
   ranked together, so a file and its sub-tunes are peers in one list and `limit`
-  bounds the response. Every hit carries `subtune` (0 for a single-song file) and
-  `title` (the sub-tune's label, or null), so each result is playable directly;
-  a file's name matches every song it holds. Search terms are quoted for FTS5
+  bounds the response. Every hit carries `subtune` (0 for a single-song file),
+  `title` (the sub-tune's label, or null) and `subtuneCount` (the song-folder
+  predicate -- the client heads a folder's songs with the folder itself, so
+  `isSongFolder(item)` decides `Tune N` vs a file name), so each result is
+  playable directly; a file's name matches every song it holds. Search terms are quoted for FTS5
   (`ftsQueryFor`), so punctuation in a title cannot break the query.
 - `/metadata?path=...&subtune=N` returns `subtuneTitle`.
 - `/shuffle` and `/random` return `{path, subtune}`, **one item per playable

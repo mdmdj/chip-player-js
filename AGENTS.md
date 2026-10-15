@@ -2031,6 +2031,27 @@ only armed when `silenceDuration >= 0`, and both arms must end the song):
     present. A sample of the corpus (37 MDX + their PDX, incl. the trigger
     fixtures) is in `catalog/mdx/` — note the app uppercases the PDX name it
     fetches, so companions must be uppercase on a case-sensitive filesystem.
+- **The limit's unit: per-track counters, not sections (greptile, 2026-10-15).**
+  `mdx_set_max_loop(N)` is compared against the *smallest per-track* loop counter
+  (`mdxmml_ym2151.c`'s fade test: `infinite_loops` = the min over live tracks),
+  while `MDXPlayer.getCurLoop()` counts the **joint** section the band is drawn
+  from. Those are the same only when every track shares a period: 4 s and 6 s
+  tracks make a 12 s section, so at 30 s the counters read 7 and 5 while the
+  section count is 2, and `max(2, curLoop+1)` is already exceeded — the fade
+  starts at once instead of finishing the section. Two new getters close it:
+  `mdx_get_section_loop_limit()` (the engine's own counter at the first boundary
+  at/after the section now playing) and `mdx_get_loops_per_section()` (how many
+  counters one section is worth, so the two-pass floor can stay in sections).
+  `applyLoopCount` uses them when present and keeps the joint count otherwise.
+  **Coverage, measured:** `per > 1` is what makes the two units differ, and it is
+  rare — **0 of 37** catalog MDX and **0 of 140** sampled corpus files have it
+  (`dev/mdx-native/region --play` prints the columns). So this is a
+  latent-correctness fix, not a reproduction of shipped behaviour: the app is
+  unaffected on every file measured, and the wiring is pinned in
+  `dev/test-mdx-loops.js` (3 checks; the fixture core reports the two units
+  separately, and forcing the player to ignore the getters fails two of them).
+  Worth re-running the `per` scan (see region.c's header) if a file that needs it
+  ever turns up.
 - **Player.** `MDXPlayer` mirrors `VGMPlayer`: `setLooping` drives
   `_mdx_set_max_loop` (0 while repeating, else `max(2, curLoop+1)` when actually
   leaving so the current pass finishes and the engine fades), `getDisplayPositionMs`

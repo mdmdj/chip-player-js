@@ -431,6 +431,19 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
     `vidall` (every clip, per-clip verdicts), `vidleak` (bytes pulled on load),
     `vidgeom`/`vidcap`/`vidsharp` (what `recordVideo` and a window size actually
     produce — see `dev/record/FINDINGS.md`).
+  - `dev/record/check-faves-hydration.mjs`, `dev/record/check-faves-cache.mjs` —
+    the favorites-list checks behind the UserProvider hydration fix (PR #10,
+    macroscope `UserProvider.js:208` / greptile P1). The first reproduces the
+    race deliberately — the first GET and POST are held, the second POST is
+    allowed to finish, then the first POST is released, so the *older* toggle
+    lands last — and asserts the server-only favorite reaches the Favorites page;
+    it fails against the pre-fix code with exactly the reported symptom. The
+    second holds the GET for the whole run and requires the page to paint from
+    the localStorage seed anyway: the fast path the fix must not clear. Both
+    navigate client-side on purpose, because a `page.goto` reloads the app, which
+    re-hydrates and hides the bug ("missing until another toggle or reload").
+    Not in `run-tests.sh`: they need a browser and a saved favorite, and skip
+    (exit 2) without one.
   - `./dev/run-tests.sh` — runs all of the above. Dev-only, not part of the PR.
   - `dev/README.md` documents the shims.
   - Two tracked seams keep the untracked overrides loadable without touching

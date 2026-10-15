@@ -68,6 +68,7 @@ export default class XMPPlayer extends Player {
     this._lastPos = -1;
     this._skipOrder = null;
     this._seekPending = false;
+    this._seekRequestedMs = 0;
     this.buffer = this.core._malloc(this.bufferSize * 16); // i16
     this.infoTexts = [];
   }
@@ -193,6 +194,7 @@ export default class XMPPlayer extends Player {
     this._lastPos = -1;
     this._skipOrder = null;
     this._seekPending = false;
+    this._seekRequestedMs = 0;
 
     this.resolveParamValues(persistedSettings);
     this.setTempo(persistedSettings.tempo || 1);
@@ -246,15 +248,20 @@ export default class XMPPlayer extends Player {
       this._lastPos = pos;
       return;
     }
-    // The first order seen after a seek is where the seek landed, mid-order. Its
-    // start is behind the landing point, so it cannot be timed -- leave it unseen
-    // and let a later backward jump onto it take the out-of-flow path below, the
-    // same as any other arrival from outside the linear flow. Orders visited
-    // before the seek keep their real first-visit times, so seeking and then
-    // looping normally still learns.
+    // What the engine did with the seek decides whether the landing order can be
+    // timed. Landing where it was asked means landing inside an order, whose
+    // start is behind the landing point -- leave it unseen and let a later
+    // backward jump onto it take the out-of-flow path below, like any other
+    // arrival from outside the linear flow. But a landing the engine *moved* is
+    // one it chose: libxmp's xmp_seek_time snaps to an order boundary, so that
+    // point is a real start and can be recorded. The tolerance is well above the
+    // read jitter (one buffer) and well below an order, so a frame-accurate seek
+    // can never invent a band and a short snap just stays unlearned. Orders
+    // visited before the seek keep their real first-visit times either way.
     if (this._seekPending) {
       this._seekPending = false;
-      if (!seen.has(pos)) {
+      const snapped = Math.abs(this._positionMs - this._seekRequestedMs) > SEEK_SNAP_MS;
+      if (!snapped && !seen.has(pos)) {
         this._lastPos = pos;
         return;
       }
@@ -355,11 +362,12 @@ export default class XMPPlayer extends Player {
     // as a backward jump. First visits are absolute, so learning continues
     // across the seek; only a never-linearly-visited start stays unlearned.
     this._lastPos = -1;
+    // What the engine does with the request decides whether the landing order
+    // can be timed (see learnLoopFromOrder): remembered here, compared at the
+    // next order poll.
+    this._seekRequestedMs = seekMs;
     // The landing is an arrival from outside the linear flow, which the next
-    // order poll has to know: an unseen order the seek lands in began somewhere
-    // behind the landing point, so timing it here would record a mid-order
-    // timestamp as that order's start -- and a later loop back to it would then
-    // draw a band from it.
+    // order poll has to know.
     this._seekPending = true;
     // xmp_seek_time_frame (libxmp 4.7+) is a more accurate seek; fall back to
     // xmp_seek_time on older builds (same millisecond units).

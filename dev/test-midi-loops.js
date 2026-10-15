@@ -25,6 +25,8 @@ Module.prototype._compile = function (content, filename) {
 
 const MIDIFile = require('../src/players/midi/midi-helpers').default;
 const MIDIFilePlayer = require('../src/players/MIDIFilePlayer').default;
+const MIDIEvents = require('../src/players/midi/MIDIEvents').default;
+const { EVENT_MIDI, EVENT_MIDI_NOTE_ON } = MIDIEvents;
 const { parseMidiData } = require('../src/piano-roll/midi-parser');
 
 let passed = 0;
@@ -153,14 +155,16 @@ catalogCheck(MARIO, 'wrap: looping Mario jumps to second-pass start at list end'
   assert.ok(Math.abs(p.loop.jumpMs - p.loop.startMs - p.loop.lengthMs) < 0.001);
   p.play(() => {});
   p.setLooping(true);
-  // Park just before the end, then render past it: one block crosses the end
-  // and wraps, the next plays from the band start.
+  // Park just before the end, then render past it: one block crosses the band
+  // end and wraps inside the buffer, so the remainder of this same call already
+  // plays from the band start (position is past jumpIndex, not parked on it).
   p.setPosition(p.getDuration() - 30);
   const before = synth.log.length;
   p.processPlaySynth(0, 2048);
-  assert.ok(Math.abs(p.elapsedTime - p.loop.jumpMs) < 200,
+  assert.ok(p.elapsedTime >= p.loop.jumpMs && Math.abs(p.elapsedTime - p.loop.jumpMs) < 200,
     `elapsed=${p.elapsedTime} jumpMs=${p.loop.jumpMs}`);
-  assert.strictEqual(p.position, p.loop.jumpIndex);
+  assert.ok(p.position >= p.loop.jumpIndex,
+    `wrapped into the band in the same buffer: position=${p.position} jumpIndex=${p.loop.jumpIndex}`);
   assert.ok(!p.paused, 'still playing after wrap');
   p.processPlaySynth(0, 2048);
   assert.ok(p.elapsedTime > p.loop.jumpMs && !p.paused, 'keeps playing into the band');
@@ -191,7 +195,7 @@ catalogCheck(DESCENT, 'Descent loads a loop and wraps too', () => {
   p.setLooping(true);
   p.setPosition(p.getDuration() - 30);
   p.processPlaySynth(0, 2048);
-  assert.strictEqual(p.position, p.loop.jumpIndex);
+  assert.ok(p.position >= p.loop.jumpIndex, 'wrapped into the band in the same buffer');
   assert.ok(!p.paused);
 });
 
@@ -208,7 +212,7 @@ catalogCheck(DESCENT, 'a loop wrap releases the sustain pedal', () => {
   p.setPosition(p.getDuration() - 30);
   synth.log.length = 0;
   p.processPlaySynth(0, 2048);
-  assert.strictEqual(p.position, p.loop.jumpIndex, 'wrapped');
+  assert.ok(p.position >= p.loop.jumpIndex, 'wrapped into the band');
   assert.ok(synth.log.some(([kind, , cc, v]) => kind === 'cc' && cc === 64 && v === 0),
     'expected a sustain-off at the wrap: ' + JSON.stringify(synth.log.slice(0, 10)));
 });
@@ -364,7 +368,7 @@ check('Repeat One wraps at the band end, leaving the composed ending', () => {
   p.setLooping(true);
   p.setPosition(p.loop.endMs - 10);
   p.processPlaySynth(0, 2048);
-  assert.strictEqual(p.position, p.loop.jumpIndex, 'wrapped at the band end, not the list end');
+  assert.ok(p.position >= p.loop.jumpIndex, 'wrapped at the band end, not the list end');
   assert.ok(!p.paused, 'still playing after the wrap');
 });
 
@@ -425,6 +429,36 @@ check('lone CC111 (RPG Maker): the region runs to the end of the track', () => {
   assert.ok(p.loop, 'a region starting at the marker');
   assert.ok(Math.abs(p.loop.startMs - 2000) < 1, `start=${p.loop.startMs}ms (2 beats in)`);
   assert.ok(p.loop.jumpMs > p.loop.startMs, 'and it wraps back to the marker');
+});
+
+check('lone CC111, multi-track: every part loops to the end of the song', () => {
+  // RPG Maker convention: CC111 is the loop start with no end marker, so the
+  // loop ends at the last track-end event in the song. A shorter part must keep
+  // its trailing silence and wait for the song end, or it repeats early while
+  // the longer part is still on its first pass (findLoopRange/getLoopedEvents).
+  const bytes = buildMidi([
+    [tempo(), cc(111), noteOnAt(0), noteOffAt(TPQ * 2)],  // short part, ends at 2*TPQ
+    [noteOnAt(0), noteOffAt(TPQ * 6)],                    // long part, ends at 6*TPQ
+  ], { format: 1 });
+  const mf = parseBytes(bytes);
+  const tracks = mf.tracks.map((_, i) => mf.getTrackEvents(i));
+  const range = mf.findLoopRange(tracks);
+  assert.deepStrictEqual(range, { startTick: 0, endTick: null });
+  const { events, loopEndMs } = mf.getLoopedEvents(tracks, 2, range);
+  assert.ok(Math.abs(loopEndMs - 3000) < 1, `loopEnd=${loopEndMs}ms (6*TPQ)`);
+  const noteOns = (t) => events
+    .filter(e => e.track === t && e.type === EVENT_MIDI && e.subtype === EVENT_MIDI_NOTE_ON)
+    .map(e => e.playTime);
+  const short = noteOns(0);
+  const long = noteOns(1);
+  assert.strictEqual(short.length, 2, `short part has one note per pass: ${short}`);
+  assert.strictEqual(long.length, 2, `long part has one note per pass: ${long}`);
+  // The bug: the short part used its own end (2*TPQ = 1000 ms) as the loop
+  // boundary, so its second pass fired 2000 ms before the long part's.
+  assert.ok(Math.abs(short[1] - long[1]) < 1,
+    `the parts replay together at the song end: short=${short[1]} long=${long[1]}`);
+  assert.ok(Math.abs(short[1] - loopEndMs) < 1,
+    `the short part waits for the song end, not its own: ${short[1]} vs ${loopEndMs}`);
 });
 
 check('post-loop content with no notes does not inflate the duration', () => {

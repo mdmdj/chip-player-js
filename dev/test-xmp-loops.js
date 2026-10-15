@@ -186,8 +186,10 @@ check('loop count lever: 1 off, 0 on, curLoop+1 leaving deep', () => {
   core.heap.set(p.infoPtr + FI_LOOP_COUNT * 4, 5);
   p.setLooping(false);
   assert.strictEqual(p._loopCount, 6);
+  // A false-to-false toggle must preserve the scheduled pass (Repeat One ->
+  // Repeat Off -> Repeat All); resetting it here would stop the song early.
   p.setLooping(false);
-  assert.strictEqual(p._loopCount, 1);
+  assert.strictEqual(p._loopCount, 6);
   p.setLooping(true);
   assert.strictEqual(p._loopCount, 0);
 });

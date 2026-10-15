@@ -188,6 +188,29 @@ check('a seek past the loop still learns when the loop start was played', () => 
   assert.deepStrictEqual(p.getLoopBandMs(), { startMs: 16000, endMs: 200000 });
 });
 
+check('a seek past the loop, then a pass through it, then a seek to the end learns', () => {
+  const { p } = makePlayer(200000);
+  let emits = 0;
+  p.on('playerStateUpdate', (s) => { if (!s.isStopped) emits++; });
+  // 1. Past the loop start (order 2, whose start is 16000): the landing order is
+  //    not timed, and neither is anything the seek skipped over.
+  p.seekMs(100000);
+  drive(p, p.core, orders([12, 13, 14], 8000).map((f, i) => ({ ...f, time: 100000 + i * 8000 })));
+  assert.strictEqual(p.metadata.intro_length, undefined);
+  // 2. Back before it, then play forward through it: now it IS timed, at its
+  //    real start. The skip is per-visit, not a permanent poison.
+  p.seekMs(0);
+  drive(p, p.core, orders([0, 1, 2, 3], 8000));
+  assert.strictEqual(p.metadata.intro_length, undefined);
+  // 3. Near the loop end, and let the engine jump back to order 2.
+  p.seekMs(152000);
+  drive(p, p.core, orders([19, 2, 3], 8000).map((f, i) => ({ ...f, time: 152000 + i * 8000 })));
+  assert.strictEqual(p.metadata.intro_length, 16000);
+  assert.strictEqual(p.metadata.loop_length, 184000);
+  assert.deepStrictEqual(p.getLoopBandMs(), { startMs: 16000, endMs: 200000 });
+  assert.strictEqual(emits, 1);
+});
+
 check('loop from the very start learns nothing (zuma-like, 23->0)', () => {
   const { p } = makePlayer(200000);
   let emits = 0;

@@ -417,6 +417,21 @@ async function main() {
       `expected the joint fallback, got ${core.lastMaxLoopArg}`);
   });
 
+  // The engine's limit and the slider's pass count are different units; the
+  // display must keep using the joint section count or the band folds straight
+  // through the audible fade (greptile P2, macroscope MDXPlayer.js:193).
+  await check('the display stays in sections while the engine gets counters', async () => {
+    const { p, core } = await makePlayer({ perSection: 2, sectionLimit: 7 });
+    p.setLooping(true);
+    await drive(p, core, [BAND_END + 1000]);
+    p.setLooping(false);
+    assert.strictEqual(core.lastMaxLoopArg, 7, `engine limit=${core.lastMaxLoopArg}`);
+    const curLoop = Math.max(0, Math.floor((core.abs - A) / B));
+    const sections = Math.max(2, curLoop + 1);
+    assert.strictEqual(p._maxLoopCount, sections, `display passes=${p._maxLoopCount}`);
+    assert.strictEqual(p._fadeStartMs(), A + sections * B, `fadeStartMs=${p._fadeStartMs()}`);
+  });
+
   console.log(`\n${passed} checks passed${xfailed ? `, ${xfailed} known failure(s)` : ''}${process.exitCode ? ' (WITH FAILURES)' : ''}.`);
 }
 

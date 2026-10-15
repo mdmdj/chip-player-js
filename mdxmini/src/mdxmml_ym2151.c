@@ -59,11 +59,15 @@ typedef struct _mdxmml_ym2151_instances {
   int fade_out_wait;
   int master_volume;
 
-  /* Song loop bookkeeping, recorded while parsing (see mdx_get_loop_*). */
-  int loop_min_seen;       /* last observed song-wide infinite-loop count */
+  /* Song loop bookkeeping (see mdx_get_loop_*). The region is measured from the
+     tracks that actually loop: a track that never loops (a one-shot) must not
+     gate the song's loop count, or the min-over-tracks stalls at 0 until that
+     track ends and misreads its dropout as the first loop. */
+  int64_t track_first_us[MDX_MAX_TRACK_NUMBER];  /* per-track 1st loop, us */
+  int64_t track_second_us[MDX_MAX_TRACK_NUMBER]; /* per-track 2nd loop, us */
   int64_t loop_first_us;   /* elapsed at the 1st loop (intro + loop) */
   int64_t loop_second_us;  /* elapsed at the 2nd loop (intro + 2 * loop) */
-  int loop_region_bad;     /* a non-looping track left the min: region invalid */
+  int loop_region_bad;     /* no usable region: the getters report none */
 } mdxmml_ym2151_instances;
 
 /* ------------------------------------------------------------------ */
@@ -339,27 +343,18 @@ mdx_parse_mml_ym2151_async(songdata *data, int track_mute_mask)
     }
   }
 
-  /* Record when the song as a whole completes its first and second loop
-     (infinite_loops is the minimum across tracks still playing). The
-     difference is the loop length; the first is intro + loop. */
-  if ( infinite_loops < 32767 ) {
-    /* A real crossing advances the song-wide count by one. A larger jump is a
-       non-looping track dropping out of the minimum (its infinite_loop_times
-       stays 0 until it ends), not a crossing: recording it would place the
-       first boundary on that tick and the second on the next, i.e. a one-tick
-       loop. Flag the region invalid instead so the getters report no region
-       (a wrong band is worse than none). */
-    int step = infinite_loops - self->loop_min_seen;
-    if ( step == 1 && !self->loop_region_bad ) {
-      if ( self->loop_first_us == 0 )
-        self->loop_first_us = self->mdx->elapsed_time;
-      else if ( self->loop_second_us == 0 )
-        self->loop_second_us = self->mdx->elapsed_time;
-    } else if ( step > 1 && self->loop_second_us == 0 ) {
-      self->loop_region_bad = 1;
-    }
-    if ( infinite_loops > self->loop_min_seen )
-      self->loop_min_seen = infinite_loops;
+  /* Per-track loop times: when each track completes its 1st and 2nd loop. The
+     song-wide region is resolved from these after the parse, using only tracks
+     that loop at all (mdx_parse_mml_ym2151_async_get_length). A one-shot track
+     is excluded, so its end cannot masquerade as a loop crossing -- the reason
+     the min-over-tracks approach mislabels the boundary (a one-shot sits at
+     count 0 and holds the minimum until it ends). */
+  for ( i = 0; i < self->mdx->tracks; i++ ) {
+    int c = self->mdx->track[i].infinite_loop_times;
+    if ( c >= 1 && self->track_first_us[i] == 0 )
+      self->track_first_us[i] = self->mdx->elapsed_time;
+    if ( c >= 2 && self->track_second_us[i] == 0 )
+      self->track_second_us[i] = self->mdx->elapsed_time;
   }
 
   /* timer count */
@@ -372,10 +367,18 @@ mdx_parse_mml_ym2151_async(songdata *data, int track_mute_mask)
 
 int mdx_parse_mml_ym2151_async_get_length(songdata *data)
 {
-  int next,sec;
+  int next,sec,i;
   
   __GETSELF(data)
   
+  /* A fresh measurement: the parse below may run on a reused context (the app
+     keeps one and reopens it per song), so clear last time's loop times. */
+  memset(self->track_first_us, 0, sizeof self->track_first_us);
+  memset(self->track_second_us, 0, sizeof self->track_second_us);
+  self->loop_first_us = 0;
+  self->loop_second_us = 0;
+  self->loop_region_bad = 0;
+
   next = 1;
   while(next && self->mdx->elapsed_time < (1200 * 1000000))
   {
@@ -383,6 +386,31 @@ int mdx_parse_mml_ym2151_async_get_length(songdata *data)
   }
   
   sec = (int)self->mdx->elapsed_time / 1000000;
+
+  /* Resolve the loop region from the tracks that loop. The first boundary is
+     the last track to complete its 1st loop; the second is the last to complete
+     its 2nd. Require every looping track to have reached the 2nd loop, so a
+     partial measurement cannot report a short region -- a wrong band is worse
+     than none, and the getters then report no region. */
+  {
+    int64_t first = 0, second = 0;
+    int loopers = 0, all_second = 1;
+    for ( i = 0; i < self->mdx->tracks; i++ ) {
+      if ( self->mdx->track[i].infinite_loop_times <= 0 )
+        continue;
+      loopers++;
+      if ( self->track_first_us[i] > first )
+        first = self->track_first_us[i];
+      if ( self->track_second_us[i] == 0 )
+        all_second = 0;
+      else if ( self->track_second_us[i] > second )
+        second = self->track_second_us[i];
+    }
+    self->loop_first_us  = first;
+    self->loop_second_us = second;
+    self->loop_region_bad =
+      ( loopers == 0 || !all_second || first <= 0 || second <= first ) ? 1 : 0;
+  }
 
   /* stop */
   ym2151_all_note_off(data);

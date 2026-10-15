@@ -371,6 +371,12 @@ export default class VGMPlayer extends Player {
         // would fade even though Repeat One is still on.
         if (this.vgmCtx && !this.looping)
           this.core._lvgm_set_indefinite_playback(this.vgmCtx, value);
+        // Turning indefinite playback off starts a fade at the current position
+        // (above). Capture that start *before* applyLoopCount() re-derives the
+        // count: otherwise the fade-start getter reports the new schedule and
+        // the head folds back into the band instead of showing the live tail.
+        if (!value && !this.looping)
+          this.syncFadeTailCapture(true);
         // Repeat-one owns the loop count while it is active.
         this.applyLoopCount(wasLooping);
         break;

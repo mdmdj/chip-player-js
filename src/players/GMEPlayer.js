@@ -411,6 +411,14 @@ export default class GMEPlayer extends Player {
     this.fadingOut = false;
     this.fadeStartMs = null;
     this.fadeFinished = false;
+    // Enabling Repeat One during the inter-song silence tail must cancel the
+    // queued end action (restartTrack does the same), or the base Player's
+    // silence countdown still stops the song after repeat is on. Only on
+    // enable -- a toggle off leaves the ending in place.
+    if (looping) {
+      this.silenceSamplesRemaining = 0;
+      this.onSilenceEnd = null;
+    }
   }
 
   // Indefinite Playback behaves like Repeat One: the engine keeps rendering

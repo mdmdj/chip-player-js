@@ -827,13 +827,14 @@ class App extends React.Component {
     } catch (e) {
       console.warn('Local file sub-tunes unavailable:', e && e.message);
     }
-    if (generation !== this.localFilesGeneration) return; // a newer update won
+    if (generation !== this.localFilesGeneration) return false; // a newer update won
     // The sub-tune cache keys on (path, size, mtime), so it must see the real
     // timestamp; format it for display only here, after the parse. Truncating
     // to a date first made same-day replacements reuse stale sub-tunes.
     // Convert timestamp 1704067200 to ISO date 2024-01-01
     localFiles.forEach(item => item.mtime = new Date(item.mtime * 1000).toISOString().split('T')[0]);
     this.applyLocalFiles(localFiles, byPath);
+    return true;
   }
 
   // Expand each local file into one playable row per sub-tune (single-song files
@@ -967,8 +968,11 @@ class App extends React.Component {
     filePaths.forEach(filePath => this.localFilesManager.delete(filePath));
     // updateLocalFiles() parses headers asynchronously; await the rebuild before
     // advancing, or nextSong() runs against the old context and steps into
-    // another tune of the file just deleted.
-    await this.updateLocalFiles();
+    // another tune of the file just deleted. A superseded rebuild returns false:
+    // a newer updateLocalFiles owns the context and runs its own continuation, so
+    // this one must not act on the stale list.
+    const rebuilt = await this.updateLocalFiles();
+    if (!rebuilt) return;
 
     if (deletedPlaying) {
       // The header parse above is async, so only act if playback is still this

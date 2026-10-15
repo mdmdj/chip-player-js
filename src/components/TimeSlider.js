@@ -22,18 +22,30 @@ export default class TimeSlider extends React.Component {
 
   componentDidUpdate(prevProps) {
     if (prevProps.paused === true && this.props.paused === false) {
-      this.timer = setInterval(() => {
-        const {getCurrentPositionMs, getIsBlindLoop, currentSongDurationMs} = this.props;
-        const blind = typeof getIsBlindLoop === 'function' ? getIsBlindLoop() : !!getIsBlindLoop;
-        const pos = getCurrentPositionMs();
-        this.setState({
-          currentSongPositionMs: blind ? pos : Math.min(pos, currentSongDurationMs),
-          isBlindLoop: blind,
-        });
-      }, UPDATE_INTERVAL_MS);
+      this.timer = setInterval(this.syncFromPlayer, UPDATE_INTERVAL_MS);
     } else if (prevProps.paused === false && this.props.paused === true) {
       clearInterval(this.timer);
+    } else if (this.props.paused) {
+      // The interval is off while paused, so nothing else refreshes the label.
+      // Re-read the live position on any other update -- a seek out of the blind
+      // loop then clears "Looping" immediately, while a no-op change (enabling
+      // Repeat One after disabling it) leaves the state alone.
+      this.syncFromPlayer();
     }
+  }
+
+  // Read the live position/blind-loop state into the component. Skips the update
+  // when nothing changed, so the paused path above cannot loop.
+  syncFromPlayer() {
+    const {getCurrentPositionMs, getIsBlindLoop, currentSongDurationMs} = this.props;
+    const blind = typeof getIsBlindLoop === 'function' ? getIsBlindLoop() : !!getIsBlindLoop;
+    const pos = getCurrentPositionMs();
+    const next = blind ? pos : Math.min(pos, currentSongDurationMs);
+    if (next === this.state.currentSongPositionMs && blind === this.state.isBlindLoop) return;
+    this.setState({
+      currentSongPositionMs: next,
+      isBlindLoop: blind,
+    });
   }
 
   componentWillUnmount() {

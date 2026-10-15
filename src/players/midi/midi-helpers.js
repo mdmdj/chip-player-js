@@ -125,9 +125,17 @@ class EventIterator {
       // Each completed pass ends one loop length further along the emitted
       // timeline; rebaseReplay() uses this so a repeated segment keeps the beat
       // instead of re-adding the gap from its pre-loop neighbor.
+      //
+      // With no end marker (a lone CC111: the RPG Maker loop-start convention)
+      // the loop runs to the end of the *song*, not this track's own end -- a
+      // part that ends early must keep its trailing silence and wait for the
+      // song end, or it repeats while the longer parts are still on their first
+      // pass. getLoopedEvents resolves that song-wide tick once (songEndTick).
       const lastTick = this.absTicks.length ? this.absTicks[this.absTicks.length - 1] : 0;
-      this.boundaryTick = loop.endTick != null ? loop.endTick : lastTick;
-      this.loopLength = loop.endTick != null ? loop.endTick - loop.startTick : lastTick - loop.startTick;
+      const endTick = loop.endTick != null ? loop.endTick
+        : (loop.songEndTick != null ? loop.songEndTick : lastTick);
+      this.boundaryTick = endTick;
+      this.loopLength = endTick - loop.startTick;
       this.replayDelta = null;
       // A post-loop event that would otherwise inflate the duration (converter
       // padding, END_OF_TRACK) is collapsed to the loop boundary -- unless the
@@ -141,7 +149,10 @@ class EventIterator {
       // manual wrap -- and it is the standard-safe choice: letting the note ring
       // past the boundary would make the replay send a second NoteOn for a still
       // sounding note, which the MIDI spec calls invalid. The composer should put
-      // the loop where voices resolve. See dev/MIDI_LOOP_TEST_GAPS.md.
+      // the loop where voices resolve. See dev/MIDI_LOOP_TEST_GAPS.md. (The
+      // player's own loop wrap -- MIDIFilePlayer.loopJump -- also cuts any note
+      // still ringing at the seam, so the second pass never overlaps a held
+      // note; this collapse is what keeps the outro from inflating duration.)
       if (loop.endTick != null) {
         this.postHasNotes = this.events.some((e, idx) =>
           this.absTicks[idx] > loop.endTick &&
@@ -211,8 +222,13 @@ class EventIterator {
     // The first event of a replayed pass carries the rebased delta, plus any
     // shift owed to passes a loop-empty track skipped; every other event keeps
     // its own delta.
-    const delta = (this.replayDelta != null ? this.replayDelta : event.delta) +
-      (this.pendingExtra || 0);
+    // A noteless outro (see postHasNotes) collapses every event to the loop
+    // boundary: the first is rebased in next(), the rest get delta 0 here, so
+    // converter padding / END_OF_TRACK cannot leave a silent tail.
+    const delta = !this.postHasNotes && this.postStarted
+      ? 0
+      : (this.replayDelta != null ? this.replayDelta : event.delta) +
+        (this.pendingExtra || 0);
     this.replayDelta = null;
     this.pendingExtra = 0;
     this.curTick += delta;
@@ -306,8 +322,23 @@ MIDIFile.prototype.getLoopedEvents = function (tracks, loopCount = 2, range = nu
     }
   };
 
+  // A lone CC111 fixes the loop start but not its end: by the RPG Maker
+  // convention the loop ends at the last track-end event in the song, so resolve
+  // one song-wide end tick (the longest track) and hand it to every iterator. A
+  // shared boundary is what keeps a short part in sync with a longer one.
+  let songEndTick = null;
+  if (expandLoop && range.endTick == null) {
+    songEndTick = 0;
+    for (const trackEvents of tracks) {
+      let tick = 0;
+      for (const event of trackEvents) {
+        if (event) tick += event.delta || 0;
+      }
+      if (tick > songEndTick) songEndTick = tick;
+    }
+  }
   const loop = expandLoop
-    ? { startTick: range.startTick, endTick: range.endTick, maxLoops: loopCount }
+    ? { startTick: range.startTick, endTick: range.endTick, maxLoops: loopCount, songEndTick }
     : null;
 
   // Reading events

@@ -305,9 +305,6 @@ function parseSID(buf) {
     }
   }
 
-  // Version 2+ adds flags, start page, page length, second/third SID address.
-  const version = u16be(buf, 0x04);
-
   // Metadata strings live at fixed offsets in the header:
   // name at 0x16 (22), author at 0x36 (54), released at 0x56 (86),
   // each 32 bytes null-padded.
@@ -320,23 +317,9 @@ function parseSID(buf) {
   const startingSong = u16be(buf, 0x10) || 1;
   if (numSongs === 0) numSongs = 1;
 
-  // The `speed` byte at 0x12 (bit 0 = PAL/NTSC for the *first* song) plus the
-  // per-song speed table at 0x18 + 0x04..0x?? For v2+, each song's speed is
-  // one bit in the packed table. We expose a simple PAL/NTSC choice for now.
-  let speeds = null;
-  if (version >= 2) {
-    // The packed speed table begins at 0x18 (24). Bit i == 1 => PAL.
-    // Table length is ceil(numSongs / 8) bytes.
-    const tableBytes = Math.ceil(numSongs / 8);
-    if (0x18 + tableBytes <= buf.length) {
-      const speedsArr = [];
-      for (let i = 0; i < numSongs; i++) {
-        const byte = buf[0x18 + (i >> 3)];
-        speedsArr.push((byte & (1 << (i & 7))) ? 'PAL' : 'NTSC');
-      }
-      speeds = speedsArr;
-    }
-  }
+  // Per-song PAL/NTSC lives in the 32-bit speed field at 0x12 (bit i => song i),
+  // not exposed here: nothing consumes it, and the old offset (0x18) sat inside
+  // the title. Decode it from 0x12 if a caller ever needs it.
 
   return {
     title: name,
@@ -346,7 +329,6 @@ function parseSID(buf) {
     system: 'C64',
     numSongs,
     startingSong,
-    ...(speeds ? { speeds } : {}),
   };
 }
 

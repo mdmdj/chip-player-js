@@ -148,8 +148,16 @@ MIDIPlayer.prototype.processPlaySynth = function (buffer, bufferSize) {
     if (batchSize > samplesRemaining) batchSize = samplesRemaining;
 
     if (!this.paused) {
+      this.elapsedTime += msPerBatch;
+      // Wrap as soon as the clock reaches the band end, inside this batch, so the
+      // new pass starts in this same output buffer rather than a whole buffer
+      // late (which shows as a gap, or the old pass's held sound, each wrap).
+      if (this.looping && this.loop && !this.isAuditioning &&
+          this.position >= this.loop.endIndex && this.elapsedTime >= this.loop.endMs) {
+        this.loopJump();
+      }
       let pos = this.position;
-      for (this.elapsedTime += msPerBatch;
+      for (;
            this.events[pos] && this.elapsedTime >= this.events[pos].playTime && pos < loopEndIdx;
            pos++) {
         event = this.events[pos];

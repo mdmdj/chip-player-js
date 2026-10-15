@@ -177,7 +177,11 @@ export default class XMPPlayer extends Player {
 
     this._parseMetadata(filename);
 
-    // Fresh timeline: order first-visits (for the learned loop band) start over.
+    // Fresh timeline: order first-visits (for the learned loop band) start over,
+    // and the loop count is re-derived from the current repeat state so a count
+    // preserved from the previous module (see setLooping) cannot leak into this
+    // one.
+    this._loopCount = this.looping ? 0 : 1;
     this._orderFirstSeen = new Map();
     this._lastPos = -1;
     this._skipOrder = null;
@@ -244,7 +248,11 @@ export default class XMPPlayer extends Player {
           // become the loop start. Learning simply never fires here.
           this._skipOrder = pos;
         } else {
-          seen.set(pos, this._positionMs);
+          // Order 0's first visit is the song's start; _positionMs has already
+          // advanced by a buffer, so record 0 rather than a small nonzero intro
+          // (which would pass the loopStartMs > 0 test and draw a false band for
+          // a track that loops from its end back to the start).
+          seen.set(pos, pos === 0 && seen.size === 0 ? 0 : this._positionMs);
         }
       } else if (pos < this._lastPos && this.metadata && this.metadata.intro_length == null) {
         const loopStartMs = seen.get(pos);
@@ -280,9 +288,11 @@ export default class XMPPlayer extends Player {
       // applyLoopCount). Only re-derive when actually leaving a looping
       // state; a no-op toggle must not move the scheduled end.
       this._loopCount = Math.max(1, this.getCurLoop() + 1);
-    } else {
-      this._loopCount = 1;
     }
+    // A false-to-false toggle (Repeat One -> Repeat Off -> Repeat All) leaves the
+    // scheduled pass count alone. Re-deriving it to 1 here would reset the pass
+    // the user already asked to finish, and the engine, already past that count,
+    // would stop early. loadData() resets the count for a new module.
   }
 
   // Which scan-end pass the engine is in (0 during the intro/first pass).

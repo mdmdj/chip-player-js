@@ -158,7 +158,10 @@ export default class Sequencer extends EventEmitter {
     }
 
     if (this.currIdx < 0 || this.currIdx >= this.context.length) {
-      if (this.repeat === REPEAT_ALL) {
+      // An empty context has nothing to wrap to: REPEAT_ALL's modulo would be
+      // NaN, and playSong(undefined) returns without stopping the player, so a
+      // deleted song would keep playing against an empty list. Eject instead.
+      if (this.repeat === REPEAT_ALL && this.context.length > 0) {
         this.currIdx = (this.currIdx + this.context.length) % this.context.length;
         this.playCurrentSong();
       } else {

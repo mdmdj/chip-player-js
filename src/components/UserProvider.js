@@ -170,8 +170,7 @@ const UserProvider = ({ children }) => {
       // roll the optimistic state back -- that would show the song as un-favorited
       // until the next refresh, and a retry would then invert it.
       // The add response carries this entry already decorated (size, sub-tune
-      // title, ...), so splice just that one in rather than re-reading the whole
-      // list -- which could otherwise drop a newer, still-pending toggle.
+      // title, ...), so splice that one in optimistically to avoid a flicker.
       if (addResult && addResult.favorite) {
         setFaves(prev => {
           // A newer toggle may have removed this exact entry already; if so,
@@ -182,10 +181,14 @@ const UserProvider = ({ children }) => {
             addResult.favorite,
           ];
         });
-        return;
       }
-      // Fallback for a server that returns only { success }: re-read the list,
-      // and apply it only if no newer toggle has happened since.
+      // Re-read the list for adds and apply it only if no newer toggle has
+      // happened since. The splice above cannot restore favorites the server
+      // already had when this toggle landed -- notably a star placed before the
+      // initial GET finished, which this toggle invalidated. The generation guard
+      // drops the response if a newer toggle happened meanwhile, so a stale
+      // whole-list response can never undo a pending change. A server that
+      // returns only { success } is covered by this same path.
       if (!isFavorite) {
         try {
           const refreshed = await getWithAuth(user, `${API_BASE}/user/favorites`);

@@ -229,6 +229,7 @@ db.exec(`
     game TEXT,
     system TEXT,
     filename TEXT,
+    subtune_count INTEGER NOT NULL DEFAULT 1,  -- the file's count: >1 = a song folder
     UNIQUE(music_id, subtune),
     FOREIGN KEY(music_id) REFERENCES music(id) ON DELETE CASCADE
   );
@@ -257,11 +258,11 @@ db.exec(`
 function rebuildSongs() {
   db.exec(`
     DELETE FROM song;
-    INSERT INTO song (music_id, subtune, path, song_id, title, file_title, artist, game, system, filename)
-      SELECT id, 0, path, song_id, NULL, title, artist, game, system, filename
+    INSERT INTO song (music_id, subtune, path, song_id, title, file_title, artist, game, system, filename, subtune_count)
+      SELECT id, 0, path, song_id, NULL, title, artist, game, system, filename, COALESCE(subtune_count, 1)
         FROM music WHERE subtune_count <= 1;
-    INSERT INTO song (music_id, subtune, path, song_id, title, file_title, artist, game, system, filename)
-      SELECT m.id, st.subtune, m.path, m.song_id, NULLIF(st.title, ''), m.title, m.artist, m.game, m.system, m.filename
+    INSERT INTO song (music_id, subtune, path, song_id, title, file_title, artist, game, system, filename, subtune_count)
+      SELECT m.id, st.subtune, m.path, m.song_id, NULLIF(st.title, ''), m.title, m.artist, m.game, m.system, m.filename, COALESCE(m.subtune_count, 1)
         FROM subtune st JOIN music m ON m.id = st.music_id;
     INSERT INTO song_fts(song_fts) VALUES('rebuild');
   `);

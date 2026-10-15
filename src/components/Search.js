@@ -5,7 +5,7 @@ import autoBindReact from 'auto-bind/react';
 import debounce from 'lodash/debounce';
 
 import { API_BASE } from '../config';
-import { getUrlFromFilepath, pathJoin, songRef, subtuneLabel } from '../util';
+import { getUrlFromFilepath, pathJoin, songRef, subtuneLabel, isSongFolder } from '../util';
 import DirectoryLink from './DirectoryLink';
 import FavoriteButton from './FavoriteButton';
 import VirtualizedList from './VirtualizedList';
@@ -124,10 +124,12 @@ export default class Search extends PureComponent {
                 idx: i,
                 path: path,
                 subtune: subtune,
-                // A sub-tune names itself by its label, else `Tune N`; the file
-                // row (sub-tune 0) shows the file name.
-                name: item.subtune > 0
-                  ? subtuneLabel(item.subtune, item.title)
+                folder: folder,
+                // A song folder's songs name themselves by label / `Tune N` --
+                // the folder is the heading above them. A plain file shows its
+                // own name.
+                name: folder
+                  ? subtuneLabel(subtune, item.title)
                   : (item.title || path.substring(path.lastIndexOf('/') + 1)),
                 href: getUrlFromFilepath(path),
                 type: 'file',

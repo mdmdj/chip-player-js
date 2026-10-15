@@ -31,7 +31,8 @@ const dbStatements = {
   // result is playable directly; `title` is the sub-tune's own label (NULL when
   // it has none).
   searchSongStmt: db.prepare(`
-      SELECT s.path as file, s.song_id as song_id, s.subtune as subtune, s.title as title
+      SELECT s.path as file, s.song_id as song_id, s.subtune as subtune, s.title as title,
+             s.subtune_count as subtuneCount
       FROM song_fts
       JOIN song s ON s.id = song_fts.rowid
       WHERE song_fts MATCH ?

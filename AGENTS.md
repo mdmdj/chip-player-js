@@ -1891,15 +1891,30 @@ only armed when `silenceDuration >= 0`, and both arms must end the song):
   `[5078, 12403]` to `[0, 14942]`). Fixed in `mdxmini/src/mdxmml_ym2151.c`
   (`c66e78832`): each track's 1st/2nd loop time is recorded and the region is
   resolved from the tracks that loop, so a one-shot cannot gate the boundary.
-  The region is the mix's **joint repeat**: the first boundary is the last track
-  to complete its first loop, and the length is the smallest multiple of the
-  longest track period that every looping track also hits (within a tick). Tracks
+  The region is the mix's **joint repeat**: the length is the smallest multiple
+  of the longest track period that every looping track also hits (within a tick),
+  and the start is the last track to *enter* its loop section — that track's own
+  first crossing less its own period, not the crossing itself. (Subtracting the
+  joint period from a crossing — what the first version did — only cancels when
+  the tracks share a period. FACE04 has two period groups entering their loops
+  22.8 s apart, and its band was drawn from 159645 instead of 182452; fixed
+  2026-10-15, second pass.) Tracks
   that loop together differ by a tick or two, so the check is a tolerance, not
   equality; tracks with no small common multiple are **incommensurate** and get
   **no region** (blind-loop UI) rather than a made-up band. The engine's
   pass/fade minimum is untouched, so repeat-off timing is unchanged; the fix only
   affects the region the band is drawn from. Measured over 4,706 candidate MDX:
   **4,201 unchanged, 435 corrected, 29 lost their band** (incommensurate).
+  A second pass the same day fixed the *start*: it is the last track to *enter*
+  its loop section (that track's own first crossing less its period), not the
+  last crossing minus the joint period. That subtraction only cancels when the
+  tracks share a period -- and it could even go negative, which the getter clamps
+  to 0, so long-loop files claimed a band from the very beginning (`utabi31b.mdx`:
+  a track enters its loop at 241.83s while `max(f) - L` is -96.7s). Measured over
+  the whole corpus (67,048 files, 46,339 with a band, all four output fields
+  compared): **65,473 identical, 1,576 changed, 0 lost, 0 gained** -- every change
+  an intro, no loop length moved, and the deltas ran 250 at tick level, 519 under
+  1s, 391 under 10s, 413 over (largest 241.8s).
   The fix reuses one context
   across songs, so `mdx_get_length` clears the per-track times each run.
   Rebuild the core to pick it up (`node scripts/build-chip-core.js`).

@@ -604,6 +604,37 @@ check('a tempo change inside the loop is restored on the replayed pass', () => {
     `the replayed change is one loop apart: ${tempos[2] - tempos[1]}ms vs loop ${B}ms`);
 });
 
+check('multi-track: the tempo restore repeats on a third and later pass', () => {
+  // A loop that opens after the intro's tempo event (at 2*TPQ), with a tempo
+  // change inside it (2.5*TPQ), so the tempo in force at the loop start comes
+  // from an event a replay does not re-emit. Track 1's note sits in the
+  // pre-change stretch, so its spacing between passes is the loop length only
+  // when every pass restores that tempo. The two-pass checks above cover the
+  // first restore; this one covers the third pass and beyond.
+  const bytes = buildMidi([
+    [tempo(500000),
+     noteOnAt(0, 0, 60), noteOffAt(TPQ * 2, 0, 60),   // intro, ticks 0..2*TPQ
+     cc(110),                                          // loop start
+     noteOnAt(0, 0, 60), noteOffAt(Math.round(TPQ / 2), 0, 60),
+     tempo(250000),                                    // tick 2.5*TPQ
+     noteOnAt(0, 0, 60), noteOffAt(Math.round(TPQ / 2), 0, 60),
+     cc(111)],                                         // loop end, tick 3*TPQ
+    [noteOnAt(Math.round(2.25 * TPQ), 1, 72), noteOffAt(Math.round(TPQ / 4), 1, 72)],
+  ], { format: 1 });
+  const mf = parseBytes(bytes);
+  const tracks = mf.tracks.map((_, i) => mf.getTrackEvents(i));
+  const range = mf.findLoopRange(tracks);
+  const { events, loopStartMs, loopEndMs } = mf.getLoopedEvents(tracks, 3, range);
+  const B = loopEndMs - loopStartMs;
+  assert.ok(B > 0, `band ${loopStartMs}..${loopEndMs}`);
+  const ons = events.filter(e => e.param1 === 72 && e.param2 > 0).map(e => e.playTime);
+  assert.strictEqual(ons.length, 3, `track-1 note-ons=${ons.length}`);
+  assert.ok(Math.abs((ons[1] - ons[0]) - B) < 1,
+    `pass 2 starts one loop after pass 1: ${(ons[1] - ons[0]).toFixed(1)}ms vs loop ${B}ms`);
+  assert.ok(Math.abs((ons[2] - ons[1]) - B) < 1,
+    `pass 3 starts one loop after pass 2: ${(ons[2] - ons[1]).toFixed(1)}ms vs loop ${B}ms`);
+});
+
 check('implicit-zero loop with no tick-0 event restores the start tempo', () => {
   // Same tempo restore, but the loop is an implicit-start CC103 (startTick 0)
   // whose first event is not at tick 0, so the loop-start tempo comes from the

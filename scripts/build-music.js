@@ -957,9 +957,6 @@ processDirectory(CATALOG_DIR, '')
       if (deletedDirs > 0) {
         console.log(chalk.yellow(`Removed ${deletedDirs} orphaned directories...`));
       }
-
-      // Rebuild the search index from the final music + subtune rows.
-      rebuildSongs();
     }
 
     let finalCount = 0;

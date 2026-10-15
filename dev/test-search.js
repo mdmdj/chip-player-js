@@ -113,6 +113,13 @@ check('song.title is the sub-tune label and nothing else', () => {
   assert.strictEqual(bad.c, 0, 'song.title != the sub-tune label (NULL when unlabelled)');
 });
 
+check('song carries the file\'s sub-tune count (the song-folder predicate)', () => {
+  const bad = one(`
+    SELECT COUNT(*) c FROM song s JOIN music m ON m.id = s.music_id
+    WHERE s.subtune_count IS NOT COALESCE(m.subtune_count, 1)`);
+  assert.strictEqual(bad.c, 0, 'song.subtune_count != the parent file\'s count');
+});
+
 // ---------------------------------------------------------------- HTTP half
 const get = async (route) => {
   const res = await fetch(`${API_BASE}${route}`);
@@ -266,6 +273,29 @@ const unlabeledTune = one(`
     for (const it of items) {
       assert.ok(/^\d+$/.test(String(it.subtune)), 'sub-tune is not a number');
     }
+  });
+
+  await run('every result carries subtuneCount', async () => {
+    const { items } = await search('the', 20);
+    for (const it of items) {
+      assert.ok(Number.isInteger(it.subtuneCount) && it.subtuneCount >= 1,
+        `subtuneCount ${JSON.stringify(it.subtuneCount)} on ${it.file}`);
+    }
+  });
+
+  await run('a folder\'s songs all report its count; a plain file reports 1', async () => {
+    if (folder) {
+      const { items } = await search(folder.title, 400);
+      const mine = items.filter(i => i.file === folder.path);
+      assert.ok(mine.length > 0, 'folder not matched');
+      for (const it of mine)
+        assert.strictEqual(it.subtuneCount, folder.subtune_count, `count on ${it.file} sub ${it.subtune}`);
+    }
+    const single = one('SELECT path FROM music WHERE subtune_count <= 1 AND title IS NOT NULL LIMIT 1');
+    if (!single) return;
+    const { items } = await search(single.path.split('/').pop(), 50);
+    const hit = items.find(i => i.file === single.path);
+    if (hit) assert.strictEqual(hit.subtuneCount, 1, `${single.path} should report 1`);
   });
 
   finish();

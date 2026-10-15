@@ -28,8 +28,7 @@ const { validate } = require('./middleware/validate');
 const { SettingsSchema, FavoriteSchema, PlaybackSchema } = require('./schemas');
 
 const {
-  searchStmt,
-  searchSubtuneStmt,
+  searchSongStmt,
   getDirIdStmt,
   getDirChildrenStmt,
   getSubtunesStmt,
@@ -120,6 +119,16 @@ if (isDev) {
   // app.use(express.static(path.join(__dirname, LOCAL_CLIENT_BUILD_ROOT)));
 }
 
+// Build the FTS5 MATCH string for a user query. Each term is wrapped in double
+// quotes (doubling any inside) and prefix-matched: a bare `-` or `:` is FTS5
+// syntax, not text, so `in-game` or `zelda:link's` would otherwise error or
+// change meaning -- and the catch below would silently return nothing.
+function ftsQueryFor(query) {
+  return (query || '').trim().split(/\s+/).filter(Boolean)
+    .map(term => `"${term.replace(/"/g, '""')}"*`)
+    .join(' ');
+}
+
 // Prepopulate searchMap for all 1- and 2-letter queries
 const searchMap = new Map();
 console.log('Pre-populating search map for 1- and 2-letter queries...');
@@ -128,12 +137,10 @@ console.log('Pre-populating search map for 1- and 2-letter queries...');
     await new Promise(resolve => setTimeout(resolve, 100));
     process.stdout.write(char1);
     const query = char1;
-    const items = searchStmt.all(`${query}*`, 50);
-    searchMap.set(query, items);
+    searchMap.set(query, searchSongStmt.all(ftsQueryFor(query), 50));
     for (let char2 of [...'abcdefghijklmnopqrstuvwxyz']) {
       const query = char1 + char2;
-      const items = searchStmt.all(`${query}*`, 50);
-      searchMap.set(query, items);
+      searchMap.set(query, searchSongStmt.all(ftsQueryFor(query), 50));
     }
   }
   console.log(`...Done populating search map.`);
@@ -308,49 +315,30 @@ app.get('/preview', cache1Hour, async (req, res) => {
 });
 
 /**
- * Returns: { items: [ { file, song_id, title?, subtune? }, ... ], total }
+ * Returns: { items: [ { file, song_id, subtune, title }, ... ], total }
  *
- * Searches both file titles (music_fts) and sub-tune titles (subtune_fts).
- * Items with a `subtune` are individual sub-tunes; items without are files.
+ * One query over the song index: every result is a playable song, so a file and
+ * its sub-tunes are ranked in a single list and `limit` bounds the whole
+ * response. `title` is the sub-tune's own label (null when it has none, and the
+ * client falls back to `Tune N`); searching a file's name matches every song it
+ * holds.
  */
 router.get('/search', cache1Hour, (req, res) => {
   const { limit = 100, query } = req.query;
   const start = performance.now();
+  const cacheKey = (query || '').trim();
 
   let items = [];
-  const sanitizedQuery = query.replace(/"/g, '""');
+  const ftsQuery = ftsQueryFor(query);
 
-  const ftsQuery = sanitizedQuery.trim().split(/\s+/).map(term => `${term}*`).join(' ');
-
-  if (searchMap.has(sanitizedQuery)) {
-    // Clone: the sub-tune loop below appends, and the cached array is shared.
-    items = [...searchMap.get(sanitizedQuery)];
-  } else {
+  if (searchMap.has(cacheKey)) {
+    // The map holds a fixed 50 per 1-2 letter query, so `limit` still caps it.
+    items = [...searchMap.get(cacheKey)].slice(0, Number(limit) || 100);
+  } else if (ftsQuery) {
     try {
-      items = searchStmt.all(ftsQuery, limit);
+      items = searchSongStmt.all(ftsQuery, limit);
     } catch (e) {
       console.error('Search error:', e.message);
-    }
-  }
-
-  // Append matches that were found in sub-tune titles rather than file titles.
-  if (ftsQuery) {
-    try {
-      const subtuneItems = searchSubtuneStmt.all(ftsQuery, limit);
-      // Drop exact duplicates only. A file hit is (file, sub-tune 0); a sub-tune
-      // whose title matched must survive even when its file also matched by
-      // title, otherwise the query yields the file and plays tune 0 instead of
-      // the tune the user searched for.
-      const seen = new Set(items.map(item => `${item.file}\u0000${item.subtune ?? 0}`));
-      for (const item of subtuneItems) {
-        const key = `${item.file}\u0000${item.subtune ?? 0}`;
-        if (!seen.has(key)) {
-          seen.add(key);
-          items.push(item);
-        }
-      }
-    } catch (e) {
-      console.error('Sub-tune search error:', e.message);
     }
   }
 

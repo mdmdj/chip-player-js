@@ -978,17 +978,20 @@ export const scenarios = [
     //      (order 1, at 3940 ms -- hence playing the first 10.5 s rather than seeking);
     //   2. a backward jump onto that order, which fires the learning.
     // A seek is fine for (2) because seekMs only forgets the *last* order; first-visit
-    // times are absolute and survive it. A seek is fatal for (1): landing on an order
-    // the linear flow never visited is skipped by design, so seeking straight to ~78 s
-    // would never learn anything. Playing past the loop start first is what makes this
-    // work -- an earlier draft of this comment claimed no seek could help, which was
-    // wrong, and cost a 92 s take to find out.
+    // times are absolute and survive it. A seek cannot supply (1): an order the seek
+    // lands in is not timed (mid-order, so the landing point is not its start), and
+    // neither is an order it skipped over -- so seeking straight to ~78 s would never
+    // learn anything. Playing past the loop start first is what makes this work -- an
+    // earlier draft of this comment claimed no seek could help, which was wrong, and
+    // cost a 92 s take to find out.
     //
-    // The seek target is 68000 rather than "band end minus 4 s" (76700) because
-    // libxmp 4.5's xmp_seek_time snaps to an order boundary: measured, 76700 lands at
-    // 68600 and 80500 at 68880, while 68000 lands at 68040. So the last stretch before
-    // the jump is entered by asking for 68000, which is the accurate end of the seek
-    // range, and the wrap is then 12.7 s of playback away rather than 4 s.
+    // The seek target is 68000 rather than "band end minus 4 s" (76700) because a seek
+    // past the module's scan end (~68.3 s) wraps into the loop instead of landing near
+    // the request: measured with the frame-accurate seek, 80500 lands back at 3920, the
+    // loop start. 68000 is the furthest point that still leaves the wrap 12.7 s of
+    // playback away. (The engine's seek changed in 2026-10 with the frame-accurate
+    // export; before that xmp_seek_time snapped backwards to an order boundary and
+    // 76700 landed at 68600 -- remeasure if the core changes again.)
     steps: [
       { atMs: 300, repeat: 'one', label: 'Repeat One ON' },
       // A label on the *absence*: this is the whole point of the clip, and the marks

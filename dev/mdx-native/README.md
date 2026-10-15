@@ -53,6 +53,26 @@ candidate MDX from the corpus below: **4,347 unchanged, 311 corrected**. Nativel
 confirmed here, and in-app for `DTWNB18.MDX` (band `[5078, 12403]` →
 `[0, 14942]`) while `G2MST6.MDX` is unchanged.
 
+## The region's two numbers are different in kind
+
+`intro` is the last track to *enter* its loop section; `loop` is the joint
+period, the smallest multiple of the longest track period that every looping
+track also hits. They come from different measurements, and the first version of
+the resolver paired the wrong ones: it took the last *crossing* and subtracted
+the joint period, which only cancels when every track shares a period.
+
+FACE04 is the fixture for that. Tracks 2–7 loop every 45.6 s and enter at
+114.03 s; tracks 8–11 loop every 22.8 s and enter at 182.45 s, so the mix only
+repeats from 182.45 s. The band used to start at 159645 -- neither a section
+start nor a crossing. G2MST6 is the counter-fixture: sections at 0 and 34.6 s
+with one shared period, where the two derivations agree exactly.
+
+To see those per-track numbers for any file, add a temporary `fprintf` in the
+resolver's track loop (`mdxmml_ym2151.c`, after the period is computed) printing
+`track_first_us[i]`, the period, and `first - period`; build `region`; run it;
+then remove the print. The arrays are internal to mdxmini, so the public API
+cannot show them.
+
 ## The corpus (`dev/mdx-corpus/`, gitignored)
 
 Two independent reference archives, from `nfggames.com/X68000/Music/`:

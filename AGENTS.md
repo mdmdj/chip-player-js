@@ -1546,6 +1546,32 @@ checks no longer work. Compare a live context to a stored one with
     and the cut-at-the-seam decision for a note crossing the loop end, which is the
     DAW default and not a bug). Feature head after promoting rounds 4+5:
     `d5715a88d`; PR #5 closed (no further action; nothing pending to promote).
+  - **Practice review #10 — the PR's head branch is NOT the promote's target, and
+    refreshing it is a separate step (cost a full review round, 2026-10-15).**
+    PR #10 is opened from a **squash branch**, `pr/subtunes-as-first-class`, built
+    with `git commit-tree <feature-tree> -p origin/master -m "<pr-body H1>"` and
+    force-pushed — *not* from `feature/subtunes-as-first-class`, which is what
+    `promote-apply.sh` pushes. That is deliberate (the PR reads as one clean
+    commit), but it means **a promote does not move the PR**: after promoting, the
+    PR still serves its previous head and a reviewer reads pre-fix code while the
+    tree you verified is correct. Symptom: macroscope replied "the cited commit is
+    not the head I can review" naming an *older* sha, twice, while `git grep` on
+    `origin/feature/...` found every fix. Triage: check
+    `gh pr view <n> --json headRefName` (a `pr/` name is the squash) before
+    concluding a reviewer is stale. Refresh, and verify through the **contents
+    API** rather than a local ref — that is the reviewer's view:
+    ```sh
+    TREE=$(git rev-parse origin/feature/subtunes-as-first-class^{tree})
+    NEW=$(git commit-tree "$TREE" -p "$(git rev-parse origin/master)" -m "$(head -1 dev/pr-body.md | sed 's/^# //')")
+    git branch -f pr/subtunes-as-first-class "$NEW"
+    git diff --stat origin/feature/subtunes-as-first-class pr/subtunes-as-first-class   # must be empty
+    git push --force-with-lease origin pr/subtunes-as-first-class
+    gh api "repos/mdmdj/chip-player-js/contents/src/components/App.js?ref=$NEW" --jq .content | base64 -d | grep -c '<fix>'   # quote the URL: zsh eats ?ref=
+    ```
+    The two branches stay tree-identical, so a line number cited from the feature
+    head is still right on the squash. Corollary for replies: cite the **PR head's**
+    sha, not the feature head's, or the citation points at a commit the reviewer
+    cannot open.
 - **A catalog rebuild is a prerequisite for booting the server after a merge that
   adds a column a query reads.** `server/index.js` selects `m.contributor`,
   created by `scripts/build-music.js`, not the server; an old catalog dies at

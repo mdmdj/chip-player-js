@@ -374,6 +374,17 @@ export default class XMPPlayer extends Player {
     } else {
       this.core._xmp_seek_time(this.xmpCtx, seekMs);
     }
+    // A pass target armed for "finish the pass you're in" must be re-derived
+    // here: libxmp's frame-accurate seek forces an xmp_play_buffer refresh, and
+    // that is exactly where it zeroes its completed-loop counter -- so a target
+    // computed before the seek would be spent counting from zero, i.e. one pass
+    // too many. Read the counter the seek left behind rather than the pre-seek
+    // one still cached in the frame info, and leave the snapping fallback alone:
+    // it does not touch the counter, so the re-derivation is a no-op there.
+    if (!this.looping && this._loopCount > 0) {
+      this.core._xmp_get_frame_info(this.xmpCtx, this.infoPtr);
+      this._loopCount = Math.max(1, this.getCurLoop() + 1);
+    }
   }
 
   stop() {

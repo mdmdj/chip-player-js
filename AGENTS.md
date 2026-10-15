@@ -455,13 +455,19 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
   "Session start"); `nvm use` alone does not fix PATH in a non-interactive
   shell.
 - **`node --watch` does not reload the API server reliably here — restart it by
-  hand after editing a server file.** On 2026-10-14 a change to `server/index.js`
+  hand after editing a server file, or after anything that rewrites `server/`
+  (a promote, or `./dev/rebase.sh`).** On 2026-10-14 a change to `server/index.js`
   at 15:52 was never picked up by a server process started at 15:21 (same PID, no
   re-exec), so every `/browse/*` request threw
   `ReferenceError: resolveDirectoryMetadata is not defined` and a full clip
-  re-shoot failed 5/18 against a *correct* commit. After editing anything under
-  `server/`, restart `npm run dev` and confirm the **HTML** route, not just the
-  API: `curl -s -o /dev/null -w '%{http_code}' mms-1:8080/browse/<dir>`, and grep
+  re-shoot failed 5/18 against a *correct* commit. It recurred 2026-10-15 the
+  same way: the promote's rebase rewrote `server/`, `--watch` restarted the child
+  mid-write and cached a `server/index.js` missing the `resolveDirectoryMetadata`
+  import, and every clip then timed out on `.BrowseList-row` — while `/api/browse`
+  still answered 200, because only the HTML injection calls that function. After
+  editing anything under `server/` (or after a rebase), restart `npm run dev` and
+  confirm the **HTML** route, not just the API:
+  `curl -s -o /dev/null -w '%{http_code}' mms-1:8080/browse/<dir>`, and grep
   the dev log for that ReferenceError.
 - **Audio:** the dev stub `src/chip-core.js` is a no-op (no audio). A **real
   chip-core was built** in this session — see "Building the real chip-core"

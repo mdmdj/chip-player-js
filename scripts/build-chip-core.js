@@ -123,7 +123,9 @@ const chipModules = [
       '_xmp_stop_module',
       '_xmp_restart_module',
       '_xmp_seek_time',
-      // '_xmp_seek_time_frame', // libxmp 4.7+; vendored 4.5 falls back to xmp_seek_time
+      // libxmp 4.7+ (the sibling tree has it). The player feature-detects, so a
+      // core without it still falls back to the order-snapping xmp_seek_time.
+      '_xmp_seek_time_frame',
       '_xmp_channel_mute',
       '_xmp_get_player',
       '_xmp_load_module_from_memory',

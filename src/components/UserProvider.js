@@ -196,16 +196,29 @@ const UserProvider = ({ children }) => {
         }
       } catch (e) {
         committed = false;
-        setFaves(oldFaves);
+        // Only unwind if the list still belongs to the account that started the
+        // toggle: after a sign-out or a switch it has already been cleared (or
+        // replaced), and restoring this snapshot would paint the old account's
+        // songs back onto the new session.
+        if (lastUid.current === user.uid) setFaves(oldFaves);
         console.log('Couldn\'t update favorites in Firebase.', e);
       }
       pendingFaveToggles.current--;
+      // Everything below lands on `faves`, so establish once that it is still
+      // the list of the account that started this toggle. A sign-out or a switch
+      // clears it, and a toggle that resolves afterwards belongs to the account
+      // that issued it -- applying it would put that account's songs (and their
+      // localStorage copy) under the next one. The rejection path is guarded
+      // above; the success path leaks just as well, because the refresh below
+      // claims its token when it issues, so the sign-out's earlier invalidation
+      // no longer covers it and its GET still runs with the captured user.
+      const sameAccount = lastUid.current === user.uid;
       // The mutation is committed from here on, so a failed re-read must not
       // roll the optimistic state back -- that would show the song as un-favorited
       // until the next refresh, and a retry would then invert it. The add response
       // carries this entry already decorated (size, sub-tune title, ...), so splice
       // that one in optimistically to avoid a flicker.
-      if (committed && addResult && addResult.favorite) {
+      if (sameAccount && committed && addResult && addResult.favorite) {
         setFaves(prev => {
           // A newer toggle may have removed this exact entry already; if so,
           // leave it out instead of re-adding a stale one.
@@ -222,7 +235,7 @@ const UserProvider = ({ children }) => {
       // cannot restore them. Deferred while another toggle is in flight, or the
       // whole-list snapshot could drop a mutation that has not landed; the last
       // toggle to land then hydrates.
-      if (favesHydratedFor !== user.uid && pendingFaveToggles.current === 0) {
+      if (sameAccount && favesHydratedFor !== user.uid && pendingFaveToggles.current === 0) {
         // Claim the token here, at issue, instead of reusing this toggle's. The
         // read is taken after every in-flight toggle has landed, so only a
         // toggle that starts *after* this point should invalidate it -- reusing

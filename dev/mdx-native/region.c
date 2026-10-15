@@ -8,7 +8,8 @@
  * intro_ms / loop_ms are exactly what mdx_get_loop_start_ms and
  * mdx_get_loop_length_ms return -- the values MDXPlayer maps onto
  * metadata.intro_length / loop_length, i.e. the slider band. length_s is
- * mdx_get_length() (the parsed song length, before the fade).
+ * mdx_get_length() in seconds -- the parse's length under the per-track fade
+ * gate, which is short of the section end when per > 1.
  *
  * With --play <ms> it renders that much audio first and appends fields:
  *
@@ -97,9 +98,10 @@ static void one(const char *path) {
      * they do in the app; the engine's own clock decides when to stop.
      *
      * Loop forever first: a section-2 position is usually *past* the parsed
-     * length (the length is intro + the passes before the fade), and under
-     * Repeat One the player is in exactly that state -- with the default limit
-     * the engine would fade, end, and stop advancing the clock. */
+     * length (the parse gates on per-track loops, so its figure is short of the
+     * section end when per > 1), and under Repeat One the player is in exactly
+     * that state -- with the default limit the engine would fade, end, and stop
+     * advancing the clock. */
     short buf[2048];
     long last = -1;
     int stalled = 0;

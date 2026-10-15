@@ -228,14 +228,18 @@ export default class MDXPlayer extends Player {
       if (hasLoop) {
         const curLoop = this.getCurLoop();
         this._maxLoopCount = Math.max(DEFAULT_LOOP_COUNT, curLoop + 1);
-        // Leaving after passing the default fade: the position is already past
-        // the reported duration, so the base end detector must stand down and
-        // let the engine's fade end the song (the display runs its tail from
-        // here). Deliberately *not* widened to "the engine's limit reaches the
-        // duration": that fires in the first pass for every song, including the
-        // per=1 files the suite pins, so it is a behaviour change rather than a
-        // consequence of the count.
-        if (curLoop >= DEFAULT_LOOP_COUNT) this.durationExtended = true;
+        // Leaving always stands the base end detector down: the engine's own
+        // fade has to end the song. _durationMs comes from mdx_get_length's
+        // parse, which runs the fade gate before loops_per_section is resolved
+        // (the region is measured after that parse), so the gate there counts
+        // raw per-track loops while playback counts joint sections. With mixed
+        // periods one section is several per-track loops, so the reported length
+        // is short by whole sections and the detector would cut the audible
+        // fade; when the periods agree the gap is only the whole-second
+        // truncation. The engine's end is never before _durationMs, so the flag
+        // is unconditional: it stands the detector down without cutting the fade
+        // and without hanging, since the finite count still ends the song.
+        this.durationExtended = true;
       } else {
         // No measured loop region: finish the pass and fade.
         this._maxLoopCount = DEFAULT_LOOP_COUNT;

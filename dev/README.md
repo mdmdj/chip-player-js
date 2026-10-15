@@ -170,6 +170,13 @@ removes its temp dir and rows afterwards.
 hook (the client code is ESM/JSX and the repo has no test runner), so it needs no
 build and no new dependencies.
 
+`dev/mdx-native/` is the one harness that is not JavaScript. The JS harnesses
+fake the region getters, so they never reach the C; this builds the repo's
+`mdxmini` as a normal Linux binary and runs the loop-region recording directly.
+`make -C dev/mdx-native check` runs golden fixtures from `catalog/mdx` (skipped
+when absent). It also holds the corpus triage tools (`scan-tracks`,
+`curate-sample.js`). See `dev/mdx-native/README.md`.
+
 ## Browser devtools (`window.__cpDev`)
 
 `shims/devtools.js` is staged to `src/chip-player-devtools.js` and prepended to

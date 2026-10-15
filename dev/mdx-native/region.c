@@ -13,24 +13,18 @@
  *
  * With --play <ms> it renders that much audio first and appends fields:
  *
- *     <per_section>  <limit>  <played_ms>  <ended_ms>  <engine_min>
+ *     <limit>  <played_ms>  <ended_ms>  <engine_min>
  *     <section_end_ms>  <fade_onset_ms>
  *
- * per_section is mdx_get_loops_per_section() and, without --sections, limit is
- * mdx_get_section_loop_limit(): the pair the counter-gated engine used to need
- * when Repeat One was switched off (the engine's limit counted per-track
- * repeats, while the band counts joint sections).
- *
- * With --sections the limit is instead the joint-section count MDXPlayer now
- * passes -- max(2, sections completed + 1) -- and section_end_ms is the
- * boundary it names (intro + limit * loop). fade_onset_ms is where the fade
- * becomes audible: the same window is rendered twice, once with the limit
- * applied and once with it lifted, and the two block levels are compared.
- * mdxmini schedules identical events either way, so their ratio is the
- * engine's gain, which steps down (one YM2151 volume step, ~0.75 dB) the
- * moment the fade starts. The fade must begin on section_end_ms: gated on the
- * per-track minimum it instead begins on the slowest track's own grid,
- * overshooting the section end by up to one tick.
+ * limit is the joint-section count MDXPlayer passes -- max(2, sections
+ * completed + 1) -- and section_end_ms is the boundary it names
+ * (intro + limit * loop). fade_onset_ms is where the fade becomes audible: the
+ * same window is rendered twice, once with the limit applied and once with it
+ * lifted, and the two block levels are compared. mdxmini schedules identical
+ * events either way, so their ratio is the engine's gain, which steps down
+ * (one YM2151 volume step, ~0.75 dB) the moment the fade starts. The fade must
+ * begin on section_end_ms: gated on the per-track minimum it instead begins on
+ * the slowest track's own grid, overshooting the section end by up to one tick.
  *
  * This exists because the JS harnesses in dev/ cannot reach the C: they fake
  * the region getters. Running the real mdxmini as a normal Linux binary is the
@@ -53,7 +47,6 @@
 
 static int play_ms = 0;
 static int limit_arg = 0;
-static int sections = 0;   /* --sections: leave the engine a joint-section limit */
 
 /* One rendered block (mdx_calc_sample's 1024 samples): its position on the
  * engine clock and its RMS. The fade is a gain on every sample, so the RMS
@@ -137,18 +130,14 @@ static void one(const char *path) {
   t_mdxmini d;
   memset(&d, 0, sizeof d);
   if (mdx_open(&d, (char *)path, dir) != 0) {
-    printf("%s\tOPEN_FAIL\t0\t0\t0\t0\t0\t0\t0\t0\t0\n", path);
+    printf("%s\tOPEN_FAIL\t0\t0\t0\t0\t0\t0\t0\t0\n", path);
     return;
   }
   int len = mdx_get_length(&d);
   int intro = mdx_get_loop_start_ms(&d);
   int loop = mdx_get_loop_length_ms(&d);
-  int per = 0, limit = 0, played = 0, ended = 0, engine_min = 0;
+  int limit = 0, played = 0, ended = 0, engine_min = 0;
   int section_end = 0, fade_onset = -1;
-
-  /* Measured at parse time, so it is readable without playback: this is the
-     column a corpus-wide "how many files have per > 1" scan reads. */
-  per = mdx_get_loops_per_section(&d);
 
   if (play_ms > 0) {
     /* The same call the player makes, so the track counters advance the way
@@ -166,19 +155,13 @@ static void one(const char *path) {
     played = d.mdx ? (int)(d.mdx->elapsed_time / 1000) : 0;
     engine_min = engine_min_loops(&d);
 
-    /* The limit to hand the engine, and the section boundary it should land on.
-     * --sections uses the joint-section count MDXPlayer passes now; the default
-     * keeps the old counter projection for comparison. */
+    /* The limit to hand the engine: the joint-section count MDXPlayer passes,
+     * max(2, sections completed + 1), and the boundary it names. */
     if (loop > 0 && intro >= 0) {
       int cur = played >= intro ? (played - intro) / loop : 0;
-      if (sections) {
-        limit = cur + 1;
-        if (limit < 2) limit = 2;              /* the two-pass floor, in sections */
-        section_end = intro + limit * loop;
-      } else {
-        limit = mdx_get_section_loop_limit(&d);
-        section_end = intro + (cur + 1) * loop;  /* the next boundary */
-      }
+      limit = cur + 1;
+      if (limit < 2) limit = 2;              /* the two-pass floor, in sections */
+      section_end = intro + limit * loop;
     }
 
     /* Now do to the engine what the player does when Repeat One is switched
@@ -200,7 +183,7 @@ static void one(const char *path) {
     free(fb);
   }
 
-  printf("%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n", path, intro, loop, len, per, limit, played, ended, engine_min, section_end, fade_onset);
+  printf("%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n", path, intro, loop, len, limit, played, ended, engine_min, section_end, fade_onset);
   mdx_close(&d);
 }
 
@@ -211,7 +194,6 @@ int main(int argc, char **argv) {
   for (i = 1; i < argc; i++) {
     if (!strcmp(argv[i], "--play")) play_ms = atoi(argv[++i]);
     else if (!strcmp(argv[i], "--limit")) limit_arg = atoi(argv[++i]);
-    else if (!strcmp(argv[i], "--sections")) sections = 1;
     else { fprintf(stderr, "region: unknown argument %s\n", argv[i]); return 2; }
   }
   while (fgets(path, sizeof path, stdin)) {
@@ -223,7 +205,7 @@ int main(int argc, char **argv) {
     if (pid == 0) { one(path); fflush(stdout); _exit(0); }
     int st = 0;
     waitpid(pid, &st, 0);
-    if (WIFSIGNALED(st)) { printf("%s\tCRASH\t0\t0\t0\t0\t0\t0\t0\t0\t0\n", path); fflush(stdout); }
+    if (WIFSIGNALED(st)) { printf("%s\tCRASH\t0\t0\t0\t0\t0\t0\t0\t0\n", path); fflush(stdout); }
   }
   return 0;
 }

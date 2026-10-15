@@ -66,7 +66,7 @@ function makeFS() {
   };
 }
 
-function makeCore({ introMs = A, loopMs = B, withLoopGetters = true, perSection = 0, sectionLimit = 0 } = {}) {
+function makeCore({ introMs = A, loopMs = B, withLoopGetters = true, perSection = 0 } = {}) {
   const per = perSection > 0 ? perSection : 1;   // per-track repeats in one section
   const core = {
     introMs, loopMs, per,
@@ -122,15 +122,10 @@ function makeCore({ introMs = A, loopMs = B, withLoopGetters = true, perSection 
     core._mdx_get_loop_start_ms = () => core.introMs;
     core._mdx_get_loop_length_ms = () => core.loopMs;
   }
-  // A core whose engine-side counter is not the section count -- per > 1 when
-  // the tracks have different periods (4 s and 6 s make a 12 s section). The
-  // player must hand the engine the limit in the engine's unit, and keep its
-  // two-pass floor expressed in sections. Absent = a core from before those
-  // getters, which keeps the joint-count behaviour.
-  if (sectionLimit > 0) {
-    core._mdx_get_section_loop_limit = () => sectionLimit;
-    core._mdx_get_loops_per_section = () => perSection;
-  }
+  // per > 1: the tracks have different periods (4 s and 6 s make a 12 s
+  // section), so the engine's per-track counter is not the section count. The
+  // player must hand the engine the limit in the engine's unit and keep its
+  // two-pass floor expressed in sections.
 
   // Advance in whole steps: the fade latches when the clock crosses the boundary
   // for the current pass count, so a test that jumped to a position would skip
@@ -290,7 +285,7 @@ async function main() {
     // (2 x 10s loops + fade = 24s) while playback fades at the joint section end
     // (2 x 20s + fade = 44s). Leaving at curLoop 1 schedules a fade past the
     // reported duration, so a detector that trusted 24s would cut 20s of music.
-    const { p, core } = await makePlayer({ perSection: 2, sectionLimit: 7 });
+    const { p, core } = await makePlayer({ perSection: 2 });
     assert.strictEqual(p.getDurationMs(), 24000, 'per-track-gated reported length');
     p.setSilenceDuration(0);   // arm the base detector so the truncation is observable
     p.setLooping(true);
@@ -435,21 +430,19 @@ async function main() {
   // hands it that count directly (mdxmml_ym2151.c's loop_gate_value does the
   // projection per track), so the old per-track projection must not reappear.
   await check('leaving repeat hands the engine the joint section count', async () => {
-    const { p, core } = await makePlayer({ perSection: 2, sectionLimit: 7 });
+    const { p, core } = await makePlayer({ perSection: 2 });
     p.setLooping(true);
     await drive(p, core, [BAND_END + 1000]);
     p.setLooping(false);
-    // The projection getters would say 7 (the old per-track limit); the joint
-    // sections completed here are 2, so the floor makes it 3.
+    // The joint sections completed here are 2, so the two-pass floor makes it 3.
     assert.strictEqual(core.lastMaxLoopArg, 3,
       `expected the joint section count 3, got ${core.lastMaxLoopArg}`);
   });
 
   await check('the two-pass floor is the same number with mixed periods', async () => {
-    // A projection of 3 is behind the floor of two sections (2 sections x 3
-    // counters), but the engine reads sections now, so the floor is two and the
-    // pass in progress makes three.
-    const { p, core } = await makePlayer({ perSection: 3, sectionLimit: 3 });
+    // The engine reads sections, so the floor is two sections and the pass in
+    // progress makes three.
+    const { p, core } = await makePlayer({ perSection: 3 });
     p.setLooping(true);
     await drive(p, core, [BAND_END + 1000]);
     p.setLooping(false);
@@ -457,8 +450,8 @@ async function main() {
       `expected the section floor 3, got ${core.lastMaxLoopArg}`);
   });
 
-  await check('a core without the getters keeps the joint-count behaviour', async () => {
-    const { p, core } = await makePlayer();   // no sectionLimit/perSection
+  await check('the player derives the joint count with no core-side section limit', async () => {
+    const { p, core } = await makePlayer();
     p.setLooping(true);
     await drive(p, core, [BAND_END + 1000]);
     p.setLooping(false);
@@ -472,7 +465,7 @@ async function main() {
   // display cannot fold the band through the audible fade (greptile P2,
   // macroscope MDXPlayer.js:193).
   await check('the display and the engine agree on the joint section count', async () => {
-    const { p, core } = await makePlayer({ perSection: 2, sectionLimit: 7 });
+    const { p, core } = await makePlayer({ perSection: 2 });
     p.setLooping(true);
     await drive(p, core, [BAND_END + 1000]);
     p.setLooping(false);

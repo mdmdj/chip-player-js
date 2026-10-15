@@ -407,25 +407,6 @@ int  mdx_get_loop_length_ms( t_mdxmini *data )
     return (int)((second - first) / 1000);
 }
 
-/* The mdx_set_max_loop limit that ends the fade at the end of the joint loop
-   section now playing: the engine compares that limit against a minimum
-   per-track count, while mdx_get_loop_length_ms describes the joint section --
-   the same unit only when every track shares a period. 0 when the core cannot
-   say (no usable region), and the caller keeps its own limit. */
-int  mdx_get_section_loop_limit( t_mdxmini *data )
-{
-    if (!data) return 0;
-    return mdx_parse_mml_get_section_loop_limit(data->self);
-}
-
-/* How many per-track counts make one joint section, so a floor expressed in
-   sections can be handed to mdx_set_max_loop. 1 when the periods agree. */
-int  mdx_get_loops_per_section( t_mdxmini *data )
-{
-    if (!data) return 0;
-    return mdx_parse_mml_get_loops_per_section(data->self);
-}
-
 int  mdx_get_tracks ( t_mdxmini *data )
 {
   if (data == NULL || data->mdx == NULL || data->mdx->tracks < 0)

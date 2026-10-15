@@ -2434,6 +2434,15 @@ greptile P1s on `dev/overlay`. Its commits land on the overlay either way — bu
   while the read decision is per-account, so A's slow toggle plus a switch to B
   can leave B's server favorites unread. Track pending per account.
 
+**Status (same session, later):** both landed on `dev/overlay` (`2f85761f5`, `52b596c26`). Independent re-run:
+native **12 ok** but **2 FAIL on some runs and 0 on others, same tree** — the
+suite is flaky, and `./dev/promote.sh` stayed clean throughout; `dev/test-mdx-loops.js`
+**21**; `check-faves-account-switch.mjs` **20 passed / 0 failed** (was 17/3).
+**Stabilise the native check before trusting a red run** — most likely the
+sample-derived fade onset (block-RMS threshold) or a fixture whose gain step
+lands near it; pin whichever row moves and say why the test, not the engine, is
+wrong — or fix the engine if it is not.
+
 **Next promote carries those two fixes.** PR head is `b0a717dba`. Arming the
 promote is the user's act; afterwards refresh the squash — `pr/subtunes-as-first-class`
 is a *separate squash branch*, and a promote does not move it, so the PR keeps

@@ -1454,7 +1454,8 @@ checks no longer work. Compare a live context to a stored one with
     clobber across loads; the local-files shuffle/delete edges; MIDI Repeat-One
     wrapping on the event index instead of the clock). Rounds 3–5 mostly found
     regressions in *those* fixes: the tempo restore ran per track and erased
-    another track's re-applied change (restore once at the shared pass boundary);
+    another track's re-applied change (restore once at the shared pass boundary
+    -- per pass since 2026-10-15, so a third and later pass restores it too);
     dropping the Web MIDI wrap overshoot lost timing (keep it, and reschedule the
     new pass in the same call); an implicit-zero loop never latched its start
     tempo; the delete path clamped an old-list slot instead of following the

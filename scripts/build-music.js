@@ -1,4 +1,5 @@
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const Database = require('better-sqlite3');
@@ -6,7 +7,8 @@ const { Command } = require('commander');
 const chalk = require('chalk');
 const { toArabic } = require('roman-numerals');
 const { FORMATS } = require('../src/config/index');
-const { parseMetadata } = require('./metadata-parsers');
+const { parseMetadata, cleanString } = require('./metadata-parsers');
+const { describeSubtunes } = require('./subtune-headers');
 
 
 const program = new Command();
@@ -52,9 +54,29 @@ function tableExists(database, tableName) {
   }
 }
 
-// Initialize DB
+// Initialize DB.
+// A dry run must leave the catalog untouched, but it still has to run the
+// additive migrations (the INSERTs reference the new columns) and exercise the
+// same code as a real build. So take a snapshot and work on that; the real
+// catalog file is never opened for writing.
 const dbExists = fs.existsSync(DB_PATH);
-const db = new Database(DB_PATH);
+let db = new Database(DB_PATH);
+let dryRunDbPath = null;
+if (options.dryrun) {
+  dryRunDbPath = path.join(os.tmpdir(), `catalog-dryrun-${process.pid}.db`);
+  try {
+    fs.rmSync(dryRunDbPath, { force: true });
+    // VACUUM INTO snapshots the committed state including anything still in WAL.
+    db.exec(`VACUUM INTO '${dryRunDbPath.replace(/'/g, "''")}'`);
+    db.close();
+    db = new Database(dryRunDbPath);
+  } catch (e) {
+    console.warn(chalk.yellow(`Could not snapshot the catalog for a dry run (${e.message}); using a temporary empty database.`));
+    db.close();
+    fs.rmSync(dryRunDbPath, { force: true });
+    db = new Database(dryRunDbPath);
+  }
+}
 db.pragma('journal_mode = WAL');
 
 process.on('SIGINT', () => {
@@ -79,6 +101,8 @@ try {
 if (options.resetDb) {
   if (options.verbose) console.log(chalk.yellow('Resetting database tables...'));
   db.exec(`
+    DROP TABLE IF EXISTS subtune;
+    DROP TABLE IF EXISTS subtune_fts;
     DROP TABLE IF EXISTS music;
     DROP TABLE IF EXISTS directories;
     DROP TABLE IF EXISTS images;
@@ -130,6 +154,7 @@ db.exec(`
     game TEXT,
     system TEXT,
     copyright TEXT,
+    release_date TEXT,           -- ISO date parsed from metadata (year -> Jan 1)
     file_size INTEGER,
     mtime TEXT,
     raw_meta TEXT,
@@ -137,15 +162,39 @@ db.exec(`
     text_ids TEXT,               -- JSON array of text IDs
     soundfont TEXT,              -- Relative path to soundfont
     md5 TEXT,                    -- MD5 hash for tracker modules
+    subtune_count INTEGER DEFAULT 1, -- Playable sub-tunes (1 = single song)
     sort_order INTEGER DEFAULT 0,
     FOREIGN KEY(directory_id) REFERENCES directories(id),
     FOREIGN KEY(image_id) REFERENCES images(id)
   );
-  
+
+  -- Each row is a playable sub-tune within a single file (e.g. an NSF/NSFE/SID
+  -- containing several tunes). A file with subtune_count > 1 is presented as a
+  -- "song folder". Single-song files have no rows here, so a sub-tune and a
+  -- plain song are the same kind of thing to the client.
+  CREATE TABLE IF NOT EXISTS subtune (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    music_id INTEGER NOT NULL,
+    subtune INTEGER NOT NULL,    -- 0-based, matches the player's subtune index
+    title TEXT,
+    length_ms INTEGER,
+    date TEXT,                   -- per-sub-tune date when the format provides one
+    sort_order INTEGER DEFAULT 0,
+    UNIQUE(music_id, subtune),
+    FOREIGN KEY(music_id) REFERENCES music(id) ON DELETE CASCADE
+  );
+
   -- FTS Virtual Table
   CREATE VIRTUAL TABLE IF NOT EXISTS music_fts USING fts5(
     title, artist, game, system, filename, path, 
     content='music', content_rowid='id', 
+    prefix='1 2 3'
+  );
+
+  -- Sub-tune titles are searchable just like file titles.
+  CREATE VIRTUAL TABLE IF NOT EXISTS subtune_fts USING fts5(
+    title, 
+    content='subtune', content_rowid='id', 
     prefix='1 2 3'
   );
   
@@ -167,18 +216,59 @@ db.exec(`
     VALUES (new.id, new.title, new.artist, new.game, new.system, new.filename, new.path);
   END;
 
+  CREATE TRIGGER IF NOT EXISTS subtune_ai AFTER INSERT ON subtune BEGIN
+    INSERT INTO subtune_fts(rowid, title) VALUES (new.id, new.title);
+  END;
+
+  CREATE TRIGGER IF NOT EXISTS subtune_ad AFTER DELETE ON subtune BEGIN
+    INSERT INTO subtune_fts(subtune_fts, rowid, title) VALUES ('delete', old.id, old.title);
+  END;
+
+  CREATE TRIGGER IF NOT EXISTS subtune_au AFTER UPDATE ON subtune BEGIN
+    INSERT INTO subtune_fts(subtune_fts, rowid, title) VALUES ('delete', old.id, old.title);
+    INSERT INTO subtune_fts(rowid, title) VALUES (new.id, new.title);
+  END;
+
   CREATE INDEX IF NOT EXISTS idx_directories_parent ON directories(parent_id);
   CREATE INDEX IF NOT EXISTS idx_music_directory ON music(directory_id);
   CREATE INDEX IF NOT EXISTS idx_music_sort ON music(sort_order);
   CREATE INDEX IF NOT EXISTS idx_music_songid ON music(song_id);
+  CREATE INDEX IF NOT EXISTS idx_subtune_music ON subtune(music_id);
   CREATE INDEX IF NOT EXISTS idx_directories_sort ON directories(sort_order);
 `);
 
-// Migration: Ensure contributor column exists in existing database
-const existingMusicCols = db.pragma('table_info(music)').map(c => c.name);
-if (existingMusicCols.length > 0 && !existingMusicCols.includes('contributor')) {
-  console.log(chalk.yellow('Migrating catalog.db: Adding "contributor" column to music table...'));
-  db.exec('ALTER TABLE music ADD COLUMN contributor TEXT');
+// Additive migrations for databases created before these columns existed.
+// Returns true when the column was just added.
+function ensureColumn(table, column, type) {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all();
+  if (!columns.some(c => c.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+    return true;
+  }
+  return false;
+}
+const addedSubtuneCount = ensureColumn('music', 'subtune_count', 'INTEGER DEFAULT 1');
+ensureColumn('music', 'release_date', 'TEXT');
+ensureColumn('music', 'contributor', 'TEXT');
+ensureColumn('subtune', 'date', 'TEXT');
+
+// A catalog created before sub-tunes existed has no sub-tune rows, so unchanged
+// multi-song files get skipped and never gain them. "Does this catalog still
+// need the backfill?" cannot be read off the data: the ALTER gives every
+// existing row subtune_count = 1, which is indistinguishable from a genuinely
+// single-song file. So record it in the database header instead, and only an
+// unfiltered build is allowed to mark it done -- a --filter run adds the column
+// to the real catalog without covering the rest of it.
+const SUBTUNE_BACKFILL_VERSION = 1;
+const backfillDone = db.pragma('user_version', { simple: true }) >= SUBTUNE_BACKFILL_VERSION;
+const needsBackfill = addedSubtuneCount || !backfillDone;
+if (needsBackfill) {
+  options.skipUnmodified = false;
+  if (options.verbose) {
+    console.log(chalk.cyan(addedSubtuneCount
+      ? 'Backfilling sub-tunes (newly added sub-tune count)...'
+      : 'Backfilling sub-tunes (catalog predates them)...'));
+  }
 }
 
 function importHvscCatalog(targetDb, opts = {}) {
@@ -242,11 +332,20 @@ if (options.hvscOnly) {
 // Statements
 const insertMusicStmt = db.prepare(`
     INSERT OR REPLACE INTO music (
-      directory_id, filename, path, extension, song_id, title, artist, contributor, game, system, 
-      copyright, file_size, mtime, raw_meta, image_id, text_ids, soundfont, md5, sort_order
+      directory_id, filename, path, extension, song_id, title, artist, contributor, game, system,
+      copyright, release_date, file_size, mtime, raw_meta, image_id, text_ids, soundfont, md5, subtune_count, sort_order
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
+
+const insertSubtuneStmt = db.prepare(`
+    INSERT INTO subtune (music_id, subtune, title, length_ms, date, sort_order)
+    VALUES (?, ?, ?, ?, ?, ?)
+`);
+
+const deleteSubtunesStmt = db.prepare('DELETE FROM subtune WHERE music_id = ?');
+
+const findMusicIdStmt = db.prepare('SELECT id FROM music WHERE path = ?');
 
 const insertDirStmt = db.prepare(`
     INSERT INTO directories (parent_id, name, path, image_id, text_ids, sort_order, count, total_size, mtime)
@@ -414,6 +513,7 @@ function escapeRegExp(string) {
   return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+// Formats that can contain more than one sub-tune in a single file.
 // --- DB Helpers ---
 
 function getImageId(imagePath) {
@@ -624,6 +724,7 @@ function processFile(child, directoryId, dirEntries, dirImagePath, dirTextIds) {
   const meta = parseMetadata(buffer, extension, relativePath);
   const title = meta.title || path.basename(name, ext);
   const system = meta.system !== undefined ? meta.system : detectSystemFromPath(relativePath);
+  const subtunes = describeSubtunes(extension, meta);
 
   // --- Sidecar Resolution for File ---
   
@@ -689,6 +790,14 @@ function processFile(child, directoryId, dirEntries, dirImagePath, dirTextIds) {
   }
 
   if (!options.dryrun) {
+    // INSERT OR REPLACE deletes and reinserts the music row. With foreign keys
+    // enforced that rejects the old subtune children, so clear them first and
+    // rewrite both below.
+    const previousMusicRow = findMusicIdStmt.get(relativePath);
+    if (previousMusicRow) {
+      deleteSubtunesStmt.run(previousMusicRow.id);
+    }
+
     insertMusicStmt.run(
       directoryId,
       name,
@@ -701,6 +810,7 @@ function processFile(child, directoryId, dirEntries, dirImagePath, dirTextIds) {
       meta.game || null,
       system,
       meta.copyright || null,
+      meta.date || null,
       stat.size,
       stat.mtime.toISOString(),
       JSON.stringify(meta),
@@ -708,8 +818,16 @@ function processFile(child, directoryId, dirEntries, dirImagePath, dirTextIds) {
       JSON.stringify(finalTextIds),
       soundfont,
       md5,
+      subtunes.length || 1,
       sortOrder
     );
+
+    const musicRow = findMusicIdStmt.get(relativePath);
+    if (musicRow) {
+      subtunes.forEach((sub, i) => {
+        insertSubtuneStmt.run(musicRow.id, sub.subtune, sub.title, sub.lengthMs, sub.date, i);
+      });
+    }
   }
 
   if (existingFiles.has(relativePath)) {
@@ -769,6 +887,10 @@ processDirectory(CATALOG_DIR, '')
         const deleteStmt = db.prepare('DELETE FROM music WHERE path = ?');
         const deleteTransaction = db.transaction((paths) => {
           for (const p of paths) {
+            // Delete sub-tune children first: databases created before the FK
+            // gained ON DELETE CASCADE would otherwise reject the parent delete.
+            const row = findMusicIdStmt.get(p);
+            if (row) deleteSubtunesStmt.run(row.id);
             deleteStmt.run(p);
           }
         });
@@ -823,6 +945,10 @@ processDirectory(CATALOG_DIR, '')
     }
 
     if (!options.dryrun) {
+      // Only a build that scanned the whole catalog can vouch that every
+      // multi-song file now has its rows. A run cut short by --limit (or a
+      // filter) has not seen every file, so it must not mark the backfill done.
+      if (!options.filter && (limit === 0 || processed < limit)) db.pragma(`user_version = ${SUBTUNE_BACKFILL_VERSION}`);
       console.log(`Database saved to ${DB_PATH}`);
     }
   })
@@ -832,6 +958,11 @@ processDirectory(CATALOG_DIR, '')
   .finally(() => {
     db.pragma('wal_checkpoint(TRUNCATE)'); // Forces all WAL data into the .db file
     db.close();
+    if (dryRunDbPath) {
+      for (const f of [dryRunDbPath, `${dryRunDbPath}-wal`, `${dryRunDbPath}-shm`]) {
+        try { fs.rmSync(f, { force: true }); } catch (e) { /* ignore */ }
+      }
+    }
   });
 
 module.exports = {

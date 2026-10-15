@@ -58,6 +58,16 @@ typedef struct _mdxmml_ym2151_instances {
   int all_track_finished;
   int fade_out_wait;
   int master_volume;
+
+  /* Song loop bookkeeping (see mdx_get_loop_*). The region is measured from the
+     tracks that actually loop: a track that never loops (a one-shot) must not
+     gate the song's loop count, or the min-over-tracks stalls at 0 until that
+     track ends and misreads its dropout as the first loop. */
+  int64_t track_first_us[MDX_MAX_TRACK_NUMBER];  /* per-track 1st loop, us */
+  int64_t track_second_us[MDX_MAX_TRACK_NUMBER]; /* per-track 2nd loop, us */
+  int64_t loop_first_us;   /* elapsed at the 1st loop (intro + loop) */
+  int64_t loop_second_us;  /* elapsed at the 2nd loop (intro + 2 * loop) */
+  int loop_region_bad;     /* no usable region: the getters report none */
 } mdxmml_ym2151_instances;
 
 /* ------------------------------------------------------------------ */
@@ -258,6 +268,7 @@ mdx_parse_mml_ym2151_async_initialize(MDX_DATA *orig_mdx, PDX_DATA *orig_pdx, so
   /* start parsing */
 
   self->all_track_finished=FLAG_FALSE;
+  self->fade_out=0;
   self->fade_out_wait=0;
   self->master_volume=127;
 
@@ -287,10 +298,11 @@ mdx_parse_mml_ym2151_async(songdata *data, int track_mute_mask)
   }
 
   if ( self->fade_out > 0 ) {
+    if ( self->master_volume <= 0 ) { self->all_track_finished = FLAG_TRUE; return FLAG_FALSE; }
     if ( self->fade_out_wait==0 ) { self->fade_out_wait = self->fade_out; }
     self->fade_out_wait--;
     if ( self->fade_out_wait==0 ) { self->master_volume--; }
-    if ( self->master_volume==0 ) { return FLAG_FALSE; }
+    if ( self->master_volume==0 ) { self->all_track_finished = FLAG_TRUE; return FLAG_FALSE; }
   }
   ym2151_set_master_volume( self->master_volume * self->mdx->fm_volume / 127, data );
   pcm8_set_master_volume( self->master_volume * self->mdx->pcm_volume / 127, data );
@@ -331,6 +343,20 @@ mdx_parse_mml_ym2151_async(songdata *data, int track_mute_mask)
     }
   }
 
+  /* Per-track loop times: when each track completes its 1st and 2nd loop. The
+     song-wide region is resolved from these after the parse, using only tracks
+     that loop at all (mdx_parse_mml_ym2151_async_get_length). A one-shot track
+     is excluded, so its end cannot masquerade as a loop crossing -- the reason
+     the min-over-tracks approach mislabels the boundary (a one-shot sits at
+     count 0 and holds the minimum until it ends). */
+  for ( i = 0; i < self->mdx->tracks; i++ ) {
+    int c = self->mdx->track[i].infinite_loop_times;
+    if ( c >= 1 && self->track_first_us[i] == 0 )
+      self->track_first_us[i] = self->mdx->elapsed_time;
+    if ( c >= 2 && self->track_second_us[i] == 0 )
+      self->track_second_us[i] = self->mdx->elapsed_time;
+  }
+
   /* timer count */
 
   self->mdx->total_count++;
@@ -341,10 +367,18 @@ mdx_parse_mml_ym2151_async(songdata *data, int track_mute_mask)
 
 int mdx_parse_mml_ym2151_async_get_length(songdata *data)
 {
-  int next,sec;
+  int next,sec,i;
   
   __GETSELF(data)
   
+  /* A fresh measurement: the parse below may run on a reused context (the app
+     keeps one and reopens it per song), so clear last time's loop times. */
+  memset(self->track_first_us, 0, sizeof self->track_first_us);
+  memset(self->track_second_us, 0, sizeof self->track_second_us);
+  self->loop_first_us = 0;
+  self->loop_second_us = 0;
+  self->loop_region_bad = 0;
+
   next = 1;
   while(next && self->mdx->elapsed_time < (1200 * 1000000))
   {
@@ -352,6 +386,31 @@ int mdx_parse_mml_ym2151_async_get_length(songdata *data)
   }
   
   sec = (int)self->mdx->elapsed_time / 1000000;
+
+  /* Resolve the loop region from the tracks that loop. The first boundary is
+     the last track to complete its 1st loop; the second is the last to complete
+     its 2nd. Require every looping track to have reached the 2nd loop, so a
+     partial measurement cannot report a short region -- a wrong band is worse
+     than none, and the getters then report no region. */
+  {
+    int64_t first = 0, second = 0;
+    int loopers = 0, all_second = 1;
+    for ( i = 0; i < self->mdx->tracks; i++ ) {
+      if ( self->mdx->track[i].infinite_loop_times <= 0 )
+        continue;
+      loopers++;
+      if ( self->track_first_us[i] > first )
+        first = self->track_first_us[i];
+      if ( self->track_second_us[i] == 0 )
+        all_second = 0;
+      else if ( self->track_second_us[i] > second )
+        second = self->track_second_us[i];
+    }
+    self->loop_first_us  = first;
+    self->loop_second_us = second;
+    self->loop_region_bad =
+      ( loopers == 0 || !all_second || first <= 0 || second <= first ) ? 1 : 0;
+  }
 
   /* stop */
   ym2151_all_note_off(data);
@@ -389,6 +448,22 @@ mdx_parse_mml_get_tempo(void* in_self)
   mdxmml_ym2151_instances* self = (mdxmml_ym2151_instances *)in_self;
 
  return 1000*1024*(256 - self->mdx->tempo)/4000;
+}
+
+int64_t
+mdx_parse_mml_get_loop_first_us(void* in_self)
+{
+  if (!in_self) return 0;
+  if (((mdxmml_ym2151_instances *)in_self)->loop_region_bad) return 0;
+  return ((mdxmml_ym2151_instances *)in_self)->loop_first_us;
+}
+
+int64_t
+mdx_parse_mml_get_loop_second_us(void* in_self)
+{
+  if (!in_self) return 0;
+  if (((mdxmml_ym2151_instances *)in_self)->loop_region_bad) return 0;
+  return ((mdxmml_ym2151_instances *)in_self)->loop_second_us;
 }
 
 

@@ -145,8 +145,6 @@ int   mdx_get_loop_start_ms(t_mdxmini *data);
  * \param data a t_mdxmini struct representing an open song.
  */
 int   mdx_get_loop_length_ms(t_mdxmini *data);
-int   mdx_get_section_loop_limit(t_mdxmini *data);
-int   mdx_get_loops_per_section(t_mdxmini *data);
 /**
  * \brief Returns the number of tracks in the song.
  *

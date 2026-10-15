@@ -2095,7 +2095,7 @@ only armed when `silenceDuration >= 0`, and both arms must end the song):
   compared against the *smallest per-track* loop counter (`mdxmml_ym2151.c`'s
   fade test: `infinite_loops` = the min over live tracks) while the band counts
   the **joint** section — the same unit only when every track shares a period.
-  `mdx_get_section_loop_limit()` (the projection) compensated, but only by
+  The projection getter compensated, but only by
   `ceil`-ing the section end onto the next per-track boundary, so measurement
   jitter rounded a near-boundary up by a whole period: `MTS2_32.MDX` (per=16)
   faded at 233586 against a section end of 226688, one slowest-track period
@@ -2107,10 +2107,10 @@ only armed when `silenceDuration >= 0`, and both arms must end the song):
   which turns exactly on the joint boundary; `loops_per_section <= 1` returns
   the raw minimum, so the per=1 path is untouched. `MDXPlayer.applyLoopCount`
   therefore hands the engine `_maxLoopCount` directly — one number, one unit
-  (the `_engineMaxLoop` field is gone). `mdx_get_section_loop_limit()` and
-  `mdx_get_loops_per_section()` stay exported and unchanged, now used only by
-  `dev/mdx-native/region.c` (the native harness) — **candidates for removal at
-  promotion** if nothing else wants them.
+  (the `_engineMaxLoop` field is gone). The two section-limit getters were
+  removed once nothing but the native harness used them: `region.c` prints no
+  per_section column (check.sh carries `per` as a literal per fixture row) and
+  the two exports are gone from `build-chip-core.js`.
   **Coverage, measured:** `per > 1` is what makes the units differ, and it is
   still rare in the wild (**0 of 37** catalog MDX beyond the fixtures below, **0
   of 140** sampled corpus files), so this is latent correctness, not a

@@ -35,37 +35,41 @@ check FACE04.MDX  182452 45613  "two period groups, entering their loops 22.8s a
 # 20-90% short on these files). Reduced to sections per track it turns at the
 # boundary. The fade can only begin on a tick and the joint period is measured,
 # so allow 1% of the loop (floor 500ms); the pre-fix error is far outside it.
-check_sections() { # file  note
+#
+# `per` is a literal per fixture: how many per-track repeats one joint section
+# is worth. It used to be read from the engine (a getter since removed), but it
+# is a fixed property of each fixture file, so it belongs in the table.
+check_sections() { # file  per  note
   f="$catalog/$1"
-  if [ ! -f "$f" ]; then printf 'skip  %s (%s)\n' "$1" "$2"; return; fi
+  if [ ! -f "$f" ]; then printf 'skip  %s (%s)\n' "$1" "$3"; return; fi
+  per="$2"
   line=$(printf '%s\n' "$f" | ./region)
   intro=$(printf '%s' "$line" | cut -f2)
   loop=$(printf '%s' "$line" | cut -f3)
-  per=$(printf '%s' "$line" | cut -f5)
   # A position a quarter into the section after the first, so the boundary the
   # limit names is a whole section away rather than the tick under the playhead.
   play=$((intro + loop + loop / 4))
-  row=$(printf '%s\n' "$f" | ./region --play "$play" --sections)
-  limit=$(printf '%s' "$row" | cut -f6)
-  end=$(printf '%s' "$row" | cut -f10)
-  onset=$(printf '%s' "$row" | cut -f11)
+  row=$(printf '%s\n' "$f" | ./region --play "$play")
+  limit=$(printf '%s' "$row" | cut -f5)
+  end=$(printf '%s' "$row" | cut -f9)
+  onset=$(printf '%s' "$row" | cut -f10)
   tol=$((loop / 100)); [ "$tol" -lt 500 ] && tol=500
   d=$((onset - end)); [ "$d" -lt 0 ] && d=$((0 - d))
   if [ "$per" -gt 1 ] && [ "$onset" -ge 0 ] && [ "$d" -le "$tol" ]; then
     printf 'ok    %s per=%s limit=%s fade=%s vs section_end=%s  %s\n' \
-      "$1" "$per" "$limit" "$onset" "$end" "$2"
+      "$1" "$per" "$limit" "$onset" "$end" "$3"
   else
     printf 'FAIL  %s per=%s limit=%s fade=%s vs section_end=%s (allow %s)  %s\n' \
-      "$1" "$per" "$limit" "$onset" "$end" "$tol" "$2"
+      "$1" "$per" "$limit" "$onset" "$end" "$tol" "$3"
     status=1
   fi
 }
 
-check_sections DES_80.MDX   "one section = 2 repeats"
-check_sections ran321.MDX   "one section = 3 repeats"
-check_sections NOS123.MDX   "one section = 5 repeats"
-check_sections VAL5.MDX     "one section = 6 repeats"
-check_sections 27_CLEAR.MDX "one section = 8 repeats"
-check_sections MTS2_32.MDX  "one section = 16 repeats"
+check_sections DES_80.MDX   2  "one section = 2 repeats"
+check_sections ran321.MDX   3  "one section = 3 repeats"
+check_sections NOS123.MDX   5  "one section = 5 repeats"
+check_sections VAL5.MDX     6  "one section = 6 repeats"
+check_sections 27_CLEAR.MDX 8  "one section = 8 repeats"
+check_sections MTS2_32.MDX  16 "one section = 16 repeats"
 
 exit $status

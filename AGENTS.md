@@ -46,6 +46,31 @@ mattered. Same for `*.wasm`, `main.<hash>.js`, any single-line generated bundle.
 - right: search the **source** (`mdxmini/src/*.c`, `src/players/*.js`), then
   confirm in the build output with a count.
 
+### Delegated work: DeepSeek V4.1 Flash Free by default
+
+Any subagent or delegated task uses **`providerInstanceId: opencode`, model
+`opencode/deepseek-v4.1-flash-free`** ("DeepSeek V4.1 Flash Free") unless the
+user names another model for that task in that turn, or approves one. It is free,
+so it is the right place for context-heavy or mechanical work — corpus scans,
+sweeps, harness runs, "add these fixtures and prove the checks fail first" — which
+keeps the parent's context small. Prefer not to build, promote or push from a
+child.
+
+A child starts **cold**: no session history, no memory of this file. Its prompt
+must carry the repo path, the exact commands, the acceptance criteria, the
+harness's flags and columns, and the rules (no push, no promote, no rebase; commit
+on `dev/overlay`; revert and report if the single attempt fails). Ask for numbers
+first, and for **fail-before / pass-after** on every check — a child reporting
+"all green" without that has told you nothing. The native harness columns
+(`dev/mdx-native/region`) and `dev/mdx-native/check.sh` are the usual evidence.
+
+**Run delegated tasks sequentially when they touch the same checkout or files.**
+Two children editing one tree is how a tree gets corrupted; the MDX pair both
+touched `src/players/MDXPlayer.js`, so they had to be one after the other.
+`delegate_task`'s `isolation: "worktree"` starts the child from the parent's
+*local commit* — uncommitted edits are not copied — and drops it into
+`npm install` / Node-ABI setup, so it is not the cheaper option here.
+
 ## Project
 
 **chip-player-js** is a web music player for chiptune/game audio formats

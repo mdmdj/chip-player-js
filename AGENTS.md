@@ -12,6 +12,40 @@ wrong version fails with `NODE_MODULE_VERSION` mismatches. Also check whether an
 `npm run dev` is already up before assuming the environment is correct — a
 long-running server may have been started under a different Node than the shell.
 
+### Shell and search hygiene — check this first, it keeps costing us time
+
+The shell here is **zsh**, not bash. Confirm before reaching for an idiom:
+`echo $0` (or `ps -p $$ -o comm=`). The two traps below have each burned calls
+more than once, so treat them as habits, not as things to remember.
+
+**zsh is not bash about `?`, `*`, `[ ]` and `$var:...`**
+
+| wrong — zsh eats it | right | what you see when you get it wrong |
+| --- | --- | --- |
+| `gh api repos/$R/contents/src/a.js?ref=$SHA` | `gh api "repos/$R/contents/src/a.js?ref=$SHA"` | `no matches found: …a.js?ref=…` |
+| `gh pr view --json headRefOid --jq '.headRefOid[0:9]'` left unquoted | quote the jq program | `no matches found` |
+| `H=ref; git show $H:src/f.js` | `git show "${H}:src/f.js"` | `bad substitution` (`$H:s` reads as a *modifier*) |
+| `grep -rn pat src --include=*.js` | `grep -rn pat src --include='*.js'` | `no matches found: --include=*.js` |
+| `for f in $(ls …)` | `find … -print0 \| xargs -0`, or quote | paths with spaces split |
+| `kill $pids` with several pids | `for p in $pids; do kill -KILL "$p"; done` | silently kills nothing |
+| `pkill -f some-pattern` | kill explicit PIDs from `ps` | matches the shell running it |
+
+And the Node rule outranks all of it: export
+`PATH="$HOME/.nvm/versions/node/v24.21.0/bin:$PATH"` for any `node`/`npm`, since
+`better-sqlite3` is ABI-matched to 24.21.0 (`nvm use` alone does not fix PATH in
+a non-interactive shell).
+
+**Never grep or print a built/minified file.** `src/chip-core.js` is Emscripten
+glue: megabytes on **one line**, so a matched-line grep prints all of it into
+context — it has happened twice, ~50 KB each, and buried the result that
+mattered. Same for `*.wasm`, `main.<hash>.js`, any single-line generated bundle.
+
+- wrong: `grep -n _mdx_get_loop_length_ms src/chip-core.js` → the entire file
+- right: `grep -c '_mdx_get_loop_length_ms' src/chip-core.js` → a count
+- right: `grep -o '_mdx_get_[a-z_]*' src/chip-core.js \| sort -u` → matches only
+- right: search the **source** (`mdxmini/src/*.c`, `src/players/*.js`), then
+  confirm in the build output with a count.
+
 ## Project
 
 **chip-player-js** is a web music player for chiptune/game audio formats

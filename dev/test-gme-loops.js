@@ -225,6 +225,43 @@ async function main() {
     assert.strictEqual(p.isPlayingIndefinitely(), true);
   });
 
+  await check('turning the setting off under repeat one starts no fade', async () => {
+    const { p, core } = await makePlayer({ tracks: [ONE_SHOT] });
+    p.setLooping(true);                                  // Repeat One
+    p.setParameter('indefinitePlayback', true);
+    drive(p, core, ONE_SHOT.play_length + 50);           // past the track length
+    assert.strictEqual(p.fadingOut, false, 'repeat one holds it, not the setting');
+    p.setParameter('indefinitePlayback', false);         // the finding: this used to fade
+    assert.strictEqual(p.fadingOut, false, 'no fade: the song is meant to keep looping');
+    assert.strictEqual(p.fadeStartMs, null);
+    assert.strictEqual(p.isPlayingIndefinitely(), true);
+    // The artefact, not just the flag: give the fake core real sample values and
+    // run well into where a 5s fade would be, then read the mix back. Full scale
+    // is 0x7fff / 65535 here, and any fade would be visible.
+    const memGet = core.getValue;
+    core.getValue = (ptr, type) => (type === 'i16' ? 0x7fff : memGet(ptr));
+    drive(p, core, ONE_SHOT.play_length + FADE_MS + 200);
+    const l = new Float32Array(BUFFER_SIZE), r = new Float32Array(BUFFER_SIZE);
+    p.processAudio([l, r]);
+    assert.ok(Math.abs(l[0] - 0x7fff / 65535) < 1e-6, `still at full scale (got ${l[0]})`);
+  });
+
+  await check('the setting still fades when nothing else is looping', async () => {
+    const { p, core } = await makePlayer({ tracks: [ONE_SHOT] });
+    p.setLooping(false);
+    p.setParameter('indefinitePlayback', true);
+    drive(p, core, ONE_SHOT.play_length + 50);
+    p.setParameter('indefinitePlayback', false);
+    assert.strictEqual(p.fadingOut, true, 'with repeat off the setting off still fades');
+    // The other half of the pair: this time the mix really is attenuated.
+    const memGet = core.getValue;
+    core.getValue = (ptr, type) => (type === 'i16' ? 0x7fff : memGet(ptr));
+    drive(p, core, ONE_SHOT.play_length + FADE_MS - 1000);
+    const l = new Float32Array(BUFFER_SIZE), r = new Float32Array(BUFFER_SIZE);
+    p.processAudio([l, r]);
+    assert.ok(l[0] < 0.1, `attenuated by the fade (got ${l[0]})`);
+  });
+
   await check('a track with a loop region folds the head into the band', async () => {
     const { p, core } = await makePlayer({ tracks: [ONE_SHOT] });
     setEndsAt(core, 100000);

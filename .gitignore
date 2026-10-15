@@ -50,3 +50,7 @@ site/
 
 #diff review
 review.html
+
+# MDX corpus (Eidis/NFG archives): a large, user-supplied reference set, like
+# dev/nes-audio-tests/. The catalogs and zips stay out of the repo.
+dev/mdx-corpus/

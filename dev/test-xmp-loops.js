@@ -159,6 +159,35 @@ check('seek-skipped loop start stays unlearned, never corrupt', () => {
   assert.strictEqual(emits, 0);
 });
 
+check('a seek into an unseen order never becomes a loop start', () => {
+  const { p } = makePlayer(200000);
+  let emits = 0;
+  p.on('playerStateUpdate', (s) => { if (!s.isStopped) emits++; });
+  drive(p, p.core, orders([0, 1, 2], 8000));
+  // A forward seek, landing 4s into order 12 -- which the linear flow (8000ms
+  // per order) would have reached at 96000.
+  p.seekMs(100000);
+  drive(p, p.core, orders([12, 13, 14, 15, 12, 13], 8000)
+    .map((f, i) => ({ ...f, time: 100000 + i * 8000 })));
+  // The 15->12 jump is a real loop, but order 12's start is not in this stream:
+  // the seek skipped over it. Timing it at the landing point would put the band
+  // 4s late and make it look measured, so no band is the right answer.
+  assert.strictEqual(p.metadata.intro_length, undefined);
+  assert.strictEqual(p.getLoopBandMs(), null);
+  assert.strictEqual(emits, 0);
+});
+
+check('a seek past the loop still learns when the loop start was played', () => {
+  const { p } = makePlayer(200000);
+  drive(p, p.core, orders([0, 1, 2, 3], 8000));
+  p.seekMs(120000); // lands on an unseen order (16)...
+  drive(p, p.core, orders([16, 17, 18, 19, 2, 3, 4], 8000)
+    .map((f, i) => ({ ...f, time: 120000 + i * 8000 })));
+  // ...but the jump 19->2 targets order 2, played at 16000 before the seek.
+  assert.strictEqual(p.metadata.intro_length, 16000);
+  assert.deepStrictEqual(p.getLoopBandMs(), { startMs: 16000, endMs: 200000 });
+});
+
 check('loop from the very start learns nothing (zuma-like, 23->0)', () => {
   const { p } = makePlayer(200000);
   let emits = 0;

@@ -67,6 +67,7 @@ export default class XMPPlayer extends Player {
     this._orderFirstSeen = new Map();
     this._lastPos = -1;
     this._skipOrder = null;
+    this._seekPending = false;
     this.buffer = this.core._malloc(this.bufferSize * 16); // i16
     this.infoTexts = [];
   }
@@ -191,6 +192,7 @@ export default class XMPPlayer extends Player {
     this._rowFirstSeen = new Map();
     this._lastPos = -1;
     this._skipOrder = null;
+    this._seekPending = false;
 
     this.resolveParamValues(persistedSettings);
     this.setTempo(persistedSettings.tempo || 1);
@@ -243,6 +245,19 @@ export default class XMPPlayer extends Player {
     if (!seen) {
       this._lastPos = pos;
       return;
+    }
+    // The first order seen after a seek is where the seek landed, mid-order. Its
+    // start is behind the landing point, so it cannot be timed -- leave it unseen
+    // and let a later backward jump onto it take the out-of-flow path below, the
+    // same as any other arrival from outside the linear flow. Orders visited
+    // before the seek keep their real first-visit times, so seeking and then
+    // looping normally still learns.
+    if (this._seekPending) {
+      this._seekPending = false;
+      if (!seen.has(pos)) {
+        this._lastPos = pos;
+        return;
+      }
     }
     if (this._skipOrder != null && pos !== this._skipOrder) this._skipOrder = null;
     if (this._skipOrder == null) {
@@ -340,6 +355,12 @@ export default class XMPPlayer extends Player {
     // as a backward jump. First visits are absolute, so learning continues
     // across the seek; only a never-linearly-visited start stays unlearned.
     this._lastPos = -1;
+    // The landing is an arrival from outside the linear flow, which the next
+    // order poll has to know: an unseen order the seek lands in began somewhere
+    // behind the landing point, so timing it here would record a mid-order
+    // timestamp as that order's start -- and a later loop back to it would then
+    // draw a band from it.
+    this._seekPending = true;
     // xmp_seek_time_frame (libxmp 4.7+) is a more accurate seek; fall back to
     // xmp_seek_time on older builds (same millisecond units).
     if (this.core._xmp_seek_time_frame) {

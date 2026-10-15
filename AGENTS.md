@@ -2021,13 +2021,15 @@ only armed when `silenceDuration >= 0`, and both arms must end the song):
   included. It marks the repeating span [loopStart, trackEnd) from the first
   loop end on (single-pass duration never rescales; learning also fires the
   one `playerStateUpdate` that re-renders the footer, since the band appears
-  mid-song); any seek freezes learning for the song only in the one case
-  that matters (a backward jump onto an order the linear flow never
-  visited, whose true start is unknowable — that visit is skipped so a
-  loop-end time can never become a loop start), while first-visit times are
-  absolute and survive seeks, so seeking then looping normally still learns
-  correctly; a from-the-start loop learns nothing (full-span highlight says
-  nothing), and files without a backward jump keep today's UI.
+  mid-song); two arrivals are never timed: the order a seek lands in, when it was
+  never visited linearly (the landing point is mid-order, so timing it there
+  would put the band's start late and make it look measured), and a backward
+  jump onto an order the linear flow never visited, whose true start is
+  unknowable -- either way the visit is skipped so a loop-end time can never
+  become a loop start, while first-visit times are absolute and survive seeks,
+  so seeking then looping normally still learns correctly; a from-the-start loop
+  learns nothing (full-span highlight says nothing), and files without a
+  backward jump keep today's UI.
   **Known limitation, and the obvious future polish:** learning needs the
   engine's *first* backward order jump, so the band cannot exist during the
   first pass — on TECHTRIS that is ~80s in, which makes the feature look

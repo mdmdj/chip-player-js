@@ -10,11 +10,18 @@
 // `user` the toggle's closure captured. The response then lands on the cleared
 // (or the new account's) list. The guard is `lastUid.current === user.uid`.
 //
-// The check performs the sign-out form of the switch. A switch to another
-// account goes through the same guard, but dev has one account and the auth
-// bypass answers every token as it, so the new account's own (legitimate) GET
-// would bring the same list -- indistinguishable from the leak, and not
-// assertable here.
+// Two scenarios. The first is the sign-out form of the switch: the guard is
+// `lastUid.current === user.uid`. The second is a switch to another *account*:
+// A's toggle is still in flight when the user switches to B, and B toggles while
+// B's own first read is in flight, so only a post-toggle replacement read can
+// bring B's list. That read must be started when B's *own* request lands, not
+// when A's does -- one global pending count lets A defer B's hydration, and A's
+// late landing is then declined by the account guard, so nobody reads and B's
+// server favorites stay missing until another toggle or a reload.
+//
+// Dev has one server account and the auth bypass answers every token as it, so
+// the second scenario cannot tell the two accounts apart by the list they bring;
+// it asserts the *read* (and that B hydrates from it) instead.
 //
 // The race is reproduced, not waited for: the initial favorites GET is held, so
 // the list stays cold and the post-toggle hydration branch is reachable at all;
@@ -201,6 +208,121 @@ try {
     log.join(' '));
 
   check('no page errors', pageErrors.length === 0, pageErrors.slice(0, 2).join(' | '));
+
+  // ---- Scenario 2: the pending-toggle count is per account ----
+  // See the header. A toggles and its POST is held; the user switches to B; B's
+  // own first read is held (so B is cold); B toggles, which invalidates that
+  // read, so only the post-toggle replacement can hydrate B. B must start that
+  // read when *its* toggle lands -- against one global counter A's outstanding
+  // request defers it, and both accounts end up unread.
+  const context2 = await browser.newContext({ viewport: { width: 1200, height: 900 } });
+  const page2 = await context2.newPage();
+  let getCount2 = 0;
+  let addCount2 = 0;
+  const heldGets2 = [];
+  let heldAddA2 = null;
+  const log2 = [];
+  const t2 = Date.now();
+  const stamp2 = what => log2.push(`${what}@${Date.now() - t2}`);
+  const at2 = prefix => log2.findIndex(e => e.startsWith(prefix));
+  const poll2 = async (fn, ms = 8000) => {
+    const until = Date.now() + ms;
+    while (Date.now() < until) {
+      if (await fn()) return true;
+      await page2.waitForTimeout(60);
+    }
+    return false;
+  };
+  const seed2 = () => page2.evaluate(() => {
+    try { return JSON.parse(window.localStorage.getItem('faves') || '[]'); } catch (e) { return null; }
+  });
+
+  try {
+    const pageErrors2 = [];
+    page2.on('pageerror', e => pageErrors2.push(String(e && e.message || e)));
+    const serverBefore2 = (await serverFaves()).length;
+
+    // Hold both accounts' first list reads (each list stays cold) and A's POST.
+    await page2.route('**/api/user/favorites', route => {
+      getCount2++;
+      stamp2(`GET#${getCount2}`);
+      if (getCount2 <= 2) { heldGets2.push(route); return; }
+      return route.continue();
+    });
+    await page2.route('**/api/user/favorites/add', route => {
+      addCount2++;
+      stamp2(`ADD#${addCount2}`);
+      if (addCount2 === 1) { heldAddA2 = route; return; }
+      return route.continue();
+    });
+
+    await page2.goto(`${BASE}/browse/${DIR}`, { waitUntil: 'domcontentloaded' });
+    await page2.waitForSelector('.BrowseList-row .FavoriteButton', { timeout: 30000 });
+    check('(switch) the initial GET was issued', await poll2(() => getCount2 >= 1));
+
+    // Two distinct un-favorited rows: A toggles the first, B the second.
+    const picks2 = await page2.$$eval('.BrowseList-row', (rows, names) => {
+      const buttons = [...document.querySelectorAll('.BrowseList-row .FavoriteButton')];
+      const out = [];
+      for (const r of rows) {
+        const a = r.querySelector('.BrowseList-colName a');
+        const b = r.querySelector('.FavoriteButton');
+        if (!a || !b) continue;
+        const name = (a.textContent || '').trim();
+        if (names.includes(name)) continue;
+        const idx = buttons.indexOf(b);
+        if (idx >= 0) out.push({ index: idx, name });
+      }
+      return out;
+    }, pick ? favNames.concat(pick.name) : favNames);
+    check('(switch) two un-favorited rows are available', picks2.length >= 2,
+      `picks=${JSON.stringify(picks2.map(p => p.name))}`);
+    if (picks2.length < 2) throw new Error('scenario 2 needs two un-favorited rows');
+
+    await page2.locator('.BrowseList-row .FavoriteButton').nth(picks2[0].index).click();
+    check('(switch) A\'s toggle is in flight', await poll2(() => addCount2 >= 1 && heldAddA2 !== null),
+      `adds=${addCount2}`);
+
+    // The switch: B arrives, and B's own first read goes in flight and stays.
+    await page2.evaluate(() => window.__cpDevSetUser({ uid: 'other-user', getIdToken: async () => 'dev-token' }));
+    stamp2('SWITCH');
+    check('(switch) B\'s first read is in flight', await poll2(() => getCount2 >= 2), `GETs=${getCount2}`);
+
+    // B toggles the second row: this invalidates B's held read, so only the
+    // post-toggle replacement read can bring B's server favorites.
+    await page2.locator('.BrowseList-row .FavoriteButton').nth(picks2[1].index).click();
+
+    const replacement = await poll2(() => getCount2 >= 3);
+    check('(switch) B starts its own replacement read', replacement, `GETs=${getCount2}`);
+    // The artefact, waited for: the read being issued is not the same as it
+    // having landed and been persisted, so poll the seed rather than read it
+    // once. Against the pre-fix code no read is issued and the seed keeps only
+    // B's own optimistic toggle, so this cannot pass vacuously.
+    const hydratedB = await poll2(async () => (await seed2()).some(f => witnessPaths.has(f.path)));
+    check('(switch) B\'s server favorites were hydrated', hydratedB,
+      `seed=${JSON.stringify((await seed2()).map(f => f.path))}`);
+
+    // A's toggle lands last: its replacement must be declined by the account
+    // guard, and it must not replace B's list.
+    await heldAddA2.continue();
+    heldAddA2 = null;
+    stamp2('ADD#1-released');
+    check('(switch) both toggles really landed',
+      await poll2(async () => (await serverFaves()).length === serverBefore2 + 2),
+      `server=${(await serverFaves()).length} expected=${serverBefore2 + 2}`);
+    const stillB = (await seed2()).some(f => witnessPaths.has(f.path));
+    check('(switch) A\'s late landing did not replace B\'s list', stillB);
+
+    check('(switch) the interleaving really happened (A in flight across the switch, B before the release)',
+      at2('ADD#1') >= 0 && at2('ADD#1') < at2('SWITCH') && at2('SWITCH') < at2('ADD#2') &&
+      at2('ADD#2') < at2('ADD#1-released'),
+      log2.join(' '));
+    check('(switch) no page errors', pageErrors2.length === 0, pageErrors2.slice(0, 2).join(' | '));
+  } finally {
+    for (const r of heldGets2) await r.abort().catch(() => {});
+    if (heldAddA2) await heldAddA2.abort().catch(() => {});
+    await context2.close().catch(() => {});
+  }
 } finally {
   if (heldGet) await heldGet.abort().catch(() => {});
   if (heldAdd) await heldAdd.abort().catch(() => {});

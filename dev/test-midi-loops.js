@@ -755,4 +755,24 @@ check('a note crossing the seam is cut at the replay, composed ending or not', (
   }
 });
 
+// The seam release is emitted at the boundary, so the iterator's own tick has to
+// reach it too -- otherwise the *next* boundary (or the noteless collapse that
+// ends the list) measures its gap from a stale tick and places its event one gap
+// too late (greptile/macroscope, midi-helpers.js:303). The note lives on a track
+// that carries no markers, so the global loop end is set elsewhere and its last
+// in-loop event sits before that boundary: gap > 0, which the marker-at-the-end
+// shape cannot show.
+check('a seam release moves the emitted timeline to the boundary', () => {
+  const mf = parseBytes(buildMidi([
+    [tempo(), cc(110), ccAt(TPQ * 4, 111)],              // loop [0, 480]
+    [noteOnAt(0), noteOffAt(TPQ * 5)],                   // on@0, released at 600 -- past the end
+  ]));
+  const { events, loopEndMs } = mf.getPlaybackEvents(false);
+  const last = events[events.length - 1];
+  // Two passes: the noteless release lands on the second boundary, 960 ticks.
+  const expected = 2 * loopEndMs;
+  assert.ok(Math.abs(last.playTime - expected) < 1,
+    `last event at ${Math.round(last.playTime)}ms, expected the second boundary ${Math.round(expected)}ms`);
+});
+
 console.log(`\n${passed} checks passed${process.exitCode ? ' (WITH FAILURES)' : ''}.`);

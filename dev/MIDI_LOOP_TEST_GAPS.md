@@ -116,6 +116,50 @@ A file whose loop marker sits mid-note is an authoring error — the loop should
 be placed where voices resolve — and cutting is what we do. Not planned to
 change; there is no note-tracking to add.
 
+## Decision: the wrap restores the state at the jump target, not at the loop entry (2026-10-15)
+
+greptile (`midi-helpers.js:176`, P1) reports that the replay rewinds events
+without restoring the controller/program values from the loop's *start*, and
+that `loopJump()` "keeps the same wrong state by collecting values through
+`loop.jumpMs`, which includes the entire first pass" — its example is an intro
+CC7=100 with the loop later setting CC7=0, so the second pass would start
+silent.
+
+Declined, on three grounds, and the second is the one that would make the
+suggested change a *regression* rather than a fix:
+
+1. **`collectStateEvents` is the seek helper.** `MIDIPlayer.collectStateEvents(fromIdx, toMs)`
+   (`MIDIFilePlayer.js:483`) is documented as "newest program/controller state
+   before toMs, for restoring the synth after a transport move (seek or loop
+   wrap)", and `seekToMs` calls it with the seek target (`:521`). So
+   state-at-a-time has exactly one definition here, and a wrap *is* a transport
+   move: `loop.jumpMs` is the time it moves to. Including the first pass is not
+   an oversight — it is what makes the result the state *at the jump target*.
+2. **The two mechanisms agree today, and the proposal would split them.** The
+   other path — the expanded two-pass list from `getLoopedEvents`, which also
+   feeds the piano roll — carries MIDI state across the boundary, because
+   nothing resets it: pass 2 begins with the values pass 1 ended with. The wrap's
+   restore reproduces exactly that. Restoring loop-*entry* values at the wrap
+   would make the JS wrap and the expanded list sound different at the same
+   musical point.
+3. **It is what the original driver does.** These markers (CC110/111, CC102/103)
+   come from engines that loop by jumping the sequence; a sequence jump does not
+   re-initialise controllers, so the game's second pass starts with the state the
+   first pass left.
+
+Measured over the catalog (same scanner as below, plus a state map from the
+expanded events at `loopStartMs` and at `loopEndMs`): **2** MIDI files have a
+loop region, both Descent, and in both the two states *do* differ — 22 and 53
+`(channel, controller)` slots. Mostly that is because their loops start at
+~100 ms, before the song's own patch setup, which lies *inside* the loop and is
+therefore replayed either way; what is genuinely carried is automation such as
+`3/cc10` (pan) 23 → 43. So the finding is not vacuous for these files — the
+behaviour is a real choice — but it is the choice the format's own player makes,
+and it keeps the wrap consistent with the expansion.
+
+A composer who needs the loop to re-enter a known state writes that state inside
+the loop, which is what "authored to continue" (the `loopJump` comment) means.
+
 ## How to regenerate the inventory
 
 A scanner was used to produce the table above (parse each file with the repo's

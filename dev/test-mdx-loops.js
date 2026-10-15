@@ -63,7 +63,7 @@ function makeFS() {
   };
 }
 
-function makeCore({ introMs = A, loopMs = B, withLoopGetters = true } = {}) {
+function makeCore({ introMs = A, loopMs = B, withLoopGetters = true, perSection = 0, sectionLimit = 0 } = {}) {
   const core = {
     introMs, loopMs,
     maxLoop: 0,
@@ -114,6 +114,15 @@ function makeCore({ introMs = A, loopMs = B, withLoopGetters = true } = {}) {
   if (withLoopGetters) {
     core._mdx_get_loop_start_ms = () => core.introMs;
     core._mdx_get_loop_length_ms = () => core.loopMs;
+  }
+  // A core whose engine-side counter is not the section count -- per > 1 when
+  // the tracks have different periods (4 s and 6 s make a 12 s section). The
+  // player must hand the engine the limit in the engine's unit, and keep its
+  // two-pass floor expressed in sections. Absent = a core from before those
+  // getters, which keeps the joint-count behaviour.
+  if (sectionLimit > 0) {
+    core._mdx_get_section_loop_limit = () => sectionLimit;
+    core._mdx_get_loops_per_section = () => perSection;
   }
 
   // Advance in whole steps: the fade latches when the clock crosses the boundary
@@ -371,6 +380,41 @@ async function main() {
     assert.strictEqual(p.fadeTailStartMs, null, 'the capture belonged to the old position');
     await drive(p, core, [BAND_START + B]);
     assertDisplay(p, BAND_START, 'folds into the band again');
+  });
+
+  // The engine's fade limit counts per-track loops, while the band counts joint
+  // sections -- the same unit only when every track shares a period. MDXPlayer
+  // must hand the engine a limit in the engine's own unit (greptile,
+  // MDXPlayer.js:228).
+  await check('leaving repeat hands the engine its own section limit', async () => {
+    const { p, core } = await makePlayer({ perSection: 2, sectionLimit: 7 });
+    p.setLooping(true);
+    await drive(p, core, [BAND_END + 1000]);
+    p.setLooping(false);
+    assert.strictEqual(core.lastMaxLoopArg, 7,
+      `expected the engine's own limit 7, got ${core.lastMaxLoopArg}`);
+  });
+
+  await check('the two-pass floor stays in sections when the units differ', async () => {
+    // A limit of 3 is behind the floor of two sections (2 sections x 3 counters),
+    // so the floor wins: the fade must not land inside the first pass.
+    const { p, core } = await makePlayer({ perSection: 3, sectionLimit: 3 });
+    p.setLooping(true);
+    await drive(p, core, [BAND_END + 1000]);
+    p.setLooping(false);
+    assert.strictEqual(core.lastMaxLoopArg, 6,
+      `expected the section floor 2*3, got ${core.lastMaxLoopArg}`);
+  });
+
+  await check('a core without the getters keeps the joint-count behaviour', async () => {
+    const { p, core } = await makePlayer();   // no sectionLimit/perSection
+    p.setLooping(true);
+    await drive(p, core, [BAND_END + 1000]);
+    p.setLooping(false);
+    // DEFAULT_LOOP_COUNT is 2; curLoop is the joint count the player derives.
+    const curLoop = Math.max(0, Math.floor((core.abs - A) / B));
+    assert.strictEqual(core.lastMaxLoopArg, Math.max(2, curLoop + 1),
+      `expected the joint fallback, got ${core.lastMaxLoopArg}`);
   });
 
   console.log(`\n${passed} checks passed${xfailed ? `, ${xfailed} known failure(s)` : ''}${process.exitCode ? ' (WITH FAILURES)' : ''}.`);

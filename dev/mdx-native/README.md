@@ -30,19 +30,19 @@ With `--play <ms>` it first renders that much audio (with `mdx_set_max_loop(0)`,
 as Repeat One does), then appends:
 
 ```
-<per_section>  <limit>  <played_ms>  <ended_ms>  <engine_min>
+<limit>  <played_ms>  <ended_ms>  <engine_min>
 <section_end_ms>  <fade_onset_ms>
 ```
 
-`per_section` is `mdx_get_loops_per_section()` — how many per-track repeats one
-joint section is worth. `--sections` hands the engine the joint-section count
-(the unit `MDXPlayer` uses now) and sets `section_end_ms` to the boundary that
-count names, `intro + limit * loop`; without it `limit` is the old
-`mdx_get_section_loop_limit()` projection and `section_end_ms` is the next
-boundary. `fade_onset_ms` is the elapsed time the engine actually starts its
-fade (a dev-only getter, `mdx_parse_mml_get_fade_out`), or -1 if it never did
-inside the render bound. `--limit N` overrides what is applied, which is the
-negative control.
+`limit` is the joint-section count `MDXPlayer` passes, `max(2, sections
+completed + 1)`, and `section_end_ms` is the boundary that count names,
+`intro + limit * loop`. `fade_onset_ms` is the elapsed time the engine actually
+starts its fade, or -1 if it never did inside the render bound. `--limit N`
+overrides what is applied, which is the negative control.
+
+The `per` of a fixture — how many per-track repeats one joint section is worth —
+is a fixed property of the file, so `check.sh` carries it as a literal per row
+rather than reading it from the engine.
 
 Golden fixtures (skipped when `catalog/mdx` is absent — `catalog/` is
 gitignored):
@@ -52,7 +52,7 @@ make -C dev/mdx-native check
 # ok    G2MST6.MDX -> [34603  34603]  verified-good; the fix must not move it
 # ok    DTWNB18.MDX -> [0      14942]  one-shot held the min; band was [5078, 12403]
 # ok    FACE04.MDX -> [182452 45613]  two period groups, entering their loops 22.8s apart
-# ok    DES_80.MDX per=2 limit=2 fade=11097 vs section_end=11058  one section = 2 repeats
+# ok    DES_80.MDX per=2 limit=2 fade=11289 vs section_end=11058  one section = 2 repeats
 # ...
 ```
 

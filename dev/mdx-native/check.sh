@@ -25,6 +25,6 @@ check() { # file  expected_intro_ms  expected_loop_ms  note
 
 check G2MST6.MDX  34603  34603  "verified-good; the fix must not move it"
 check DTWNB18.MDX 0      14942  "one-shot held the min; band was [5078, 12403]"
-check FACE04.MDX  182452 22806  "two loop periods; one-shot delayed the first"
+check FACE04.MDX  159645 45613  "2:1 loop periods -> the joint period (was 22806)"
 
 exit $status

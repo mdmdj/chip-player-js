@@ -2420,3 +2420,45 @@ way. Cheap to state, expensive to learn:
   `./dev/remove.sh` and double-check `git diff` / `git status`.
 - The client uses React 16, react-router-dom v5, react-virtualized, lodash,
   auto-bind. Match those.
+
+## Handoff (2026-10-16) — MDX/loop work, and what the next session starts with
+
+**In flight when this session ended:** subagent `p1-pair-fixes-1` is fixing two
+greptile P1s on `dev/overlay`. Its commits land on the overlay either way — but
+**read its report and verify the fail-before/pass-after claims** before promoting:
+- `MDXPlayer.js:120` — playback counts joint sections (`loop_gate_value`) while
+  `mdx_get_length` still measures the raw per-track minimum (it resolves
+  `loops_per_section` *after* the length pass), so for `per>1` `_durationMs` is
+  short and, with a silence gap armed, the song stops early.
+- `UserProvider.js:238` — `pendingFaveToggles` is one counter for every account
+  while the read decision is per-account, so A's slow toggle plus a switch to B
+  can leave B's server favorites unread. Track pending per account.
+
+**Next promote carries those two fixes.** PR head is `b0a717dba`. Arming the
+promote is the user's act; afterwards refresh the squash — `pr/subtunes-as-first-class`
+is a *separate squash branch*, and a promote does not move it, so the PR keeps
+serving the old head until it is re-squashed.
+
+**After any promote: restart the dev tree and kill the PORT OWNERS, not just the
+tree.** Twice now a promote's rebase left `html=500, api=200` — the rebase rewrites
+`server/`, the running `node --watch` re-execs onto a half-written file, and the
+restart missed *orphaned children* still holding the ports (`.bin/webpack-dev-server`
+on 3000, `node server/index.js` on 8080) whose parents had been killed. A fresh
+`npm run dev` then cannot bind and proxies to the broken one:
+```sh
+ss -ltnp | grep -E ':(3000|8080)'                               # kill those PIDs
+curl -s -o /dev/null -w '%{http_code}\n' mms-1:8080/browse/mdx  # the HTML route, not just /api
+```
+
+**The DEV-region stripper is wrong for non-JS files (found 2026-10-16, not fixed).**
+`dev/promote-plan.sh:93-101` calls itself "brace balance" but is a raw **open-brace
+count** — `tr -cd '{' | wc -c` over `HEAD:<file>` versus the stripped text, with
+closing braces never counted. Removing a *balanced* region therefore changes the
+count, so whole-function DEV regions in C are rejected as false positives:
+`mdxmini/src/mdxmini.c` (73 -> 71) and `mdxmml_ym2151.c` (165 -> 158) both strip to
+balanced text and both pass `gcc -fsyntax-only` / `emcc -fsyntax-only` with exit 0.
+The same code creates the stripped temp file as `mktemp --suffix=.js`, so a real
+parse would hand C to the JS validator. Fix: compile the stripped non-JS file
+(`-fsyntax-only`, flags taken from the build scripts) instead of counting braces,
+and test it with a synthetic accept/reject pair. Reproducer: commit `45e0226cc`
+(the failing wrap), reverted in `22547bcfe`.

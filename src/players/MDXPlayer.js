@@ -224,33 +224,28 @@ export default class MDXPlayer extends Player {
       // toggle (Repeat Off <-> All) must not reset a count already extended for
       // a deep pass, or the engine fades the pass short.
       if (hasLoop) {
-        // The engine compares max_infinite_loops against the *smallest
-        // per-track* loop counter (mdxmml_ym2151.c, the fade test), while
-        // getCurLoop() counts the joint section the slider band is drawn from.
-        // Those are the same unit only when every track shares a period: with
-        // 4 s and 6 s tracks the section is 12 s, so a limit taken from the
-        // section count is already exceeded and the fade starts at once. Ask
-        // the engine for the limit that ends the section now playing, and for
-        // how many counters one section is worth so the two-pass floor can stay
-        // in sections. A core built before those getters keeps the joint count.
-        const sectionLimit = typeof this.core._mdx_get_section_loop_limit === 'function'
-          ? this.core._mdx_get_section_loop_limit(this.mdxCtx) : 0;
-        const perSection = typeof this.core._mdx_get_loops_per_section === 'function'
-          ? this.core._mdx_get_loops_per_section(this.mdxCtx) : 0;
         const curLoop = this.getCurLoop();
-        this._maxLoopCount = (sectionLimit > 0 && perSection > 0)
-          ? Math.max(DEFAULT_LOOP_COUNT * perSection, sectionLimit)
-          : Math.max(DEFAULT_LOOP_COUNT, curLoop + 1);
-        // Leaving after passing the default fade: the position is already past
-        // the reported duration, so the base end detector must stand down and
-        // let the engine's fade end the song (the display runs its tail from
-        // here).
-        if (curLoop >= DEFAULT_LOOP_COUNT) this.durationExtended = true;
+        this._maxLoopCount = Math.max(DEFAULT_LOOP_COUNT, curLoop + 1);
+        // Leaving always stands the base end detector down: the engine's own
+        // fade has to end the song. _durationMs comes from mdx_get_length's
+        // parse, which runs the fade gate before loops_per_section is resolved
+        // (the region is measured after that parse), so the gate there counts
+        // raw per-track loops while playback counts joint sections. With mixed
+        // periods one section is several per-track loops, so the reported length
+        // is short by whole sections and the detector would cut the audible
+        // fade; when the periods agree the gap is only the whole-second
+        // truncation. The engine's end is never before _durationMs, so the flag
+        // is unconditional: it stands the detector down without cutting the fade
+        // and without hanging, since the finite count still ends the song.
+        this.durationExtended = true;
       } else {
         // No measured loop region: finish the pass and fade.
         this._maxLoopCount = DEFAULT_LOOP_COUNT;
       }
     }
+    // One unit: the engine counts joint sections itself (mdxmml_ym2151.c's
+    // loop_gate_value projects each track's repeats onto the section the band
+    // is drawn from), so _maxLoopCount is what it is handed -- no conversion.
     this.core._mdx_set_max_loop(this.mdxCtx, this._maxLoopCount);
   }
 

@@ -67,6 +67,7 @@ typedef struct _mdxmml_ym2151_instances {
   int64_t track_second_us[MDX_MAX_TRACK_NUMBER]; /* per-track 2nd loop, us */
   int64_t loop_first_us;   /* elapsed at the 1st loop (intro + loop) */
   int64_t loop_second_us;  /* elapsed at the 2nd loop (intro + 2 * loop) */
+  int loops_per_section;   /* per-track counters one joint section is worth (L / pmax) */
   int loop_region_bad;     /* no usable region: the getters report none */
 } mdxmml_ym2151_instances;
 
@@ -283,6 +284,48 @@ mdx_parse_mml_ym2151_async_finalize(songdata *data)
   ym2151_shutdown(data);
 }
 
+/* The quantity the fade gate compares against max_infinite_loops, in the unit
+   the caller names.
+
+   The engine's own quantity is the smallest per-track loop count, but the loop
+   region the slider band describes is the *joint* section. One section is
+   several repeats of the longest track when the tracks differ in period
+   (loops_per_section > 1), so a limit in joint sections compared against raw
+   counts fires early. Reducing each live track's count to the sections it has
+   finished and taking the smallest turns at exactly the joint boundary.
+
+   loops_per_section <= 1 keeps the raw minimum: there the units agree, and the
+   per=1 path must not change. Tracks with no measured period (a one-shot that
+   never loops) contribute their raw count, as they always did. */
+static int
+loop_gate_value(mdxmml_ym2151_instances *self, int infinite_loops)
+{
+  int64_t L;
+  int i, gate = -1;
+
+  if (self->loop_region_bad || self->loops_per_section <= 1)
+    return infinite_loops;
+  L = self->loop_second_us - self->loop_first_us;
+  if (L <= 0)
+    return infinite_loops;
+
+  for (i = 0; i < self->mdx->tracks; i++) {
+    int64_t p, s;
+    if (self->mdx->track[i].waiting_sync == FLAG_TRUE) continue;
+    if (self->mdx->track[i].counter < 0) continue;   /* finished */
+    p = self->track_second_us[i] - self->track_first_us[i];
+    if (self->track_second_us[i] <= 0 || p <= 0) {
+      s = self->mdx->track[i].infinite_loop_times;   /* never loops: raw count */
+    } else {
+      int64_t r = (L + p / 2) / p;   /* this track's repeats in one section */
+      if (r <= 0) r = 1;
+      s = self->mdx->track[i].infinite_loop_times / r;
+    }
+    if (gate < 0 || s < gate) gate = (int)s;
+  }
+  return gate < 0 ? infinite_loops : gate;
+}
+
 int
 mdx_parse_mml_ym2151_async(songdata *data, int track_mute_mask)
 {
@@ -338,7 +381,7 @@ mdx_parse_mml_ym2151_async(songdata *data, int track_mute_mask)
   }
 
   if ( self->mdx->max_infinite_loops > 0 ) {
-    if ( infinite_loops >= self->mdx->max_infinite_loops ) {
+    if ( loop_gate_value(self, infinite_loops) >= self->mdx->max_infinite_loops ) {
       self->fade_out = self->mdx->fade_out_speed;
     }
   }
@@ -377,6 +420,7 @@ int mdx_parse_mml_ym2151_async_get_length(songdata *data)
   memset(self->track_second_us, 0, sizeof self->track_second_us);
   self->loop_first_us = 0;
   self->loop_second_us = 0;
+  self->loops_per_section = 0;
   self->loop_region_bad = 0;
 
   next = 1;
@@ -443,6 +487,11 @@ int mdx_parse_mml_ym2151_async_get_length(songdata *data)
        the start they report is the intro above. */
     self->loop_first_us  = intro + L;
     self->loop_second_us = intro + 2 * L;
+    /* One joint section is L / pmax of the engine's own counters -- the multiple
+       the resolver just proved every looping track hits. Measured here, from the
+       parse's own data: the live counters are 0 until a track's first boundary,
+       so reading them instead would miss a longer-period track early on. */
+    self->loops_per_section = ( pmax > 0 && L > 0 ) ? (int)(L / pmax) : 0;
     self->loop_region_bad =
       ( loopers == 0 || !all_second || periods == 0 || L <= 0 || intro + L <= 0 ) ? 1 : 0;
   }
@@ -577,28 +626,10 @@ int
 mdx_parse_mml_get_loops_per_section(void* in_self)
 {
   mdxmml_ym2151_instances *self = (mdxmml_ym2151_instances *)in_self;
-  int64_t L, per = 0;
-  int i;
 
-  if (!self || !self->mdx) return 0;
+  if (!self) return 0;
   if (self->loop_region_bad) return 0;
-  L = self->loop_second_us - self->loop_first_us;
-  if (L <= 0) return 0;
-
-  for (i = 0; i < self->mdx->tracks; i++) {
-    int64_t p, n;
-    /* Read at runtime, where the counters exist: a track loops iff it has
-       looped (the region resolver's own test, in its live form). */
-    if (self->mdx->track[i].infinite_loop_times <= 0) continue;
-    if (self->track_second_us[i] == 0) continue;
-    p = self->track_second_us[i] - self->track_first_us[i];
-    if (p <= 0) continue;
-    n = (L + p / 2) / p;   /* L is a multiple of p within the resolver's tolerance */
-    if (n <= 0) continue;
-    if (per == 0 || n < per) per = n;
-  }
-
-  return (int)per;
+  return self->loops_per_section;
 }
 
 

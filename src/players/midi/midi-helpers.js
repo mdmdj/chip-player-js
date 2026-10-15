@@ -301,6 +301,10 @@ class EventIterator {
     const replay = this.absTicks[this.startIdx] - this.loop.startTick;
     if (this.seamReleases && this.seamReleases.length) {
       this.pendingReleases = this.seamReleases.map((event, i) => ({ ...event, delta: i === 0 ? gap : 0 }));
+      // The releases are emitted at the boundary, so the emitted timeline
+      // reaches it: without this the *next* boundary would add this gap again
+      // (curTick is what the deltas are measured from).
+      this.curTick += gap;
       this.replayDelta = replay;
     } else {
       this.replayDelta = gap + replay;

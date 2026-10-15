@@ -17,7 +17,7 @@ Sub-tunes: each is its own song (`{path, sub-tune}`), with its own favorites, sh
 
 ## ⚠ Before Deploying
 
-- **Rebuild the catalog:** `node scripts/build-music.js` (no `--reset-db`, no `-n`). The new statements reference `subtune` / `subtune_fts` / `music.subtune_count`; against an old catalog the server throws `SqliteError: no such table: subtune` **at require time** and `/top`, `/search`, `/browse`, `/user/favorites` go down. ~12 s on the full catalog. `playbacks.subtune` and favorites need no migration.
+- **Rebuild the catalog:** `node scripts/build-music.js` (no `--reset-db`, no `-n`). The new statements reference `subtune` / `song_fts` / `music.subtune_count`; against an old catalog the server throws `SqliteError: no such table: subtune` **at require time** and `/top`, `/search`, `/browse`, `/user/favorites` go down. ~12 s on the full catalog. `playbacks.subtune` and favorites need no migration.
 - **Rebuild the chip-core:** `npm run build-chip-core` has seven new loop exports, and the `mdxmini` patch (loop points, fade latch, microsecond position).
 
 ## Known Limits

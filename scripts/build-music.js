@@ -229,7 +229,6 @@ db.exec(`
     game TEXT,
     system TEXT,
     filename TEXT,
-    subtune_count INTEGER NOT NULL DEFAULT 1,  -- the file's count: >1 = a song folder
     UNIQUE(music_id, subtune),
     FOREIGN KEY(music_id) REFERENCES music(id) ON DELETE CASCADE
   );
@@ -256,23 +255,16 @@ db.exec(`
 // `Tune N`); `file_title` carries the parent's name so a file-name query matches
 // every song the file holds -- a song folder's name finds its songs.
 function rebuildSongs() {
-  // Swapped in one transaction, like the per-file work: the statements below
-  // commit one at a time otherwise, so a reader landing in the middle sees no
-  // index at all, and a hard kill leaves one half built. The index is derived,
-  // so all the rollback can cost is a stale index until the next run.
-  const swapSongs = db.transaction(() => {
-    db.exec(`
-      DELETE FROM song;
-      INSERT INTO song (music_id, subtune, path, song_id, title, file_title, artist, game, system, filename, subtune_count)
-        SELECT id, 0, path, song_id, NULL, title, artist, game, system, filename, COALESCE(subtune_count, 1)
-          FROM music WHERE subtune_count <= 1;
-      INSERT INTO song (music_id, subtune, path, song_id, title, file_title, artist, game, system, filename, subtune_count)
-        SELECT m.id, st.subtune, m.path, m.song_id, NULLIF(st.title, ''), m.title, m.artist, m.game, m.system, m.filename, COALESCE(m.subtune_count, 1)
-          FROM subtune st JOIN music m ON m.id = st.music_id;
-      INSERT INTO song_fts(song_fts) VALUES('rebuild');
-    `);
-  });
-  swapSongs();
+  db.exec(`
+    DELETE FROM song;
+    INSERT INTO song (music_id, subtune, path, song_id, title, file_title, artist, game, system, filename)
+      SELECT id, 0, path, song_id, NULL, title, artist, game, system, filename
+        FROM music WHERE subtune_count <= 1;
+    INSERT INTO song (music_id, subtune, path, song_id, title, file_title, artist, game, system, filename)
+      SELECT m.id, st.subtune, m.path, m.song_id, NULLIF(st.title, ''), m.title, m.artist, m.game, m.system, m.filename
+        FROM subtune st JOIN music m ON m.id = st.music_id;
+    INSERT INTO song_fts(song_fts) VALUES('rebuild');
+  `);
 }
 
 // Additive migrations for databases created before these columns existed.
@@ -964,6 +956,9 @@ processDirectory(CATALOG_DIR, '')
       if (deletedDirs > 0) {
         console.log(chalk.yellow(`Removed ${deletedDirs} orphaned directories...`));
       }
+
+      // Rebuild the search index from the final music + subtune rows.
+      rebuildSongs();
     }
 
     let finalCount = 0;

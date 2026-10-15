@@ -607,7 +607,7 @@ anchored code fails the build instead of rendering the wrong block.
 | snippet | shows |
 | ------- | ----- |
 | `api-songfolder` | `curl` of the parent listing showing `type:"songfolder"`, and of the file showing `type:"file"` rows with `subtune` and `url = /?play=…&subtune=N` |
-| `schema-subtune` | `subtune` / `subtune_fts` DDL and the `(song_id, subtune)` grouping in the top-charts query |
+| `schema-subtune` | the `subtune` / `song` / `song_fts` DDL and the `(song_id, subtune)` grouping in the top-charts query |
 | `songref` | `songRef` / `songRefKey` / `songRefListsEqual` — why highlight and now-playing keys work |
 | `handle-song-end` | the small `Player.handleSongEnd` diff: the player stops, the sequencer owns navigation |
 | `parser-parity` | NSFE `plst` remap shown next to `Nsfe_Emu.cpp:34-46` — the "did you check the emulator" answer |

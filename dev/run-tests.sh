@@ -36,6 +36,9 @@ echo
 echo "== sub-tunes (server) =="
 node "$DIR/test-subtunes-server.js"
 echo
+echo "== song search =="
+node "$DIR/test-search.js"
+echo
 echo "== song refs (client) =="
 node "$DIR/test-songrefs.js" 2>/dev/null
 echo

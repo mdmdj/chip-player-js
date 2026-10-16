@@ -340,6 +340,24 @@ async function main() {
     }
   });
 
+  await check('#10 a seek re-arms the finite budget after leaving a deep repeat', async () => {
+    const { p, core } = await makePlayer();
+    p.setLooping(true);
+    // Repeat One through several passes, then leave deep: the count becomes
+    // max(2, curLoop+1) and durationExtended stands the end detector down.
+    await drive(p, core, [BAND_END + 1000, BAND_END + B + 1000, BAND_END + 4 * B + 1000]);
+    p.setLooping(false);
+    assert.ok(core.loopCount > 2, `leaving deep sets a larger count (${core.loopCount})`);
+    assert.strictEqual(p.durationExtended, true, 'and stands the end detector down');
+    // A seek is a transport move: the budget has to describe where it lands.
+    // libvgm's own counter does not reset, so leaving the count at seven would
+    // run that many passes from the new position. (The harness's seek() helper
+    // only moves the fake clock, so this calls the player's own path.)
+    p.seekMs(0);
+    assert.strictEqual(core.loopCount, 2, `the normal two passes (got ${core.loopCount})`);
+    assert.strictEqual(p.durationExtended, false, 'and the end detector is back');
+  });
+
   await check('#9 repeat off from the start: lead-in, two passes, then the fade tail', async () => {
     const { p, core } = await makePlayer();
     // Live through the intro and both passes.

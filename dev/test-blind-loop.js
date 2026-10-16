@@ -309,7 +309,10 @@ async function main() {
   await check('sid: a tune with a known region is never a blind loop', async () => {
     const { p } = await makeSidPlayer({ positionMs: SID_LENGTH_MS + 1000 });
     p.setLooping(true);
-    p.metadata = { intro_length: 5000, loop_length: 30000 };
+    p.metadata = { intro_length: 5000, loop_length: 20000 };
+    // The band has to fit inside the listed length: a band the song cannot
+    // reach is not drawn (Player.getLoopBandMs), which would make this a blind
+    // loop for the wrong reason.
     assert.strictEqual(p.getLoopBandMs() !== null, true, 'the fake region resolves');
     assert.strictEqual(p.isBlindLoop(), false);
   });

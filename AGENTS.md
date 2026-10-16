@@ -1020,10 +1020,19 @@ multi-song files), a `sid/` set (including two RSID fixtures with 20 and 3
 songs, extracted from the `HVSC_85-all-of-them.7z` also kept there), `nes-audio-tests/`
 (28 single-song NSF hardware/expansion-chip tests, copied from the
 `dev/nes-audio-tests` clone of `bbbradsmith/nes-audio-tests`), `n64/Blast Corps/` (65 `.miniusf` + one
-shared `.usflib`), `mods/` (`.S3M`), `midi/`, and a `.vgz`. Rebuild with
-`node scripts/build-music.js -n` after changing it. Note `.usflib` companions
-are intentionally not indexed but must stay next to their `.miniusf`; a
-gzipped VGM must use the `.vgz` extension (`.gz` is not recognized).
+shared `.usflib`), `mods/` (`.S3M`), `midi/`, a `.vgz`, and `gsf/` (GBA sets,
+`.minigsf` + `.gsflib` companions -- the only fixture that exercises the
+`GSFPlayer` loop path; single-song, so no sub-tune coverage there). Rebuild with
+`node scripts/build-music.js -n` after changing it. Note `.usflib`/`.gsflib`
+companions are intentionally not indexed but must stay next to their song file;
+a gzipped VGM must use the `.vgz` extension (`.gz` is not recognized).
+
+**`psf/` in the catalog is inert.** `.psf`/`.minipsf` are not in `FORMATS` and
+have no parser or player (the merge added GSF only; PSX needs a core we do not
+have), so the builder ignores them -- `VALID_EXTENSIONS` is derived from
+`FORMATS`, so unlisted extensions never even get a `music` row. Adding PS1
+support is a real feature (a PSX core + wrapper + `FORMATS`/`PARSERS` entries),
+not a switch to flip. Their `.psflib` companions are likewise ignored.
 
 ## Catalog / server data model
 

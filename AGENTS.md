@@ -487,10 +487,11 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
     user-supplied catalog: an N64 CC102/103 pair, a paired marker too short to be
     a region, a lone CC111, post-loop padding with and without notes, a markerless
     file under repeat one, and the format-2 no-band rule with a format-1 guard.
-  - `node dev/test-end-detector.js` — the shared `EndDetector` as used by SID
-    and N64: trip gate, level+stillness rule, muted voices, restart re-arming,
-    N64's config-default length for untagged `.miniusf`, and the tuning layers
-    (module defaults, and a player override replacing only named fields).
+  - `node dev/test-end-detector.js` — the shared `EndDetector` as used by SID,
+    N64 and GSF: trip gate, level+stillness rule, muted voices, restart
+    re-arming, N64's config-default length for untagged `.miniusf`, GSF's
+    indefinite-flag OR and tail restart, and the tuning layers (module defaults,
+    and a player override replacing only named fields).
   - `node dev/test-subtunes-server.js` — the sub-tune API over HTTP against the
     running dev server (song folders, sub-song rows, song search, metadata,
     shuffle/random/playback/top, and per-sub-tune favorites including a legacy
@@ -609,7 +610,11 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
 > were a second, stale copy of every engine. The build takes those four from
 > siblings beside the checkout — `../libvgm` (ValleyBell), `../libxmp` (4.7.x),
 > `../FluidLite`, `../game-music-emu` (mmontag's fork) — plus `../libsidplayfp`
-> (mmontag fork, as before). `libADLMIDI/`, `psflib/` and `lazyusf2/` remain
+> (mmontag fork, as before) and `../libgsf` (joshbarrass/viogsf, the GBA core
+> upstream's merge brought in; `scripts/build-subprojects.sh` builds it with a
+> force-included `dev/emscripten-compat/regparm.h`, since newer clang rejects
+> VBA-M's i386-only `regparm` attribute and we never patch a sibling).
+> `libADLMIDI/`, `psflib/` and `lazyusf2/` remain
 > vendored in-repo; `mdxmini/` and `farbrausch-v2m/` compile from source.
 > `scripts/build-subprojects.sh` builds all of them to the paths
 > `build-chip-core.js` links. (The vendor-tree deletion and sibling build live on
@@ -2354,6 +2359,14 @@ only armed when `silenceDuration >= 0`, and both arms must end the song):
   if a reader's GME reports a region — a newer GME honouring the NSFe `loop` chunk
   would do exactly that — and then the fix is the ~6-line MDX mirror (fade start =
   the track length when not looping) plus a continuity check across the toggle.
+- **GSF (GBA, viogsf):** no loop region — the MP2K driver loops internally like
+  NSF, and the engine's only time hint is the tag length. It exposes an
+  indefinite-playback flag (`_gsf_set_indefinite_playback`), which `GSFPlayer`
+  ORs from Repeat One and the Indefinite Playback setting exactly like N64, and
+  it shares the `detectSongEnd` tail restart (default on): while the engine
+  free-runs, a one-shot whose content has ended sits silent forever, so a quiet,
+  static tail is re-run from the top via `seekMs(0)`. No band, so it gets the
+  blind-loop UI (the head parks at the listed length, elapsed keeps climbing).
 - **N64/USF:** whole-track model like GME, loop inferred from the `fade` tag
   (`song_loops`) + the indefinite flag. Under Repeat One the engine flag is
   OR'd from Repeat One and the setting (so looping tracks free-run past
@@ -2443,8 +2456,8 @@ only armed when `silenceDuration >= 0`, and both arms must end the song):
 - **V2M:** no loop points in the format (fixed-length synth render); stays
   stop + reload, the lone tier-3 engine.
 
-**Where Repeat One actually works today (audit, 2026-09).** GME, VGM, SID, N64,
-MDX, MIDI, and XMP are seamless. Everything else falls through the engine's own end -> `stop()` ->
+**Where Repeat One actually works today (audit, 2026-09; GSF added 2026-10).** GME, VGM, SID, N64,
+GSF, MDX, MIDI, and XMP are seamless. Everything else falls through the engine's own end -> `stop()` ->
 `Sequencer.advanceSong` (which leaves `currIdx` alone under `REPEAT_ONE`) ->
 re-fetch + reload, i.e. a stop, a network fetch, a decode gap, and a jump to
 0:00. This is the behavior prod has today, so the *floor* for a format we have
@@ -2457,6 +2470,7 @@ feature only holds for the engines above.
 | `VGMPlayer` | native libvgm loop count | yes |
 | `SIDPlayer` | free-run past HVSC length + `detectSongEnd` tail restart | yes |
 | `N64Player` | engine indefinite flag OR'd from Repeat One + `detectSongEnd` tail restart | yes |
+| `GSFPlayer` | engine indefinite flag OR'd from Repeat One + `detectSongEnd` tail restart | yes |
 | `MDXPlayer` | native `mdx_set_max_loop(0)` + exact band | yes |
 | `MIDIPlayer` | JS event-loop wrap to second-pass start + shared band fold | yes |
 | `XMPPlayer` | native libxmp loop count (0 = forever); positional clock wraps on its own, no band | yes |

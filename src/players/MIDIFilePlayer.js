@@ -155,16 +155,6 @@ MIDIPlayer.prototype.getLoopRegion = function () {
   return this.loop;
 };
 
-// The band the transport wraps over and the slider marks: the wrap span
-// (jumpMs..endMs) -- the second pass when the file is expanded, the loop region
-// itself when it is not. Overrides the base, whose band is always the second
-// instance of intro_length/loop_length.
-MIDIPlayer.prototype.getLoopBandMs = function () {
-  const loop = this.loop;
-  if (!loop || !(loop.endMs > loop.jumpMs)) return null;
-  return { startMs: loop.jumpMs, endMs: loop.endMs };
-};
-
 MIDIPlayer.prototype.setLooping = function (looping) {
   this.looping = !!looping;
 };

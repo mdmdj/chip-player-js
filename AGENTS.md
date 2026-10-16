@@ -326,8 +326,21 @@ The other remaining hand-carry is `scripts/build-chip-core.js`, 7 lines of
 That one is **policy, not mechanics**: the file is technically promotable (the
 dev hunks could be regioned), but de-listing it would ship our duplicate-symbol
 tripwire, `../`-path normalisation and GME-pruning notes into Matt's PR, and
-Matt builds his own way. Hand-carrying 7 stable export entries is the right
+Matt builds his own way. Hand-carrying the stable export entries is the right
 trade.
+
+**The hand-carry hazard: a promote that *removes* a symbol removes only the
+promotable half.** An addition is safe by construction — the file already lists
+the export, and the new C arrives with the promote. A removal is not: the
+definition and its `EXPORTED_FUNCTIONS` entry live in two files, and only the
+first is promotable. On 2026-10-16 the promote that dropped mdxmini's
+harness-only section-loop getters took the definitions off the feature branch
+while this file kept exporting both names, so the PR's core could not be built at
+all — greptile's "Chip-core cannot rebuild", filed nine minutes after the push.
+Fixed by hand-carrying the two-line removal (`dd92de151`). So: when a promote
+removes a symbol this file exports, edit both in the same cycle, and sweep the
+exports it lists against the tree it promotes into (that head had 2 of 25
+`mdx_*` exports dangling; the other 23 were fine).
 
 Because the file is path-listed, `promote.sh` also skips the feature work that
 lands here. **Hand-carried (2026-10-02, re-carried 2026-10-06):** the `?play=`
@@ -1597,10 +1610,13 @@ checks no longer work. Compare a live context to a stored one with
 - **Branch state:** all three branches are pushed to `origin`; the feature branch
   carries upstream as a *merge* (not a rebase, so the sub-tune commits keep their
   identity) and `git diff master..feature/subtunes-as-first-class` is feature-only
-  (47 files, no dev tooling or vendored engine). `dev/overlay` differs from it by
-  DEV regions only; `dev/promote.sh` reports "Nothing to promote" (the healthy
-  state — do not run it per change). `dev/rebase.sh` verifies the tree; never
-  rebase by hand.
+  (**49 files** as of 2026-10-16; re-measure rather than trusting the count — it
+  was 47 before this promote). `dev/overlay` differs from it by DEV regions only;
+  `dev/promote.sh` reports "Nothing to promote" (the healthy state — do not run it
+  per change). `dev/rebase.sh` verifies the tree; never rebase by hand.
+  - **2026-10-16 promotion (user-armed).** The P1 pair from the review round, plus
+    the hand-carry it exposed: feature `a1875fdea` -> `dd92de151`, squash
+    `71a71ee74`, PR #10 closed. See the "Handoff (2026-10-16)" notes at the end.
   - **2026-10-12 promotion (user-armed).** Landed with the tree verified unchanged:
     the review-round fixes (MIDI loop rebasing + band-end wrap; MDX/SID/N64/MIDI
     seek and state guards; `/search` de-dup by `(file, sub-tune)`), local-file
@@ -1652,6 +1668,12 @@ checks no longer work. Compare a live context to a stored one with
     head is still right on the squash. Corollary for replies: cite the **PR head's**
     sha, not the feature head's, or the citation points at a commit the reviewer
     cannot open.
+    **Closed 2026-10-16 at `71a71ee74`.** Three P1s were resolved across the last
+    two rounds — `MDXPlayer.js:120`, `UserProvider.js:238`, and
+    `build-chip-core.js:332` — and the last of those is why the refresh is needed
+    after a *hand-carry* too, not only after a promote: both move the feature
+    tree, and the PR serves the squash. Its own lesson is the "hand-carry hazard"
+    above.
 - **A catalog rebuild is a prerequisite for booting the server after a merge that
   adds a column a query reads.** `server/index.js` selects `m.contributor`,
   created by `scripts/build-music.js`, not the server; an old catalog dies at
@@ -2109,8 +2131,12 @@ only armed when `silenceDuration >= 0`, and both arms must end the song):
   therefore hands the engine `_maxLoopCount` directly — one number, one unit
   (the `_engineMaxLoop` field is gone). The two section-limit getters were
   removed once nothing but the native harness used them: `region.c` prints no
-  per_section column (check.sh carries `per` as a literal per fixture row) and
-  the two exports are gone from `build-chip-core.js`.
+  per_section column (check.sh carries `per` as a literal per fixture row), and
+  the two exports went with them. **That removal was two files and only one of
+  them promotes** — the definitions live in `mdxmini/`, the `EXPORTED_FUNCTIONS`
+  entries in the path-listed `build-chip-core.js`, which `promote.sh` never
+  writes — so the promote left the feature branch exporting two symbols with no
+  definition and the core could not link. See "the hand-carry hazard" above.
   **Coverage, measured:** `per > 1` is what makes the units differ, and it is
   still rare in the wild (**0 of 37** catalog MDX beyond the fixtures below, **0
   of 140** sampled corpus files), so this is latent correctness, not a
@@ -2452,10 +2478,18 @@ control is run with no rebuild. `check.sh` now always runs `make -s region`
 lesson is about the control, not the test: a fail-before run must rebuild after
 it restores the fix.
 
-**Next promote carries those two fixes.** PR head is `b0a717dba`. Arming the
-promote is the user's act; afterwards refresh the squash — `pr/subtunes-as-first-class`
-is a *separate squash branch*, and a promote does not move it, so the PR keeps
-serving the old head until it is re-squashed.
+**That promote has landed (2026-10-16), and PR #10 is closed.** Feature branch
+`a1875fdea`, then `dd92de151` for the hand-carry that took the two dangling
+`build-chip-core.js` exports back off the head. Squash head `b0a717dba` ->
+`c1235e9b4` -> **`71a71ee74`** (tree-identical to the feature branch each time).
+Both fixes are on the head, verified through the contents API rather than a local
+ref: `pendingFaveToggles` is a per-uid `Map`, and `mdx_get_length` re-measures on
+the joint grid. The three P1 threads were answered inline with the fix; the older
+inline threads were already answered in the conversation, so they were left
+alone. Arming a promote is still the user's act, and the squash is still a
+*separate branch* — a promote does not move it, so the PR keeps serving the old
+head until it is re-squashed (and a hand-carry moves the feature tree too, so it
+needs the same refresh).
 
 **After any promote: restart the dev tree and kill the PORT OWNERS, not just the
 tree.** Twice now a promote's rebase left `html=500, api=200` — the rebase rewrites

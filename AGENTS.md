@@ -321,6 +321,19 @@ line of unexplained indirection is worse than hand-carrying the file, so the
 file stays listed. The seam is now one line rather than two, and the blockers
 are down to one.
 
+**The chart exclusion in `server/index.js` is the same shape, and it cannot be a
+region.** Excluding the local `catalog/nes-audio-tests` fixture from the Top Charts
+changes the outer `LIMIT` argument of an existing call, and a strip can only
+*remove* the lines it wrapped — it cannot rewrite an argument. So the whole file is
+path-listed and skipped instead, and that whole-file skip is what makes the
+exclusion dev-only. If the file is ever de-listed, this hunk has to move by hand,
+and stripping it mechanically would leave `chartItems` referenced but undefined — a
+runtime error, not a parse error, so a syntax check would not catch it. The comment
+in the code deliberately carries only the product reason (the fixture is a copy of
+the NES hardware-test suite, and engine work put 11 plays on one of its one-second
+tests, enough to reach the global Top 50 where a fixture must not appear) so that
+nothing in that file points at this document or at our tooling.
+
 The other remaining hand-carry is `scripts/build-chip-core.js`, 7 lines of
 `EXPORTED_FUNCTIONS` entries against 186 lines of our engine build tooling.
 That one is **policy, not mechanics**: the file is technically promotable (the

@@ -2139,8 +2139,10 @@ only armed when `silenceDuration >= 0`, and both arms must end the song):
   definition and the core could not link. See "the hand-carry hazard" above.
   **Coverage, measured:** `per > 1` is what makes the units differ, and it is
   still rare in the wild (**0 of 37** catalog MDX beyond the fixtures below, **0
-  of 140** sampled corpus files), so this is latent correctness, not a
-  reproduction of shipped behaviour. `catalog/mdx/` now carries the shapes
+  of 140** sampled corpus files) — *but this was only half the unit, and the
+  other half is not rare at all: see the head-start fix below, which a 296-region
+  sampled sweep found on five real files.* Original reading, now corrected:
+  "latent correctness, not a reproduction of shipped behaviour". `catalog/mdx/` now carries the shapes
   (`per` = 2/3/5/6/8/16, via `dev/mdx-native/curate-sample.js`; `MTS2_32.MDX`
   needs its hand-copied uppercase `MOTOS.PDX`). Evidence: `check_sections` in
   `dev/mdx-native/check.sh` — with the section count handed to the engine the
@@ -2152,6 +2154,34 @@ only armed when `silenceDuration >= 0`, and both arms must end the song):
   `VAL5`(6) `27_CLEAR`(8) `MTS2_32`/`RANCE11`/`M9`/`v8`(16). **Note the wasm is
   not rebuilt for this**: `node scripts/build-chip-core.js` before judging the
   app on a per>1 file (none are in the catalog, so nothing visible moves).
+- **The gate must also subtract each track's head start (2026-10-16, second fix,
+  found by a corpus sweep).** The section division above was half the unit. The
+  region starts at the *last* track to enter its loop, so any earlier track has
+  that many loops already on its counter, and `infinite_loop_times / r` still
+  reads as sections it has not finished. Measured on a real file (`EXES04.MDX`):
+  the fade began **7.2 s early — one whole section — at every play point**, and
+  `mdx_get_length` reported 36000 while the engine played to 43532, a section
+  short, so `MDXPlayer`'s end detector armed early and the song stopped mid-fade.
+  `loop_gate_value` now subtracts `pre = (intro - start) / p` per track before
+  dividing, and the length re-measure keys on a hoisted `gate_reduced` (any track
+  with `r > 1` **or** a head start) rather than on `loops_per_section > 1`, so the
+  length parse gates on the same grid playback does. Tracks that enter together
+  still all reduce to the same count, so `G2MST6` (per=1, "must not move") and the
+  six per>1 rows are unchanged; 14/14 golden checks green.
+  **Found by sweeping, not by reading:** `dev/mdx-corpus` (67,048 MDX) through
+  `dev/mdx-native/region`. A *stratified sample* of 296 regions (bucketed by
+  `intro + 2L` — loops are long, median 30–60 s) put **5 early** (0.07–0.95 of a
+  section: `EXES04`, `SIDE11C`, `SIDE11C3`, `CTTY`, `SPD35`), all at their section
+  end now. The harness gained `--no-onset` (skip the reference render: half the
+  cost) and a level-*relative* onset floor — the old absolute floor made most of
+  the corpus report "no onset", which reads as "no deviation". The exhaustive
+  post-fix sweep over all 67k costs ~5 h of single-threaded rendering (~65×
+  realtime, 8 cores) and is the one open check; the sample is 5 deviants before
+  vs 0 after. `check.sh` asserts both halves on `EXES04.MDX` — `check_sections
+  ... 1` (its `per > 1` gate is gone: a per=1 row with a head start is a genuine
+  fail-before) and `check_length ... 2` — and the fix is engine-side, so the app
+  needs `node scripts/build-chip-core.js` (the native and JS harnesses both pass
+  without it).
 - **Player.** `MDXPlayer` mirrors `VGMPlayer`: `setLooping` drives
   `_mdx_set_max_loop` (0 while repeating, else `max(2, curLoop+1)` when actually
   leaving so the current pass finishes and the engine fades), `getDisplayPositionMs`
@@ -2422,6 +2452,44 @@ way. Cheap to state, expensive to learn:
 - **Re-verify claims inherited from notes.** "mdxmini `position_us` overflow is
   unreachable" was wrong — it wraps at 35.8 min and a review bot found it
   independently.
+
+## The bar a review finding has to clear
+
+Reviewer findings — ours, or a bot's — do not get a commit for being correct in
+principle. Set 2026-10-16 after a run of nitpicks: each one costs a fix, a
+harness row, a promote and a squash refresh, and sub-perceptual ones are the
+expensive kind because there is no end to them. A finding is acted on only when
+**all four** hold:
+
+1. **Audio, or a control beyond its own resolution.** It changes what is heard,
+   or moves a UI element by more than that element resolves (the footer head
+   polls at 100 ms; the slider is ms-resolution). Sub-resolution display drift
+   is *documented*, not fixed.
+2. **Reachable on real content.** A catalog/corpus file, or a synthetic fixture
+   modelling a shape shown to exist in measured data. "Constructible in
+   principle" is not reachable, and the arbiter is on disk: `catalog/` plus
+   `dev/mdx-corpus/` (67,048 MDX).
+3. **A complete fix.** No half-mechanism: when correcting a unit forces a length
+   measurement — or any other consumer — to move with it, that is *one* fix. No
+   new state unless it is a real engine/UI concept rather than a patch for the
+   reviewer's example.
+4. **Provable, fail-before → pass-after, asserting the claimed magnitude.** Not
+   "does not crash": the check has to fail against the pre-fix code for the
+   claimed reason, and state the number.
+
+Failing any of them, the finding is recorded with the measurement that
+disqualified it and that is the end of it — see `dev/MIDI_LOOP_TEST_GAPS.md` for
+the worked example (the Web MIDI wrap's 33 ms head slop is real, bounded,
+display-only, and its exact fix would add engine state: documented with the
+number and the consumers surveyed, no commit). A finding that *does* clear the
+bar is a real defect even when it reads like a nitpick: the MDX head-start fade
+was found by sweeping 67k files *after* two source readings had concluded the
+unit was fixed.
+
+The same bar applies to new code we write: when a mechanism has a unit or a
+bound (a look-ahead window, a section count, a truncation ceiling), state it in
+the comment and make the harness assert it, so the next reviewer reads a
+contract instead of a bug.
 
 ## Conventions & cautions
 

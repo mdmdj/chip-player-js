@@ -260,6 +260,18 @@ export default class VGMPlayer extends Player {
       // capture so the fold mapping takes over again.
       this.fadeTailStartMs = null;
       this.core._lvgm_seek_ms(this.vgmCtx, seekMs);
+      // libvgm keeps its loop count across a seek, and the extended count /
+      // durationExtended were for the pass we just abandoned. A seek repositions
+      // into the normal timeline, so restore the default finite count (the
+      // wrapper's two passes at load) and let the end detector re-arm -- unless
+      // Repeat One or Indefinite Playback still has it looping forever. Without
+      // this, leaving a deep repeat and seeking back plays the extended count's
+      // passes from the new position (measured: 7).
+      if (!this.looping && !this.params.indefinitePlayback &&
+          typeof this.core._lvgm_set_loop_count === 'function') {
+        this.durationExtended = false;
+        this.core._lvgm_set_loop_count(this.vgmCtx, 2);
+      }
     }
   }
 

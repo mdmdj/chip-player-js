@@ -298,8 +298,7 @@ mdx_parse_mml_ym2151_async_finalize(songdata *data)
    - the loops it ran *before the joint start*. The region starts at the last
      track to enter its loop (see the resolver), so a track that entered earlier
      has that many loops already on the books, and its count alone reads as
-     sections it has not finished. Measured on a real file (EXES04): the fade
-     began 7.2s early, one whole section, at every play point.
+     sections it has not finished, so the fade can begin a whole section early.
 
    Tracks with no measured period (a one-shot that never loops) contribute their
    raw count, as they always did. */

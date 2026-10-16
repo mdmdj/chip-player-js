@@ -96,6 +96,13 @@ MIDIFile.prototype.findLoopRange = function (tracks) {
   return { startTick, endTick };
 };
 
+// The seam, in one place: a loop's own events re-establish its state, so the
+// iterator intervenes only where no event can -- notes still sounding at the
+// boundary (cut; for a pedal-sustained note that cut is a pedal lift, then the
+// pedal's own seam value is re-applied) -- and where the replay changes what time
+// means (the loop-start tempo latched and restored per pass, which is what gives
+// the replayed pass's events the right ms mapping). Transport policy is the
+// player's business.
 class EventIterator {
   constructor(events, loop) {
     // getTrackEvents can trail a null on empty tracks; drop it early so tick

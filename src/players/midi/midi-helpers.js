@@ -127,15 +127,10 @@ class EventIterator {
     this.passesLeft = loop ? loop.maxLoops : 1;
     this.absTicks = null;
     this.startIdx = 0;
-    // Whether the track has content past the loop end whose position matters:
-    // note-ons (music) or tempo changes (a Type-1 conductor track carries the
-    // ending's tempos but no notes). A truly contentless outro (controller
-    // cleanup, END_OF_TRACK, converter padding) attaches at the loop end instead
-    // of extending the duration with dead air; a composed ending keeps its exact
-    // timing. Counting tempos is what keeps the conductor's ending tempos from
-    // collapsing onto the boundary while another track plays the ending.
-    this.postHasContent = false;
-    this.postStarted = false;
+    // Post-loop events keep their authored position (see next()): an event's
+    // offset from the loop end places it after the passes. Nothing is clamped
+    // onto the loop boundary; the song's end comes from the sounding content
+    // (getLoopedEvents), so a converter's note-less tail cannot inflate it.
     // Tick shift owed to a skipped replay, applied to the next emitted event's
     // delta (see next()).
     this.pendingExtra = 0;
@@ -165,29 +160,12 @@ class EventIterator {
       this.boundaryTick = endTick;
       this.loopLength = endTick - loop.startTick;
       this.replayDelta = null;
-      // A post-loop event that would otherwise inflate the duration (converter
-      // padding, END_OF_TRACK) is collapsed to the loop boundary -- unless the
-      // track has real post-loop content (a note-on, or a tempo change that
-      // times another track), which keeps its exact position.
-      //
       // Decision (2026-10): a note that starts inside the loop and is released
-      // after it is cut at the seam. Its release is "noteless" (this only sees
-      // note-ons), so the collapse moves it to the boundary. That matches the
-      // DAW default -- Logic/Cubasis cut notes crossing a cycle, Ableton needs a
-      // manual wrap -- and it is the standard-safe choice: letting the note ring
-      // past the boundary would make the replay send a second NoteOn for a still
-      // sounding note, which the MIDI spec calls invalid. The composer should put
-      // the loop where voices resolve. See dev/MIDI_LOOP_TEST_GAPS.md. (The
-      // player's own loop wrap -- MIDIFilePlayer.loopJump -- also cuts any note
-      // still ringing at the seam, so the second pass never overlaps a held
-      // note; this collapse is what keeps the outro from inflating duration.)
-      if (loop.endTick != null) {
-        this.postHasContent = this.events.some((e, idx) => {
-          if (this.absTicks[idx] <= loop.endTick) return false;
-          return (e.type === EVENT_MIDI && e.subtype === EVENT_MIDI_NOTE_ON && e.param2 > 0) ||
-                 (e.type === MIDIEvents.EVENT_META && e.subtype === MIDIEvents.EVENT_META_SET_TEMPO);
-        });
-      }
+      // after it is cut at the seam -- its release is emitted at each replay
+      // boundary (see rebaseReplay) so the replay never sends a second NoteOn for
+      // a still-sounding note, which the MIDI spec calls invalid. The composer's
+      // authored release past the loop end still plays in the outro, at its
+      // authored position. See dev/MIDI_LOOP_TEST_GAPS.md.
       // Notes that cross the seam, released at every replay boundary (see
       // rebaseReplay). A release sitting past the loop end is still pending when
       // the replay re-triggers the same pitch, and a second NoteOn for a
@@ -269,17 +247,6 @@ class EventIterator {
         }
         if (this.pos >= this.events.length) {
           return null;
-        } else if (!this.postHasContent && !this.postStarted) {
-          // Noteless outro: attach it at the loop end (see postHasContent), not at
-          // the preceding in-loop event's tick, so a replayed note rings to the
-          // boundary instead of being cut short.
-          this.postStarted = true;
-          const event = this.events[this.pos++];
-          if (!event) return null;
-          const delta = Math.max(0, this.boundaryTick - this.curTick);
-          this.pendingExtra = 0;
-          this.curTick += delta;
-          return { ...event, delta, absTick: this.absTicks[this.pos - 1] };
         }
         // Else fall through: the outro plays once, at its authored position,
         // then the track ends.
@@ -308,14 +275,9 @@ class EventIterator {
 
     // The first event of a replayed pass carries the rebased delta, plus any
     // shift owed to passes a loop-empty track skipped; every other event keeps
-    // its own delta.
-    // A noteless outro (see postHasContent) collapses every event to the loop
-    // boundary: the first is rebased in next(), the rest get delta 0 here, so
-    // converter padding / END_OF_TRACK cannot leave a silent tail.
-    const delta = !this.postHasContent && this.postStarted
-      ? 0
-      : (this.replayDelta != null ? this.replayDelta : event.delta) +
-        (this.pendingExtra || 0);
+    // its own delta, so a post-loop event keeps its authored offset.
+    const delta = (this.replayDelta != null ? this.replayDelta : event.delta) +
+      (this.pendingExtra || 0);
     this.replayDelta = null;
     this.pendingExtra = 0;
     this.curTick += delta;

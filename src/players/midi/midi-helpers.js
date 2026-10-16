@@ -369,12 +369,15 @@ export function usesTrackLoops(filepath) {
 // can never disagree about what the song contains.
 MIDIFile.prototype.getPlaybackEvents = function (useTrackLoops = false) {
   const tracks = this.tracks.map((_, i) => this.getTrackEvents(i));
-  // Expansion is opt-in, not marker-triggered: findLoopRange only supplies the
-  // region to loop over. Files that do not opt in play exactly once.
-  if (!useTrackLoops) {
+  const range = this.findLoopRange(tracks);
+  // The loop region is *always* detected; the expansion is the opt-in. Without
+  // it the list is the file's own timeline -- one pass -- and the player wraps
+  // it itself (see MIDIFilePlayer.load); with it, intro + two passes, so the
+  // piano roll can draw across the seam. Both report the region.
+  if (!range) {
     return { events: this.getEvents(), loopStartMs: null, loopEndMs: null };
   }
-  return this.getLoopedEvents(tracks, 2, this.findLoopRange(tracks));
+  return this.getLoopedEvents(tracks, useTrackLoops ? 2 : 1, range);
 };
 
 // Monkey patch MIDIFile class.

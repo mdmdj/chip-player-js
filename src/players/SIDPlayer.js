@@ -125,8 +125,9 @@ export default class SIDPlayer extends Player {
     // the shared core, so a superseded load cannot restart the previous song.
     const generation = ++this.loadGeneration;
     // Hold any seek asked for while the metadata fetch below is in flight: this
-    // load re-selects the sub-tune when it resumes, which would discard it.
-    this.loadingAsync = true;
+    // load re-selects the sub-tune when it resumes, which would discard it --
+    // and anything still held from an earlier load is dropped with it.
+    this.beginAsyncLoad();
     if (!this.initialized) {
       this.core._sid_init(this.sampleRate);
       this.initialized = true;

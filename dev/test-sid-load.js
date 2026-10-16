@@ -87,6 +87,26 @@ check('a seek during the metadata wait is applied after the load, not lost', asy
     `the seek is applied once, after the load (calls: ${calls.join(' ')})`);
   assert.ok(calls.indexOf('seek:30000') > calls.lastIndexOf('subtune:0'),
     `and after the sub-tune re-select that would otherwise reset it (calls: ${calls.join(' ')})`);
-}).then(() => {
+}).then(() => check('a held seek does not follow the player into the next song', async () => {
+  const calls = [];
+  const p = new SIDPlayer(makeCore(calls), 44100, 64);
+  p.audioNode = { context: { state: 'suspended' } };
+  p.processAudioInner = () => {};
+  p.getVoiceGroups = () => [];
+  let deliverMetadata;
+  p.getSidMetadata = () => new Promise((resolve) => { deliverMetadata = resolve; });
+
+  const first = p.loadData(new Uint8Array([1]), 'a.sid', {}, 0);
+  await Promise.resolve();                        // song A reaches its metadata wait
+  p.seekMs(30000);                               // the ?t= link's seek, held for A
+  const second = p.loadData(new Uint8Array([2]), 'b.sid', {}, 0); // switch songs
+  await Promise.resolve();
+  deliverMetadata();                             // the wait song B is sitting in
+  await second;
+  p.processAudio([new Float32Array(64), new Float32Array(64)]);
+  assert.strictEqual(calls.filter(c => c.startsWith('seek:')).length, 0,
+    `the next song must start at zero (calls: ${calls.join(' ')})`);
+  await first.catch(() => {});                   // A was superseded; its race times out
+})).then(() => {
   console.log(`\n${passed} checks passed${process.exitCode ? ' (WITH FAILURES)' : ''}.`);
 });

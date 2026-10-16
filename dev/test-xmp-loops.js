@@ -177,6 +177,30 @@ check('a seek into an unseen order never becomes a loop start', () => {
   assert.strictEqual(emits, 0);
 });
 
+check('a seek landing still playing on a later poll is never timed', () => {
+  const { p } = makePlayer(200000);
+  let emits = 0;
+  p.on('playerStateUpdate', (s) => { if (!s.isStopped) emits++; });
+  drive(p, p.core, orders([0, 1, 2], 8000));
+  // The same landing as above, but the order is still playing on the next poll
+  // -- an order lasts many polls, so this is the ordinary shape. The skip has to
+  // outlive the poll that saw the seek, or that poll records a mid-order time as
+  // the order's start and the loop back onto it draws a band from 4s into it.
+  p.seekMs(100000);
+  drive(p, p.core, [
+    { pos: 12, time: 100000 },
+    { pos: 12, time: 100800 },
+    { pos: 13, time: 108000 },
+    { pos: 14, time: 116000 },
+    { pos: 15, time: 124000 },
+    { pos: 12, time: 132000 },
+    { pos: 13, time: 140000 },
+  ]);
+  assert.strictEqual(p.metadata.intro_length, undefined);
+  assert.strictEqual(p.getLoopBandMs(), null);
+  assert.strictEqual(emits, 0);
+});
+
 check('a seek past the loop still learns when the loop start was played', () => {
   const { p } = makePlayer(200000);
   drive(p, p.core, orders([0, 1, 2, 3], 8000));

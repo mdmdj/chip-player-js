@@ -10,6 +10,9 @@ const Module = require('module');
 const babel = require('@babel/core');
 
 const ROOT = path.join(__dirname, '..');
+// The outer MIDIPlayer (the class the sequencer holds) pulls in Player.js, which
+// shims window.requestIdleCallback at module level.
+global.window = global.window || {};
 const originalCompile = Module.prototype._compile;
 Module.prototype._compile = function (content, filename) {
   if (filename.startsWith(ROOT) && !filename.includes('node_modules') && /\.jsx?$/.test(filename)) {
@@ -26,6 +29,7 @@ Module.prototype._compile = function (content, filename) {
 const MIDIFile = require('../src/players/midi/midi-helpers').default;
 const { usesTrackLoops } = require('../src/players/midi/midi-helpers');
 const MIDIFilePlayer = require('../src/players/MIDIFilePlayer').default;
+const MIDIPlayerClass = require('../src/players/MIDIPlayer').default;
 const MIDIEvents = require('../src/players/midi/MIDIEvents').default;
 const { EVENT_MIDI, EVENT_MIDI_NOTE_ON } = MIDIEvents;
 const { parseMidiData } = require('../src/piano-roll/midi-parser');
@@ -390,11 +394,17 @@ check('expansion is opt-in: the region is detected, the list stays one pass', ()
   assert.ok(p1.loop, 'a loop region is installed without the opt-in');
   assert.strictEqual(p1.loop.jumpMs, off.loopStartMs, 'default wraps at the loop start');
   assert.strictEqual(p1.loop.endMs, off.loopEndMs);
-  assert.deepStrictEqual(p1.getLoopBandMs(), { startMs: off.loopStartMs, endMs: off.loopEndMs });
   const p2 = makePlayer(stubSynth(true));
   p2.load(mf, true);
   assert.strictEqual(p2.loop.jumpMs, on.loopEndMs, 'expanded wraps at the second pass');
-  assert.deepStrictEqual(p2.getLoopBandMs(), { startMs: on.loopEndMs, endMs: p2.loop.endMs });
+  // MIDIPlayer.getLoopBandMs (the class the sequencer holds; this harness builds
+  // the nested file player) projects that wrap span onto the slider band.
+  const bandFor = (loop) => MIDIPlayerClass.prototype.getLoopBandMs
+    .call({ midiFilePlayer: { getLoopRegion: () => loop } });
+  assert.deepStrictEqual(bandFor(p1.loop), { startMs: off.loopStartMs, endMs: off.loopEndMs });
+  assert.deepStrictEqual(bandFor(p2.loop), { startMs: on.loopEndMs, endMs: p2.loop.endMs });
+  assert.strictEqual(bandFor(null), null, 'no region, no band');
+  assert.strictEqual(bandFor({ jumpMs: 100, endMs: 100 }), null, 'a zero-length span is no band');
 });
 
 catalogCheck(DOOM, 'piano roll unchanged for files without loops (DOOM)', () => {

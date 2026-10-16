@@ -24,6 +24,7 @@ Module.prototype._compile = function (content, filename) {
 };
 
 const MIDIFile = require('../src/players/midi/midi-helpers').default;
+const { usesTrackLoops } = require('../src/players/midi/midi-helpers');
 const MIDIFilePlayer = require('../src/players/MIDIFilePlayer').default;
 const MIDIEvents = require('../src/players/midi/MIDIEvents').default;
 const { EVENT_MIDI, EVENT_MIDI_NOTE_ON } = MIDIEvents;
@@ -203,7 +204,7 @@ catalogCheck(DESCENT, 'Descent loads a loop and wraps too', () => {
   const mf = loadMidi(DESCENT);
   const synth = stubSynth(true);
   const p = makePlayer(synth);
-  p.load(mf, false); // content-gated, not filepath-gated
+  p.load(mf, true); // the opted-in HMI loop
   assert.ok(p.loop, 'expected a loop region');
   assert.ok(Math.abs(p.loop.startMs - 100) < 2, `startMs=${p.loop.startMs}`);
   p.play(() => {});
@@ -221,7 +222,7 @@ catalogCheck(DESCENT, 'a loop wrap releases the sustain pedal', () => {
   const mf = loadMidi(DESCENT);
   const synth = stubSynth(true);
   const p = makePlayer(synth);
-  p.load(mf, false);
+  p.load(mf, true);
   p.play(() => {});
   p.setLooping(true);
   p.setPosition(p.getDuration() - 30);
@@ -235,7 +236,7 @@ catalogCheck(DESCENT, 'a loop wrap releases the sustain pedal', () => {
 catalogCheck(DESCENT, 'setPosition still restores program state (seek regression)', () => {
   const mf = loadMidi(DESCENT);
   const p = makePlayer(stubSynth(true));
-  p.load(mf, false);
+  p.load(mf, true);
   p.play(() => {});
   p.setPosition(60000);
   assert.ok(p.elapsedTime === 60000);
@@ -327,7 +328,8 @@ function parseBytes(bytes) {
 
 function rollFor(rel) {
   const buf = fs.readFileSync(path.join(ROOT, 'catalog', rel));
-  return parseMidiData(new Uint8Array(buf));
+  // Same opt-in the player and the Visualizer use.
+  return parseMidiData(new Uint8Array(buf), usesTrackLoops(rel));
 }
 
 catalogCheck(MARIO, 'piano roll covers the same two passes the audio plays (Mario)', () => {
@@ -347,14 +349,37 @@ catalogCheck(MARIO, 'piano roll covers the same two passes the audio plays (Mari
   assert.ok(roll.notes.some(n => n.startMs >= bandStart), 'no notes in second pass');
 });
 
-catalogCheck(DESCENT, 'piano roll covers the same two passes the audio plays (Descent)', () => {
+catalogCheck(DESCENT, 'Descent is not expanded: the roll and the audio both play it once', () => {
+  // Descent carries HMI loop markers but is not a SoundFont MIDI set, so it
+  // opts out of the expansion: audio once, roll once, no band. The markers
+  // still define a region when opted in, which is what the loop checks above
+  // exercise.
   const mf = loadMidi(DESCENT);
-  const audio = mf.getPlaybackEvents(false);
-  const audioDur = audio.events.slice(-1)[0].playTime;
+  const { events, loopStartMs, loopEndMs } = mf.getPlaybackEvents(false);
+  assert.strictEqual(loopStartMs, null);
+  assert.strictEqual(loopEndMs, null);
+  const audioDur = events[events.length - 1].playTime;
   const roll = rollFor(DESCENT);
   assert.ok(Math.abs(roll.durationMs - audioDur) < 1, `roll=${roll.durationMs} audio=${audioDur}`);
-  // Band start from the file's markers, not the literal 200194 this used to carry.
-  assert.ok(roll.notes.some(n => n.startMs >= audio.loopEndMs), 'no notes in second pass');
+  const expanded = mf.getPlaybackEvents(true);
+  assert.ok(expanded.loopEndMs > 0, 'the HMI markers still define a region when opted in');
+});
+
+check('expansion is opt-in: loop markers alone do not expand', () => {
+  // The PR briefly expanded every marker-bearing file; the gate is the
+  // SoundFont MIDI sets (usesTrackLoops), and detection only supplies the
+  // region. Pins the decoupling.
+  assert.strictEqual(usesTrackLoops('Nintendo 64 (SoundFont MIDI)/Pilotwings 64/13 - Gyrocopter.mid'), true);
+  assert.strictEqual(usesTrackLoops('midi/Game MIDI_Descent (PC∕DOS, 1995)_Game01.mid'), false);
+  assert.strictEqual(usesTrackLoops('local/dropped.mid'), false);
+  assert.strictEqual(usesTrackLoops(null), false);
+  const mf = loopWithIntroGapAndEnding(); // CC110/CC111 markers
+  assert.strictEqual(mf.findLoopRange(mf.tracks.map((_, i) => mf.getTrackEvents(i))) != null, true);
+  const off = mf.getPlaybackEvents(false);
+  assert.strictEqual(off.loopStartMs, null, 'markers alone do not expand');
+  assert.strictEqual(off.loopEndMs, null);
+  const on = mf.getPlaybackEvents(true);
+  assert.ok(on.loopEndMs > 0, 'the opt-in expands');
 });
 
 catalogCheck(DOOM, 'piano roll unchanged for files without loops (DOOM)', () => {
@@ -397,7 +422,7 @@ function loopWithIntroGapAndEnding() {
 
 check('replayed pass keeps the beat (loop-start delta is rebased)', () => {
   const mf = loopWithIntroGapAndEnding();
-  const { events, loopStartMs, loopEndMs } = mf.getPlaybackEvents(false);
+  const { events, loopStartMs, loopEndMs } = mf.getPlaybackEvents(true);
   assert.ok(Math.abs(loopStartMs - 2000) < 1, `startMs=${loopStartMs}`);
   assert.ok(Math.abs(loopEndMs - 6000) < 1, `endMs=${loopEndMs}`);
   // The second pass places the loop-start marker at the boundary (6000 ms), not
@@ -410,7 +435,7 @@ check('replayed pass keeps the beat (loop-start delta is rebased)', () => {
 check('Repeat One wraps at the band end, leaving the composed ending', () => {
   const mf = loopWithIntroGapAndEnding();
   const p = makePlayer(stubSynth(true));
-  p.load(mf, false);
+  p.load(mf, true);
   assert.ok(p.loop, 'expected a loop region');
   assert.ok(p.loop.endIndex < p.events.length, 'the ending is past the band end');
   p.play(() => {});
@@ -644,7 +669,7 @@ check('a tempo change inside the loop is restored on the replayed pass', () => {
     cc(111),                            // loop end, tick 4*TPQ
   ]);
   const mf = parseBytes(bytes);
-  const { events, loopStartMs, loopEndMs } = mf.getPlaybackEvents(false);
+  const { events, loopStartMs, loopEndMs } = mf.getPlaybackEvents(true);
   const B = loopEndMs - loopStartMs; // 500ms @120 + 250ms @240 = 750
   const tempos = events.filter(e => e.type === 0xff && e.subtype === 0x51)
     .map(e => Math.round(e.playTime));
@@ -695,7 +720,7 @@ check('implicit-zero loop with no tick-0 event restores the start tempo', () => 
     cc(103),                                        // loop end, tick 3*TPQ
   ]);
   const mf = parseBytes(bytes);
-  const { events, loopStartMs, loopEndMs } = mf.getPlaybackEvents(false);
+  const { events, loopStartMs, loopEndMs } = mf.getPlaybackEvents(true);
   assert.ok(loopEndMs > loopStartMs, `band ${loopStartMs}..${loopEndMs}`);
   const B = loopEndMs - loopStartMs;
   const tempos = events.filter(e => e.type === 0xff && e.subtype === 0x51)
@@ -716,7 +741,7 @@ check('Repeat One Web MIDI: the wrap reschedules the new pass in the same call',
     synth: stubSynth(true),
   });
   const mf = loopWithIntroGapAndEnding();
-  p.load(mf, false);
+  p.load(mf, true);
   assert.ok(p.loop, 'expected a loop region');
   p.play(() => {});
   p.setLooping(true);
@@ -749,7 +774,7 @@ check('multi-track: a track replayed after an in-loop tempo change keeps that te
     [noteOnAt(Math.round(1.5 * TPQ), 1, 72), noteOffAt(Math.round(0.4 * TPQ), 1, 72)],
   ], { format: 1 });
   const mf = parseBytes(bytes);
-  const { events, loopStartMs, loopEndMs } = mf.getPlaybackEvents(false);
+  const { events, loopStartMs, loopEndMs } = mf.getPlaybackEvents(true);
   assert.ok(loopEndMs > loopStartMs, `band ${loopStartMs}..${loopEndMs}`);
   const ons = events.filter(e => e.param1 === 72 && e.param2 > 0).map(e => e.playTime);
   const offs = events.filter(e => e.param1 === 72 && e.param2 === 0).map(e => e.playTime);
@@ -786,7 +811,7 @@ check('a note crossing the seam is cut at the replay, composed ending or not', (
   const NOTE_OFF = MIDIEvents.EVENT_MIDI_NOTE_OFF;
   for (const composedEnding of [false, true]) {
     const mf = noteCrossingTheSeam(composedEnding);
-    const { events, loopEndMs } = mf.getPlaybackEvents(false);
+    const { events, loopEndMs } = mf.getPlaybackEvents(true);
     let sounding = false;
     let overlaps = 0;
     let releasesAtBoundary = 0;
@@ -821,7 +846,7 @@ check('a seam release moves the emitted timeline to the boundary', () => {
     [tempo(), cc(110), ccAt(TPQ * 4, 111)],              // loop [0, 480]
     [noteOnAt(0), noteOffAt(TPQ * 5)],                   // on@0, released at 600 -- past the end
   ]));
-  const { events, loopEndMs } = mf.getPlaybackEvents(false);
+  const { events, loopEndMs } = mf.getPlaybackEvents(true);
   const last = events[events.length - 1];
   // Two passes: the noteless release lands on the second boundary, 960 ticks.
   const expected = 2 * loopEndMs;
@@ -848,7 +873,7 @@ check('a large loop keeps both passes and its band', () => {
     // The sequential (one track) and concurrent (multi-track) merges each had
     // their own copy of the cap, so exercise both.
     for (const tracks of [list, [list, [tempo()]]]) {
-      const { events, loopEndMs } = parseBytes(buildMidi(tracks)).getPlaybackEvents(false);
+      const { events, loopEndMs } = parseBytes(buildMidi(tracks)).getPlaybackEvents(true);
       const data = events.filter(e => e.subtype === MIDIEvents.EVENT_MIDI_CONTROLLER && e.param1 === 7);
       assert.strictEqual(data.length, 2 * N,
         `expected both passes, got ${data.length} of ${2 * N}`);
@@ -876,7 +901,7 @@ check('an expansion past the merge ceiling plays one full pass, dropping nothing
     // Both merges carry their own copy of the ceiling test.
     for (const extraTracks of [0, 1]) {
       const { events, loopStartMs, loopEndMs } =
-        parseBytes(buildBulkMidi(N, extraTracks)).getPlaybackEvents(false);
+        parseBytes(buildBulkMidi(N, extraTracks)).getPlaybackEvents(true);
       assert.strictEqual(loopStartMs, null, 'expected no loop region');
       assert.strictEqual(loopEndMs, null, 'expected no loop band');
       const overflowWarnings = warnings.filter(w => w.includes('loop expansion exceeded'));
@@ -934,7 +959,7 @@ check('Repeat One Web MIDI: the next pass is queued from inside the look-ahead w
     cc(111),                                          // loop end, tick 600
     noteOnAt(TPQ * 6, 0, 50), noteOffAt(TPQ, 0, 50),  // composed ending
   ]));
-  p.load(mf, false);
+  p.load(mf, true);
   assert.ok(p.loop, 'expected a loop region');
   p.play(() => {});
   p.setLooping(true);
@@ -986,7 +1011,7 @@ check('Repeat One Web MIDI: the wrap cleanup lands on the band end, not the last
     noteOnAt(0, 0, 72), noteOffAt(TPQ, 0, 72), // loop content, ticks 480..600
     ccAt(TPQ * 4, 111),                        // loop end, tick 960
   ]));
-  p.load(mf, false);
+  p.load(mf, true);
   assert.ok(p.loop, 'expected a loop region');
   p.play(() => {});
   p.setLooping(true);
@@ -1027,7 +1052,7 @@ check('the MIDI seam lifts a pedal-held note like the live wrap does', () => {
     noteOnAt(0, 0, 64), noteOffAt(TPQ, 0, 64),
     cc(111),                                   // loop end
   ]));
-  const { events, loopEndMs } = withPedal.getPlaybackEvents(false);
+  const { events, loopEndMs } = withPedal.getPlaybackEvents(true);
   assert.ok(loopEndMs > 0, `expected a loop region, got ${loopEndMs}`);
   const seam = events.filter(e => e.subtype === MIDIEvents.EVENT_MIDI_CONTROLLER &&
     e.param1 === 64 && Math.abs(e.playTime - loopEndMs) < 1);
@@ -1043,7 +1068,7 @@ check('the MIDI seam lifts a pedal-held note like the live wrap does', () => {
     ccAt(TPQ, 110),
     noteOnAt(0, 0, 64), noteOffAt(TPQ, 0, 64),
     cc(111),
-  ])).getPlaybackEvents(false);
+  ])).getPlaybackEvents(true);
   const bareSeam = bare.events.filter(e => e.subtype === MIDIEvents.EVENT_MIDI_CONTROLLER &&
     e.param1 === 64 && Math.abs(e.playTime - bare.loopEndMs) < 1);
   assert.strictEqual(bareSeam.length, 0, 'nothing was sustained, so nothing is added');
@@ -1053,7 +1078,7 @@ check('the MIDI seam lifts a pedal-held note like the live wrap does', () => {
 // committed to the catalog (catalog/ is gitignored, so this skips elsewhere):
 // pedal down throughout, a note released on the seam while it is held.
 catalogCheck('midi/loop-pedal-seam.mid', 'the pedal fixture lifts its pedal at the seam', () => {
-  const { events, loopEndMs } = loadMidi('midi/loop-pedal-seam.mid').getPlaybackEvents(false);
+  const { events, loopEndMs } = loadMidi('midi/loop-pedal-seam.mid').getPlaybackEvents(true);
   assert.ok(loopEndMs > 0, `expected a loop region, got ${loopEndMs}`);
   const seam = events.filter(e => e.subtype === MIDIEvents.EVENT_MIDI_CONTROLLER &&
     e.param1 === 64 && Math.abs(e.playTime - loopEndMs) < 1);

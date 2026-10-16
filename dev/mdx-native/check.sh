@@ -5,7 +5,10 @@
 # files whose band was wrong must stay corrected.
 set -e
 cd "$(dirname "$0")"
-[ -x ./region ] || make region
+# Always (re)build: make is a no-op when current. Never trust a pre-existing
+# binary -- a stale one reads as a different engine, and a leftover pre-fix
+# build once looked exactly like a flaky suite (2 FAILs, then 0 for days).
+make -s region
 root=$(cd ../.. && pwd)
 catalog="$root/catalog/mdx"
 

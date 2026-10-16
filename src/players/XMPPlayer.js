@@ -58,13 +58,23 @@ export default class XMPPlayer extends Player {
     // Loop passes to hand libxmp for the current state (xmp_play_buffer's
     // loop count; 0 = forever). 1 ends at the scan end, like before.
     this._loopCount = 1;
-    // Learned loop band: order -> first-visit frame time. libxmp exposes no
+    // Learned loop band: position -> first-visit frame time. libxmp exposes no
     // loop start, but the first backward order jump (the engine looping)
     // resolves it exactly, tempo included. First visits are absolute, so seeks
     // can't corrupt them; a backward jump onto an order the linear flow never
     // visited has an unknowable start, so it is skipped -- a loop-end time must
     // never become a loop start.
+    //
+    // Tracked at two granularities, and the band start comes from the row map:
+    // a loop can re-enter an order mid-pattern (libxmp's "Bxx+Dxx within same
+    // position" line jump applies the pattern break's row), so the order's
+    // row-0 time would draw a band over music the loop never revisits. The row
+    // key is the entry row's own first-pass time; when that row was never
+    // played (a pattern break can skip it), the band is left unset rather than
+    // guessed. The order map still answers "was this order visited" for the
+    // out-of-flow and seek-landing rules.
     this._orderFirstSeen = new Map();
+    this._rowFirstSeen = new Map();
     this._lastPos = -1;
     this._skipOrder = null;
     this._seekPending = false;
@@ -242,7 +252,7 @@ export default class XMPPlayer extends Player {
   // The band is the repeating span [loopStart, trackEnd), shown from the
   // first loop end on. Files without a backward jump never learn one and
   // keep today's UI.
-  learnLoopFromOrder(pos) {
+  learnLoopFromOrder(pos, row) {
     const seen = this._orderFirstSeen;
     if (!seen) {
       this._lastPos = pos;
@@ -275,25 +285,38 @@ export default class XMPPlayer extends Player {
     }
     if (this._skipOrder != null && pos !== this._skipOrder) this._skipOrder = null;
     if (this._skipOrder == null) {
-      if (!seen.has(pos)) {
-        if (pos < this._lastPos) {
-          // Backward jump onto a never-visited order: arrival from outside
-          // the linear flow, true start unknown -- skip recording this
-          // visit (and the ones that follow it) so the loop-end time can't
-          // become the loop start. Learning simply never fires here.
-          this._skipOrder = pos;
-        } else {
-          // Order 0's first visit is the song's start; _positionMs has already
-          // advanced by a buffer, so record 0 rather than a small nonzero intro
-          // (which would pass the loopStartMs > 0 test and draw a false band for
-          // a track that loops from its end back to the start).
-          seen.set(pos, pos === 0 && seen.size === 0 ? 0 : this._positionMs);
-        }
-      } else if (pos < this._lastPos && this.metadata && this.metadata.intro_length == null) {
-        const loopStartMs = seen.get(pos);
+      // A backward order jump is the loop; its arrival is never a first visit,
+      // so nothing is recorded for it -- the band start must come from the
+      // linear pass, or a loop-end time would become a loop start.
+      const backward = pos < this._lastPos;
+      if (!backward) {
+        // Order 0's first visit is the song's start; _positionMs has already
+        // advanced by a buffer, so record 0 rather than a small nonzero intro
+        // (which would pass the loopStartMs > 0 test and draw a false band for
+        // a track that loops from its end back to the start).
+        const visitTime = pos === 0 && seen.size === 0 ? 0 : this._positionMs;
+        // Row first visits: a Bxx+Dxx line jump re-enters an order mid-pattern,
+        // so the band start must be that row's time, not the order's row-0 time
+        // (see the constructor comment). Recorded for every new (pos,row), not
+        // just an order's first row, since the loop target row is usually a
+        // later one.
+        const rowKey = pos + ':' + row;
+        if (!this._rowFirstSeen.has(rowKey)) this._rowFirstSeen.set(rowKey, visitTime);
+        if (!seen.has(pos)) seen.set(pos, visitTime);
+      } else if (!seen.has(pos)) {
+        // Backward jump onto a never-visited order: arrival from outside the
+        // linear flow, true start unknown -- skip recording this visit (and the
+        // ones that follow it) so the loop-end time can't become the loop start.
+        // Learning simply never fires here.
+        this._skipOrder = pos;
+      } else if (this.metadata && this.metadata.intro_length == null) {
+        const loopStartMs = this._rowFirstSeen.get(pos + ':' + row);
         // A loop from the very start spans the whole track, so highlighting
         // it says nothing -- the repeat indicator already covers that case.
-        if (loopStartMs > 0 && loopStartMs < this._durationMs) {
+        // An unrecorded row (the first pass never played it) is likewise left
+        // unset: a start guessed at the order's row 0 would cover music the
+        // loop never revisits.
+        if (loopStartMs != null && loopStartMs > 0 && loopStartMs < this._durationMs) {
           this.metadata.intro_length = loopStartMs;
           this.metadata.loop_length = this._durationMs - loopStartMs;
           // The band appears mid-song, after the footer already rendered

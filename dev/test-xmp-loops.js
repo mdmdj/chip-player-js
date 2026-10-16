@@ -28,7 +28,7 @@ Module.prototype._compile = function (content, filename) {
 const XMPPlayer = require('../src/players/XMPPlayer').default;
 
 // Frame-info field indices (libxmp xmp_frame_info, also asserted in-code).
-const FI_POS = 0, FI_TIME = 7, FI_TOTAL = 8, FI_LOOP_COUNT = 14;
+const FI_POS = 0, FI_ROW = 2, FI_TIME = 7, FI_TOTAL = 8, FI_LOOP_COUNT = 14;
 
 function makeCore() {
   const heap = new Map();
@@ -64,11 +64,12 @@ function makePlayer(totalMs) {
   return { p, core };
 }
 
-// One processAudioInner per {pos, time} frame.
+// One processAudioInner per {pos, row, time} frame.
 function drive(player, core, frames) {
   const ch = () => new Float32Array(64);
   for (const f of frames) {
     core.heap.set(player.infoPtr + FI_POS * 4, f.pos);
+    core.heap.set(player.infoPtr + FI_ROW * 4, f.row || 0);
     core.heap.set(player.infoPtr + FI_TIME * 4, f.time);
     if (f.loop != null) core.heap.set(player.infoPtr + FI_LOOP_COUNT * 4, f.loop);
     player.processAudioInner([ch(), ch()]);
@@ -121,6 +122,78 @@ check('first backward jump wins (Bgm01-like, skips then 43->10)', () => {
   assert.strictEqual(p.metadata.intro_length, 80000);
   assert.strictEqual(p.metadata.loop_length, 291840 - 80000);
   assert.deepStrictEqual(p.getLoopBandMs(), { startMs: 80000, endMs: 291840 });
+});
+
+check('a mid-pattern loop entry draws the band from the entry row, not the order row 0', () => {
+  const { p } = makePlayer(200000);
+  // Order 1 is played rows 0..15 at 120ms/row (first-pass times 8000, 8120, ...).
+  const firstPass = [];
+  for (let r = 0; r < 16; r++) firstPass.push({ pos: 1, row: r, time: 8000 + r * 120 });
+  drive(p, p.core, [
+    { pos: 0, row: 0, time: 0 },
+    ...firstPass,
+    { pos: 2, row: 0, time: 10000 },
+    { pos: 3, row: 0, time: 11000 },
+    // A Bxx+Dxx line jump re-enters order 1 at row 8 (first-pass time 8960),
+    // not row 0 (8000). Order-level tracking alone would start the band at 8000.
+    { pos: 1, row: 8, time: 20000 },
+    { pos: 1, row: 9, time: 20120 },
+    { pos: 2, row: 0, time: 21000 },
+  ]);
+  assert.strictEqual(p.metadata.intro_length, 8960,
+    "band starts at the re-entry row, not the order's row 0");
+  assert.strictEqual(p.metadata.loop_length, 200000 - 8960);
+  assert.deepStrictEqual(p.getLoopBandMs(), { startMs: 8960, endMs: 200000 });
+});
+
+check('a loop entry row the first pass never played leaves the band unset', () => {
+  const { p } = makePlayer(200000);
+  drive(p, p.core, [
+    { pos: 0, row: 0, time: 0 },
+    { pos: 1, row: 0, time: 8000 },
+    { pos: 1, row: 2, time: 8240 },
+    { pos: 1, row: 4, time: 8480 }, // a pattern break left order 1 before row 8
+    { pos: 2, row: 0, time: 10000 },
+    { pos: 3, row: 0, time: 11000 },
+    { pos: 1, row: 8, time: 20000 }, // the re-entry row was never timed
+    { pos: 2, row: 0, time: 21000 },
+  ]);
+  assert.strictEqual(p.metadata.intro_length, undefined,
+    "no honest start -> no band, rather than the order's row 0");
+  assert.strictEqual(p.getLoopBandMs(), null);
+});
+
+check('a row-0 loop entry still learns at the order start', () => {
+  const { p } = makePlayer(200000);
+  drive(p, p.core, [
+    { pos: 0, row: 0, time: 0 },
+    { pos: 1, row: 0, time: 8000 },
+    { pos: 1, row: 1, time: 8120 },
+    { pos: 2, row: 0, time: 10000 },
+    { pos: 3, row: 0, time: 11000 },
+    { pos: 1, row: 0, time: 20000 }, // an ordinary loop back to the order start
+    { pos: 2, row: 0, time: 21000 },
+  ]);
+  assert.strictEqual(p.metadata.intro_length, 8000);
+  assert.deepStrictEqual(p.getLoopBandMs(), { startMs: 8000, endMs: 200000 });
+});
+
+check('a jump observed one row past its entry uses that row (one-row slop, bounded)', () => {
+  const { p } = makePlayer(200000);
+  const firstPass = [];
+  for (let r = 0; r < 16; r++) firstPass.push({ pos: 1, row: r, time: 8000 + r * 120 });
+  drive(p, p.core, [
+    { pos: 0, row: 0, time: 0 },
+    ...firstPass,
+    { pos: 2, row: 0, time: 10000 },
+    { pos: 3, row: 0, time: 11000 },
+    // The poll catches row 9 rather than the entry row 8: the band starts at
+    // row 9's first-pass time, so the error is bounded by one row (~120ms at
+    // this tempo), never an order.
+    { pos: 1, row: 9, time: 20000 },
+    { pos: 2, row: 0, time: 21000 },
+  ]);
+  assert.strictEqual(p.metadata.intro_length, 9080);
 });
 
 check('seek then natural loop still learns with the pre-seek start time', () => {

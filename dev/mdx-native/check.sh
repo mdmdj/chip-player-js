@@ -58,7 +58,7 @@ check_sections() { # file  per  note
   onset=$(printf '%s' "$row" | cut -f10)
   tol=$((loop / 100)); [ "$tol" -lt 500 ] && tol=500
   d=$((onset - end)); [ "$d" -lt 0 ] && d=$((0 - d))
-  if [ "$per" -gt 1 ] && [ "$onset" -ge 0 ] && [ "$d" -le "$tol" ]; then
+  if [ "$onset" -ge 0 ] && [ "$d" -le "$tol" ]; then
     printf 'ok    %s per=%s limit=%s fade=%s vs section_end=%s  %s\n' \
       "$1" "$per" "$limit" "$onset" "$end" "$3"
   else
@@ -74,6 +74,12 @@ check_sections NOS123.MDX   5  "one section = 5 repeats"
 check_sections VAL5.MDX     6  "one section = 6 repeats"
 check_sections 27_CLEAR.MDX 8  "one section = 8 repeats"
 check_sections MTS2_32.MDX  16 "one section = 16 repeats"
+# per=1, so no repeat unit is involved: the raw counter of a track that entered
+# its loop a section before the last one reads a section ahead of the joint grid.
+# The fade began 7.2s early on this file at every play point (found by a corpus
+# sweep: 5 of 296 sampled regions deviated); 'per' is still the column the row
+# carries, so a per=1 row is a real assertion now rather than a skipped one.
+check_sections EXES04.MDX   1 "per=1: an earlier track's head start, not a repeat unit"
 
 # mdx_get_length must report the length the engine actually plays under the same
 # finite limit. The length parse and playback gate the fade on the same quantity
@@ -103,5 +109,9 @@ check_length() { # file  limit  note
 check_length DES_80.MDX  2 "per=2: the length must reach the section-grid fade"
 check_length MTS2_32.MDX 2 "per=16: the shortfall was a whole section (16 repeats)"
 check_length G2MST6.MDX  2 "per=1 must not move"
+# The same file, for the length half: pre-fix mdx_get_length reported 36000 while
+# the engine played to 43532, a section short, so MDXPlayer's end detector armed
+# early and the song stopped mid-fade.
+check_length EXES04.MDX  2 "per=1 with a head start: the length must reach the section-grid fade"
 
 exit $status

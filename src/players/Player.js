@@ -58,6 +58,9 @@ export default class Player extends EventEmitter {
    * @return {number} - A pointer to the allocated memory.
    */
   copyToHeap(data) {
+    // TODO: the JSDoc promises an ArrayBuffer, but HEAPU8.set() only accepts a
+    // TypedArray/array-like, so an ArrayBuffer silently copies nothing. Callers
+    // pass a Uint8Array today; normalize `data` here.
     const dataPtr = this.core._malloc(data.byteLength);
     this.core.HEAPU8.set(data, dataPtr);
     return dataPtr;
@@ -118,6 +121,14 @@ export default class Player extends EventEmitter {
   getPositionMs() {
     console.debug(`Player.getPositionMs() not implemented for ${this.constructor.name}.`);
     return 0;
+  }
+
+  // Position for the slider head and time label. getPositionMs() is the
+  // absolute "time playing" (it keeps counting across loops); players that can
+  // loop a region override this to fold the loop phase into the displayed
+  // "playlist" position so the head repeats the region instead of running on.
+  getDisplayPositionMs() {
+    return this.getPositionMs();
   }
 
   seekMs(ms) {
@@ -193,6 +204,8 @@ export default class Player extends EventEmitter {
     return 0;
   }
 
+  // Sub-tune selection is handled by the sequencer (one SongRef per sub-tune),
+  // not by the player.
   playSubtune() {}
 
   getMetadata() {
@@ -285,17 +298,65 @@ export default class Player extends EventEmitter {
     this.looping = looping;
   }
 
+  // End of the loop region in ms, or null when the track defines no loop.
+  getLoopEndMs() {
+    const meta = this.metadata;
+    return meta && meta.loop_length > 0 && meta.intro_length >= 0
+      ? meta.intro_length + meta.loop_length
+      : null;
+  }
+
+  // Highlight band for the time slider, in ms, or null when the track defines
+  // no loop region. The band is the LAST loop instance before the fade
+  // (default playback is intro + two passes + fade): that gives the user as
+  // long as possible to decide to stay, and toggling repeat never shifts the
+  // band. Reads the shared intro_length/loop_length vocabulary; engines whose
+  // loop semantics differ override this.
+  getLoopBandMs() {
+    const meta = this.metadata;
+    if (!meta || !Number.isFinite(meta.intro_length) || meta.intro_length < 0 ||
+        !Number.isFinite(meta.loop_length) || meta.loop_length <= 0)
+      return null;
+    const startMs = meta.intro_length + meta.loop_length;
+    let endMs = meta.intro_length + 2 * meta.loop_length;
+    const durationMs = this.getDurationMs();
+    if (durationMs > 0) endMs = Math.min(endMs, durationMs);
+    return endMs > startMs ? { startMs, endMs } : null;
+  }
+
+  // True when playback legitimately runs past durationMs and the engine (not
+  // the base end detector) owns the end. The base returns Repeat One only;
+  // subclasses OR in their own indefinite-playback setting and any extended
+  // tail left over from leaving a deep repeat.
+  isPlayingIndefinitely() {
+    return this.looping;
+  }
+
+  // True when the fallback loop UI applies: the song runs past its length with
+  // no known loop region, so no honest position exists -- the transport parks
+  // the head while the elapsed time climbs. Engines land here by free-running
+  // past a listed length (an NSF driver looping internally; SID/N64 under
+  // indefinite playback); a bounded clock -- a loop region, a native loop
+  // (XMP), a JS wrap (MIDI with a region), or a stop + reload (V2M) -- never
+  // does. The past-the-end term scopes it.
+  isBlindLoop() {
+    if (!this.isPlayingIndefinitely()) return false;
+    if (this.getLoopBandMs()) return false;
+    const duration = this.getDurationMs();
+    if (!(duration > 0)) return false;
+    if (!this.isPlaying()) return false;
+    return this.getPositionMs() >= duration;
+  }
+
   setSilenceDuration(seconds) {
     const val = Number(seconds);
     this.silenceDuration = isNaN(val) ? -1 : val;
   }
 
   handleSongEnd(onSilenceEnd = null) {
-    let defaultCallback = null;
-    if (this.getSubtune() + 1 < this.getNumSubtunes()) {
-      defaultCallback = () => this.playSubtune(this.getSubtune() + 1);
-    }
-    const endAction = onSilenceEnd || defaultCallback || (() => this.stop());
+    // A player plays exactly one song and then stops. Sub-tune navigation is
+    // the sequencer's job: each sub-tune is its own context entry.
+    const endAction = onSilenceEnd || (() => this.stop());
 
     if (this.silenceDuration >= 0) {
       const trailingSilenceSec = this.trailingSilenceSamples / this.sampleRate;
@@ -352,7 +413,7 @@ export default class Player extends EventEmitter {
       for (let ch = 0; ch < output.length; ch++) {
         output[ch].fill(0);
       }
-    } else if (this.silenceDuration >= 0 && !this.paused && !this.looping && !this.fadingOut && output.length > 0) {
+    } else if (this.silenceDuration >= 0 && !this.paused && !this.isPlayingIndefinitely() && !this.fadingOut && output.length > 0) {
       const duration = this.durationMs;
       const position = this.getPositionMs();
 

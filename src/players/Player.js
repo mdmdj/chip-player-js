@@ -329,7 +329,17 @@ export default class Player extends EventEmitter {
     const startMs = meta.intro_length + meta.loop_length;
     let endMs = meta.intro_length + 2 * meta.loop_length;
     const durationMs = this.getDurationMs();
-    if (durationMs > 0) endMs = Math.min(endMs, durationMs);
+    if (durationMs > 0) {
+      // A song can be shorter than its region claims: MDX files whose tracks run
+      // out of loops before the second pass completes end inside the band
+      // (FACE04: a 242s song against a band ending at 273.7s -- 120 of 67k
+      // corpus files, by up to whole minutes). Clamping there left a sliver the
+      // song never plays, drawn while it was already fading out. No band is the
+      // honest answer, and the blind-loop UI covers it. The second of slack
+      // absorbs the whole-second length.
+      if (endMs > durationMs + 1000) return null;
+      endMs = Math.min(endMs, durationMs);
+    }
     return endMs > startMs ? { startMs, endMs } : null;
   }
 

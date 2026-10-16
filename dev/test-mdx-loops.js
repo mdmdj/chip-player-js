@@ -66,10 +66,10 @@ function makeFS() {
   };
 }
 
-function makeCore({ introMs = A, loopMs = B, withLoopGetters = true, perSection = 0 } = {}) {
+function makeCore({ introMs = A, loopMs = B, withLoopGetters = true, perSection = 0, lengthMs = null } = {}) {
   const per = perSection > 0 ? perSection : 1;   // per-track repeats in one section
   const core = {
-    introMs, loopMs, per,
+    introMs, loopMs, per, lengthMs,
     maxLoop: 0,
     abs: 0,
     fadeStartedAtMs: null, // mdxmini latches fade_out; only reinit (a seek) clears it
@@ -117,7 +117,9 @@ function makeCore({ introMs = A, loopMs = B, withLoopGetters = true, perSection 
   // per-track loops (one section is `per` of them) and the return is whole
   // seconds. per == 1 leaves only the truncation.
   core._mdx_get_length = () => Math.floor(
-    (core.introMs + (core.maxLoop / core.per) * core.loopMs + FADE_MS) / 1000);
+    (core.lengthMs != null
+      ? core.lengthMs                     // a file whose tracks stop looping early
+      : core.introMs + (core.maxLoop / core.per) * core.loopMs + FADE_MS) / 1000);
   if (withLoopGetters) {
     core._mdx_get_loop_start_ms = () => core.introMs;
     core._mdx_get_loop_length_ms = () => core.loopMs;
@@ -219,6 +221,20 @@ async function main() {
     assert.strictEqual(p.metadata.loop_length, B);
     assert.deepStrictEqual(p.getLoopBandMs(), { startMs: BAND_START, endMs: BAND_END });
     assert.strictEqual(p.getDurationMs(), DURATION, 'intro + two passes + fade');
+  });
+
+  await check('a band the song cannot reach is not drawn', async () => {
+    // Measured on FACE04: the engine's length is 242s while intro + 2*loop is
+    // 273.7s, so the highlighted band hung off the end of the slider and the
+    // clamp left a sliver the song never plays, drawn while it was already
+    // fading out. No band is the honest answer.
+    const short = await makePlayer({ lengthMs: A + 2 * B - 1500 });
+    assert.strictEqual(short.p.getLoopBandMs(), null, 'no band past the song');
+    assert.strictEqual(short.p.metadata.loop_length, B,
+      'the region itself is still recorded -- the transport derives from it');
+    const fits = await makePlayer({ lengthMs: A + 2 * B + 2000 });
+    assert.ok(fits.p.getLoopBandMs(), 'a band the song reaches is still drawn');
+    assert.strictEqual(fits.p.getLoopBandMs().startMs, BAND_START);
   });
 
   await check('load leaves the engine at two passes (libvgm parity)', async () => {

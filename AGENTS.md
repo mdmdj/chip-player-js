@@ -2341,6 +2341,19 @@ only armed when `silenceDuration >= 0`, and both arms must end the song):
    since the position is already past the length). Repeat-off plays to the
    natural end + JS fade. Real per-track regions would need GME-side work
    (roadmap) — NSFe `loop` chunk support and/or a native loop API.
+
+  **Categorized not-a-bug 2026-10-16 (greptile, `GMEPlayer.js:336`).** The finding
+  says the head jumps when Repeat One is disabled, because `getDisplayPositionMs`
+  gates its fold on `isPlayingIndefinitely()` rather than on the band — VGM and MDX
+  gate only the *fade-start query*, so their mapping is continuous across the
+  toggle. With a band, GME's guard would be a contract violation. It has no bands:
+  every GME loop here is a blind loop (`intro_length` stays -1, above), so
+  `getLoopBandMs()` is null and the mapping returns the live position either way,
+  and disabling Repeat One inside a blind loop is a clean transition to the fade
+  (the player's own words after checking it in the app). It becomes a real gap only
+  if a reader's GME reports a region — a newer GME honouring the NSFe `loop` chunk
+  would do exactly that — and then the fix is the ~6-line MDX mirror (fade start =
+  the track length when not looping) plus a continuity check across the toggle.
 - **N64/USF:** whole-track model like GME, loop inferred from the `fade` tag
   (`song_loops`) + the indefinite flag. Under Repeat One the engine flag is
   OR'd from Repeat One and the setting (so looping tracks free-run past

@@ -247,6 +247,36 @@ resolution").
 Revisit if `BUFFER_AHEAD` grows, or if the UI ever samples the position faster
 than the look-ahead — then the pre-band sample becomes reachable on purpose.
 
+## Documented, not fixed: "the PR adds no tests for the expansion" (2026-10-16)
+
+greptile P2 on PR #12 (`midi-helpers.js:375`): the loop expansion serves both
+playback and the piano roll, the PR ships no automated tests for it, and it changes
+timing across tracks, tempo changes, held notes and composed endings — "listening
+tests alone can miss errors shared by the audio and piano roll".
+
+**The tests exist; they are deliberately not in the PR.** `dev/test-midi-loops.js`
+has 39 checks covering exactly those shapes: exact times ("replayed pass keeps the
+beat", "a seam release moves the emitted timeline to the boundary", "post-loop
+content *with* notes keeps its exact timing"); loop bounds ("Mario Kart: region is
+the whole song, [0, ~72062] ms, two passes", plus the CC102/103, CC111 and
+format-2 shapes); tracks that end early ("a track whose only events are past the
+loop end still shifts its ending", "Gyrocopter: padded END_OF_TRACK does not
+inflate duration"); tempo changes inside a loop (three checks, including the
+third-pass case); held notes and composed endings (the seam cuts, the pedal
+fixture, "wrapping at the band end leaves the composed ending").
+
+The "shared by the audio and piano roll" worry is answered by construction: the
+expansion is one source for both (`getPlaybackEvents`), and the checks assert the
+list the roll reads, so a shared error is one error in one place rather than two
+implementations drifting.
+
+Why they are not shipped: the repo has no test runner and no CI, `catalog/` is
+gitignored so the real-file checks would silently skip elsewhere, and the benefit
+is consumed before the PR is written while the maintenance cost lands on the
+reviewer. If a durable suite is ever wanted, the same harnesses move to a tracked
+`test/` dir under `node --test` with no new dependencies. No new information since
+that decision, so: not a bug, documented.
+
 ## How to regenerate the inventory
 
 A scanner was used to produce the table above (parse each file with the repo's

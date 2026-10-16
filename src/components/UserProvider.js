@@ -54,10 +54,15 @@ const UserProvider = ({ children }) => {
   // matching. A toggle before the initial GET lands bumps the token and
   // invalidates that GET, so a still-cold list is re-read once it completes.
   const [favesHydratedFor, setFavesHydratedFor] = useState(null);
-  // Toggles whose request is still in flight. A whole-list refresh is deferred
-  // while any is outstanding, so the snapshot cannot drop a mutation that has
-  // not landed yet; the last toggle to land then hydrates.
-  const pendingFaveToggles = useRef(0);
+  // Toggles whose request is still in flight, per account (uid -> count). A
+  // whole-list refresh is deferred while any of *that account's* toggles is
+  // outstanding, so the snapshot cannot drop a mutation that has not landed yet;
+  // the last toggle to land then hydrates. Per account, not one global count: a
+  // slow toggle from the account the user just left would otherwise defer the
+  // new account's own hydration, and -- its late landing being declined by the
+  // sameAccount guard -- leave that account's server favorites unread until
+  // another toggle or a reload.
+  const pendingFaveToggles = useRef(new Map());
   // The identity the favorites in state were last resolved against. The
   // localStorage seed is trusted on the first resolution -- it is what paints
   // favorites without waiting for the GET, and it is nearly always the same
@@ -187,7 +192,7 @@ const UserProvider = ({ children }) => {
 
       let addResult;
       let committed = true;
-      pendingFaveToggles.current++;
+      pendingFaveToggles.current.set(user.uid, (pendingFaveToggles.current.get(user.uid) || 0) + 1);
       try {
         if (isFavorite) {
           await removeFavorite(fave);
@@ -203,7 +208,7 @@ const UserProvider = ({ children }) => {
         if (lastUid.current === user.uid) setFaves(oldFaves);
         console.log('Couldn\'t update favorites in Firebase.', e);
       }
-      pendingFaveToggles.current--;
+      pendingFaveToggles.current.set(user.uid, Math.max(0, (pendingFaveToggles.current.get(user.uid) || 1) - 1));
       // Everything below lands on `faves`, so establish once that it is still
       // the list of the account that started this toggle. A sign-out or a switch
       // clears it, and a toggle that resolves afterwards belongs to the account
@@ -232,10 +237,10 @@ const UserProvider = ({ children }) => {
       // Hydrate the list if it is still cold. This toggle invalidated the initial
       // GET, so the server favorites it would have brought -- and this toggle's
       // own result, for a removal -- are not in `faves` yet, and the splice above
-      // cannot restore them. Deferred while another toggle is in flight, or the
-      // whole-list snapshot could drop a mutation that has not landed; the last
-      // toggle to land then hydrates.
-      if (sameAccount && favesHydratedFor !== user.uid && pendingFaveToggles.current === 0) {
+      // cannot restore them. Deferred while another toggle *for this account* is
+      // in flight, or the whole-list snapshot could drop a mutation that has not
+      // landed; the last of this account's toggles to land then hydrates.
+      if (sameAccount && favesHydratedFor !== user.uid && !pendingFaveToggles.current.get(user.uid)) {
         // Claim the token here, at issue, instead of reusing this toggle's. The
         // read is taken after every in-flight toggle has landed, so only a
         // toggle that starts *after* this point should invalidate it -- reusing

@@ -408,6 +408,31 @@ mdx_parse_mml_ym2151_async(songdata *data, int track_mute_mask)
   return FLAG_TRUE;
 }
 
+/* Rewind the song to the start of a parse (or of playback). mdx_get_length may
+   measure twice -- see its comment -- and mdx_parse_mml_ym2151_async leaves the
+   tracks mid-song; this is the same reinit the single-pass version did once at
+   the end. Returns 0 when the OPM registers fail to initialize, as that did. */
+static int
+mdx_parse_mml_ym2151_async_rewind(songdata *data)
+{
+  __GETSELF(data)
+
+  ym2151_all_note_off(data);
+  mdx_init_track_work_area_ym2151(data);
+  pcm8_init(data);
+
+  if (!ym2151_reg_init( self->mdx, data )) {
+    /* failed to initialize opm! */
+    return 0;
+  }
+
+  self->all_track_finished = FLAG_FALSE;
+  self->fade_out_wait = 0;
+  self->master_volume = 127;
+
+  return 1;
+}
+
 int mdx_parse_mml_ym2151_async_get_length(songdata *data)
 {
   int next,sec,i;
@@ -496,25 +521,28 @@ int mdx_parse_mml_ym2151_async_get_length(songdata *data)
       ( loopers == 0 || !all_second || periods == 0 || L <= 0 || intro + L <= 0 ) ? 1 : 0;
   }
 
-  /* stop */
-  ym2151_all_note_off(data);
-
-  /* reinitialize */ 
-  mdx_init_track_work_area_ym2151(data);
-  pcm8_init(data);
-  
-  if (!ym2151_reg_init( self->mdx, data )) {
-    /* failed to initialize opm! */
-    return 0;
+  /* The parse above measured the length with the fade gate on the raw per-track
+     minimum: loops_per_section is resolved only here, so loop_gate_value
+     short-circuits during that parse. When one joint section is several repeats
+     of the longest track (per > 1) the raw gate turns a section's worth early,
+     so sec is short of the section end -- and MDXPlayer arms its end detector on
+     sec, stopping the song mid-fade. Re-measure with the grid resolved, which is
+     the quantity playback gates on, so sec is the length the engine plays. */
+  if (!self->loop_region_bad && self->loops_per_section > 1) {
+    if (!mdx_parse_mml_ym2151_async_rewind(data))
+      return 0;
+    next = 1;
+    while(next && self->mdx->elapsed_time < (1200 * 1000000))
+    {
+      next = mdx_parse_mml_ym2151_async(data, 0);
+    }
+    sec = (int)self->mdx->elapsed_time / 1000000;
   }
-  
-  
-  /* start parsing */
 
-  self->all_track_finished=FLAG_FALSE;
-  self->fade_out_wait=0;
-  self->master_volume=127;
-  
+  /* stop and reinitialize for playback */
+  if (!mdx_parse_mml_ym2151_async_rewind(data))
+    return 0;
+
   return sec;
 }
 
@@ -549,91 +577,6 @@ mdx_parse_mml_get_loop_second_us(void* in_self)
   if (((mdxmml_ym2151_instances *)in_self)->loop_region_bad) return 0;
   return ((mdxmml_ym2151_instances *)in_self)->loop_second_us;
 }
-
-/* Floor division, for projecting a count over a track's own zero. */
-static int64_t
-mdx_floor_div(int64_t a, int64_t b)
-{
-  int64_t q = a / b;
-  if (a % b != 0 && a < 0) q--;
-  return q;
-}
-
-/* Ceiling division, for the same reason in the other direction. */
-static int64_t
-mdx_ceil_div(int64_t a, int64_t b)
-{
-  return -mdx_floor_div(-a, b);
-}
-
-/* The max_infinite_loops that ends the fade at the end of the joint loop
-   section now playing (see mdx_set_max_loop).
-
-   The engine compares max_infinite_loops against the MINIMUM per-track loop
-   count (the fade test in mdx_parse_mml_ym2151_async), while
-   mdx_get_loop_{start,length}_ms describe the *joint* section. The two are the
-   same only when every track shares a period: 4 s and 6 s tracks make a 12 s
-   section, so at 30 s the counters read 7 and 5 while the section count is 2,
-   and a limit taken from the section count fires the fade immediately instead
-   of at the section end. Projecting each live track's count to the section end
-   and returning the smallest gives the limit in the engine's own unit.
-
-   Only differences between projections are used, so which pass the engine
-   counts as 0 cannot matter. Returns 0 with no usable region, in which case the
-   caller keeps its own limit. */
-int
-mdx_parse_mml_get_section_loop_limit(void* in_self)
-{
-  mdxmml_ym2151_instances *self = (mdxmml_ym2151_instances *)in_self;
-  int64_t now, intro, end, L, limit = 0;
-  int i;
-
-  if (!self || !self->mdx) return 0;
-  if (self->loop_region_bad) return 0;
-
-  L = self->loop_second_us - self->loop_first_us;
-  if (L <= 0) return 0;
-  intro = self->loop_first_us - L;
-  now = self->mdx->elapsed_time;
-  if (now <= intro) return 0;
-  /* The end of the section now playing: the next multiple of L past the intro. */
-  end = intro + ((now - intro + L - 1) / L) * L;
-
-  for (i = 0; i < self->mdx->tracks; i++) {
-    int64_t entry, p, projected;
-    if (self->mdx->track[i].waiting_sync == FLAG_TRUE) continue;
-    if (self->mdx->track[i].counter < 0) continue;   /* finished */
-    projected = self->mdx->track[i].infinite_loop_times;
-    p = self->track_second_us[i] - self->track_first_us[i];
-    if (self->track_second_us[i] != 0 && p > 0) {
-      /* The count at the first of this track's boundaries at or after the
-         section end -- the moment its own counter would read that value, and
-         so the earliest the counter can carry the engine past the limit. */
-      entry = self->track_first_us[i] - p;   /* where this track's loop began */
-      projected = mdx_ceil_div(end - entry, p);
-      if (projected < 0) projected = 0;
-    }
-    if (limit == 0 || projected < limit) limit = projected;
-  }
-
-  return (int)limit;
-}
-
-/* How many per-track counts make one joint section: the smallest L / p over the
-   looping tracks, which is L / pmax. 1 when every track shares a period, so the
-   caller can express a floor in joint sections. 0 with no usable region. */
-int
-mdx_parse_mml_get_loops_per_section(void* in_self)
-{
-  mdxmml_ym2151_instances *self = (mdxmml_ym2151_instances *)in_self;
-
-  if (!self) return 0;
-  if (self->loop_region_bad) return 0;
-  return self->loops_per_section;
-}
-
-
-
 
 /* ------------------------------------------------------------------ */
 

@@ -27,7 +27,7 @@ more than once, so treat them as habits, not as things to remember.
 | `H=ref; git show $H:src/f.js` | `git show "${H}:src/f.js"` | `bad substitution` (`$H:s` reads as a *modifier*) |
 | `grep -rn pat src --include=*.js` | `grep -rn pat src --include='*.js'` | `no matches found: --include=*.js` |
 | `for f in $(ls …)` | `find … -print0 \| xargs -0`, or quote | paths with spaces split |
-| `kill $pids` with several pids | `for p in $pids; do kill -KILL "$p"; done` | silently kills nothing |
+| `kill $pids` with several pids | `printf '%s\n' $pids \| xargs -r kill -9` | silently kills nothing — and note the fix this table used to give, `for p in $pids; do kill -KILL "$p"; done`, is zsh's *other* trap: an unquoted variable is ONE word, so a list read from `$(…)` never splits and every `kill` fails while the loop reads right |
 | `pkill -f some-pattern` | kill explicit PIDs from `ps` | matches the shell running it |
 
 And the Node rule outranks all of it: export
@@ -2501,6 +2501,16 @@ on 3000, `node server/index.js` on 8080) whose parents had been killed. A fresh
 ss -ltnp | grep -E ':(3000|8080)'                               # kill those PIDs
 curl -s -o /dev/null -w '%{http_code}\n' mms-1:8080/browse/mdx  # the HTML route, not just /api
 ```
+**Count the TREES, not just the ports (2026-10-16).** Killing the port owners is
+not enough when an *older* `npm run dev` is still alive: its WDS/API may have died
+(it could not bind), but its `node --watch` survives and grabs 8080 the instant it
+frees — so a "fresh" tree loses the race and proxies to the broken one, and the
+port PIDs you then find are not the tree you killed. There were **two** extra trees
+here, 3.5 h and 35 min old, before a restart finally stuck. Kill by process, in a
+retry loop, and verify both: `ps -eo pid,cmd | grep -E 'npm run dev|concurrently|
+scripts/start\.js|--watch server'` (must be empty) and `ss -ltn | grep -cE
+':(3000|8080)'` (must be 0) *before* starting one. Use the `xargs` kill above; the
+`for p in $pids` form silently kills nothing under zsh and the loop reports success.
 
 **The DEV-region stripper's non-JS check is a compile now (fixed 2026-10-16,
 `ad7936197`).** It used to count only **open braces** — `tr -cd '{' | wc -c` over

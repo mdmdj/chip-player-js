@@ -179,6 +179,52 @@ and it keeps the wrap consistent with the expansion.
 A composer who needs the loop to re-enter a known state writes that state inside
 the loop, which is what "authored to continue" (the `loopJump` comment) means.
 
+## Documented, not fixed: the Web MIDI wrap moves the engine clock one look-ahead early (2026-10-16)
+
+greptile (`MIDIFilePlayer.js:607`, P2) reports that the Web MIDI wrap moves the
+displayed clock early — its example: `jumpMs=10000, endMs=20000,
+elapsedTime=19980` becomes `9980` "while the listener is still hearing 19980", so
+"the slider jumps before the loop finishes and briefly lands before the loop
+band". Suggested fix: keep a separate clock for display and for queueing.
+
+The mechanism is real; the magnitude is not. `processPlay` wraps inside its
+look-ahead window — `elapsedTime + BUFFER_AHEAD >= endMs` — so the clock lands
+`endMs - elapsedTime <= BUFFER_AHEAD` before the band end, i.e. **at most 33 ms
+of song time** (`BUFFER_AHEAD`), never the 10-second jump the example implies — the example's
+own numbers are the 20 ms case: `9980` is `jumpMs - (endMs - elapsedTime)` with
+`endMs - elapsedTime = 20`, not a ten-second move.
+
+Why it cannot be more: the wrap is what makes the *next* pass's events land on
+the original boundary. `loopJump` carries the signed overshoot
+(`elapsedTime = jumpMs + (elapsedTime - endMs)`), so a schedule computed
+afterwards maps the band-start event to `boundary`, not to "now". Clamping the
+clock instead (the obvious stateless repair) sends that event up to 33 ms early
+and shortens the loop by the same amount on every pass — a real musical error
+where the current behaviour has none. The synth path is exact either way: it
+wraps mid-batch (sub-millisecond `msPerBatch`) the moment `elapsedTime >= endMs`,
+so its clock never lands before the band.
+
+What actually reads the clock, surveyed:
+
+| consumer | effect |
+| --- | --- |
+| footer head (`AppFooter` → `getDisplayPositionMs`) | the fold shows `abs` inside the band, so at most one 100 ms poll can sample the pre-band `jumpMs - ε`; ≤0.33 % of a 10 s band |
+| piano-roll playhead (`App.js:1197` → `PianoRollEngine.getSmoothPositionMs`) | `rawPos` drops, and the existing rewind/loop branch snaps `smoothPos = rawPos` — the same wrap, ≤33 ms early |
+| media-session position, `Settings` readout, devtools/record shims | display values |
+| relative seek (`App.js:619`) | base is ≤33 ms behind; the seek itself is re-derived |
+| **audio** | nothing: Web MIDI sends absolute timestamps derived from the overshoot-carrying map, and the next pass's events are scheduled against the original boundary |
+
+So: display-only, bounded by one look-ahead window, below the resolution of a
+control the UI samples every 100 ms. The exact display needs a new "the clock has
+wrapped" flag on the engine plus resets on load/seek (the post-wrap window is
+indistinguishable from the first pass's last 33 ms by position alone), which is
+more mechanism than a sub-poll artifact justifies. Verdict recorded per the
+review-finding bar in `AGENTS.md` ("audio, or a control beyond its own
+resolution").
+
+Revisit if `BUFFER_AHEAD` grows, or if the UI ever samples the position faster
+than the look-ahead — then the pre-band sample becomes reachable on purpose.
+
 ## How to regenerate the inventory
 
 A scanner was used to produce the table above (parse each file with the repo's

@@ -319,6 +319,7 @@ const ccAt = (delta, controller, value = 0) => ({ delta, bytes: [0xb0, controlle
 const noteOnAt = (delta, channel = 0, pitch = 60, velocity = 100) =>
   ({ delta, bytes: [0x90 | channel, pitch, velocity] });
 const noteOffAt = (delta, channel = 0, pitch = 60) => ({ delta, bytes: [0x80 | channel, pitch, 0] });
+const programChangeAt = (delta, channel = 0, program = 0) => ({ delta, bytes: [0xc0 | channel, program] });
 
 function parseBytes(bytes) {
   return new MIDIFile(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
@@ -959,6 +960,56 @@ check('Repeat One Web MIDI: the next pass is queued from inside the look-ahead w
   const ts = Math.max(...sends.map(s => s[1]));
   assert.ok(ts - now > 5 && ts - now <= 33,
     `band-start event scheduled ${(ts - now).toFixed(1)}ms out, expected the boundary at ~20ms`);
+});
+
+// The wrap's own messages -- the ringing-note cuts, the sustain release and the
+// restored state -- belong at the band end. The last event the scheduler sent
+// can sit a whole rest before it, so stamping them with lastSendTimestamp cuts
+// held notes and switches the sound while the pass is still playing out.
+check('Repeat One Web MIDI: the wrap cleanup lands on the band end, not the last event', () => {
+  const sends = [];
+  const p = new MIDIFilePlayer({
+    programChangeCb: () => {},
+    useWebMIDI: true,
+    output: { send: (message, timestamp) => sends.push([message, timestamp]) },
+    skipSilence: false,
+    sampleRate: 44100,
+    synth: stubSynth(true),
+  });
+  // Intro program 5, loop [2000, 4000], loop content in its first second: the
+  // last in-band event is a full second before the band ends.
+  const mf = parseBytes(buildMidi([
+    tempo(),
+    programChangeAt(0, 0, 5),
+    noteOnAt(0, 0, 64), noteOffAt(TPQ, 0, 64),
+    ccAt(TPQ * 3, 110),                        // loop start, tick 480
+    noteOnAt(0, 0, 72), noteOffAt(TPQ, 0, 72), // loop content, ticks 480..600
+    ccAt(TPQ * 4, 111),                        // loop end, tick 960
+  ]));
+  p.load(mf, false);
+  assert.ok(p.loop, 'expected a loop region');
+  p.play(() => {});
+  p.setLooping(true);
+  const now = performance.now();
+  p.lastProcessPlayTimestamp = now;
+  p.elapsedTime = p.loop.endMs - 20; // the wrap fires inside the look-ahead window
+  p.position = p.loop.endIndex;
+  p.lastSendTimestamp = now - 1000; // the last event went out a second ago...
+  p.activeNotes.set(72, 1);         // ...leaving this note ringing across the seam
+  sends.length = 0;
+  p.processPlay();
+  const boundary = now + 20; // loop.endMs, 20ms out
+  const near = (ts) => Math.abs(ts - boundary) < 1;
+  const noteOff = sends.find(s => (s[0][0] & 0xf0) === 0x80 && s[0][1] === 72);
+  assert.ok(noteOff, 'the ringing note is cut at the wrap');
+  assert.ok(near(noteOff[1]),
+    `its note-off belongs at the band end (${boundary.toFixed(0)}), got ${noteOff[1].toFixed(0)}`);
+  const sustain = sends.find(s => (s[0][0] & 0xf0) === 0xb0 && s[0][1] === 64);
+  assert.ok(sustain && near(sustain[1]), 'the sustain release belongs at the band end');
+  const program = sends.find(s => (s[0][0] & 0xf0) === 0xc0);
+  assert.ok(program, 'the second pass restores its program');
+  assert.ok(near(program[1]),
+    `the restore belongs at the band end (${boundary.toFixed(0)}), got ${program[1].toFixed(0)}`);
 });
 
 console.log(`\n${passed} checks passed${process.exitCode ? ' (WITH FAILURES)' : ''}.`);

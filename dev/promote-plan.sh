@@ -62,10 +62,21 @@ strip_regions() {
   '
 }
 
-# After stripping, the result must still parse. A region that unbalances a
-# brace or a paren produces a file that is wrong but still commits; the only
+# After stripping, the result must still parse / compile. A region that removes
+# a brace or a paren produces a file that is wrong but still commits; the only
 # cheap guard is to ask the language. Anything we cannot check is reported
 # rather than assumed fine.
+#
+# JS goes through node --check, with @babel/core's parser (jsx plugin) as the
+# fallback, because node --check rejects JSX outright and several src/ files use
+# it.
+#
+# C/C++ is COMPILED (-fsyntax-only). A DEV region in C is normally a whole
+# function, which is brace-BALANCED but changes the open-brace *count* when
+# removed. Counting braces therefore rejected exactly the normal shape, while a
+# region that really broke the file (it removed a semicolon, say) left the count
+# untouched and slipped through. The compiler can tell the two apart; a count
+# cannot.
 # Parse a .js file that may contain JSX, which node --check rejects outright.
 parses_as_jsx() {
   node -e '
@@ -75,6 +86,41 @@ parses_as_jsx() {
       parserOpts: { plugins: ["jsx"] },
     });
   ' "$1" >/dev/null 2>&1
+}
+
+# A C/C++ front end for this extension, or non-zero when none is installed. cc
+# first, matching dev/mdx-native's native build (whose emscripten.h stub
+# satisfies mdxmini's unconditional include); emcc is the fallback, since it
+# supplies <emscripten.h> itself.
+c_compiler() { # ext
+  local c
+  case "$1" in
+    c++|cc|cpp|cxx|hpp|hh|hxx)
+      for c in c++ g++ clang++ em++; do command -v "$c" >/dev/null 2>&1 && { echo "$c"; return 0; }; done ;;
+    *)
+      for c in cc gcc clang emcc; do command -v "$c" >/dev/null 2>&1 && { echo "$c"; return 0; }; done ;;
+  esac
+  return 1
+}
+
+# Compile the stripped text to a syntax check. The temp file keeps the source's
+# basename (so the compiler reports the real name and picks the right front end
+# from the extension), and -I its original directory resolves quoted includes.
+check_compiles() { # file stripped
+  local file="$1" stripped="$2" cc
+  cc="$(c_compiler "${file##*.}")" || {
+    echo "promote: no C/C++ compiler found to validate $file" >&2
+    return 1
+  }
+  local -a inc=(-I "$(dirname "$file")")
+  # mdxmini includes <emscripten.h> unconditionally; the native stub here
+  # satisfies a plain cc. emcc brings its own, but the extra -I is harmless.
+  if [ -d dev/mdx-native ]; then inc+=(-I dev/mdx-native); fi
+  if ! "$cc" -fsyntax-only -Wno-unknown-pragmas "${inc[@]}" "$stripped" 2>"$TMPDIR_P/cc.err"; then
+    echo "promote: $file does not compile after stripping DEV regions" >&2
+    head -5 "$TMPDIR_P/cc.err" >&2
+    return 1
+  fi
 }
 
 check_syntax() {
@@ -90,15 +136,15 @@ check_syntax() {
         return 1
       fi
       ;;
+    *.c|*.cc|*.cpp|*.cxx|*.h|*.hpp|*.hh|*.hxx)
+      check_compiles "$file" "$stripped" || return 1
+      ;;
     *)
-      : # no cheap syntax check for this language; brace balance is all we get
-      local before after
-      before="$(git show "HEAD:$file" | tr -cd '{' | wc -c)"
-      after="$(tr -cd '{' < "$stripped" | wc -c)"
-      if [ "$before" != "$after" ]; then
-        echo "promote: $file loses {braces} when DEV regions are stripped" >&2
-        return 1
-      fi
+      # No compiler for this language means we cannot tell whether stripping
+      # broke the file, and a silent accept could commit the break. Refuse and
+      # say why rather than fall back to a check we know is unsound.
+      echo "promote: no syntax check for $file; refusing to promote it unvalidated" >&2
+      return 1
       ;;
   esac
 }
@@ -106,8 +152,11 @@ check_syntax() {
 plan=()
 unbalanced=()
 unsound=()
-TMPFILE="$(mktemp --suffix=.js)"
-trap 'rm -f "$TMPFILE"' EXIT
+# One temp dir: the stripped file keeps the source basename so the right front
+# end (and a real name in compiler messages) is used, and cc.err holds the last
+# compiler output.
+TMPDIR_P="$(mktemp -d)"
+trap 'rm -rf "$TMPDIR_P"' EXIT
 for f in "${CANDIDATES[@]}"; do
   [ -e "$f" ] || continue
   # Balanced sentinel check, using the same anchoring as the strip itself --
@@ -124,8 +173,8 @@ for f in "${CANDIDATES[@]}"; do
   if git show "HEAD:$f" | strip_regions | diff -q - <(git show "$FEATURE:$f" 2>/dev/null) >/dev/null 2>&1; then
     continue  # nothing but dev regions differ
   fi
-  git show "HEAD:$f" | strip_regions > "$TMPFILE"
-  if ! check_syntax "$f" "$TMPFILE"; then
+  git show "HEAD:$f" | strip_regions > "$TMPDIR_P/$(basename "$f")"
+  if ! check_syntax "$f" "$TMPDIR_P/$(basename "$f")"; then
     unsound+=("$f")
     continue
   fi
@@ -150,5 +199,5 @@ if [ ${#unsound[@]} -gt 0 ]; then
   echo
   echo "ERROR (stripping DEV regions does not produce a valid file):"
   printf '  %s\n' "${unsound[@]}"
-  die "a dev region is unbalancing the file; promoting it would commit broken code"
+  die "a dev region breaks the file when stripped; promoting it would commit broken code"
 fi

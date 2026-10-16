@@ -305,7 +305,12 @@ const chipModules = [
   },
   {
     name: 'gsf',
-    enabled: true,
+    // Upstream's Game Boy Advance core (merged in from master) is a sibling this
+    // checkout does not keep. Enable it when `../libgsf` is built; otherwise skip
+    // the engine rather than fail the whole build. Dev-only concession: this file
+    // is in promote-paths.txt and never promotes, so upstream's copy keeps
+    // `enabled: true` and builds GSF wherever the sibling exists.
+    enabled: fs.existsSync(__dirname + '/../libgsf/build/libviogsf.a'),
     sourceFiles: [
       '../libgsf/build/libviogsf.a',
       'src/bindings/gsf-wrapper.cpp',

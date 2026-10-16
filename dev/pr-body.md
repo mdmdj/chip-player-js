@@ -4,7 +4,7 @@ A file that holds several songs (NSF/NSFE, SID, GBS, AY) becomes a **song folder
 
 **Sub-tunes** are each their own song (`{path, sub-tune}`), with its own favorites, share link, chart rank, shuffle slot, search hit, and SEO page; local files get the same treatment, read from their own header.
 
-**Repeat One** is improved: native region looping where the engine exposes one (VGM/VGZ, MDX, MIDI, MOD/XM/IT/S3M), an ending detector where it doesn't (NSFE, SID, N64), a drawn loop band, and no jumps when toggling.
+**Repeat One** is improved: native region looping where the engine exposes one (VGM/VGZ, MDX, MOD/XM/IT/S3M), file-region looping for the SoundFont MIDI sets (the file's own CC 102/103 or CC 110/111 markers, expanded in JS — a synth engine has no loop of its own), an ending detector where it doesn't (NSFE, SID, N64), a drawn loop band, and no jumps when toggling.
 
 **Full write-up with video for every behaviour: https://mdm.dj/dev/chip-player-js/subtunes-as-first-class/**
 

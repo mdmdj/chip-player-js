@@ -487,6 +487,14 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
     user-supplied catalog: an N64 CC102/103 pair, a paired marker too short to be
     a region, a lone CC111, post-loop padding with and without notes, a markerless
     file under repeat one, and the format-2 no-band rule with a format-1 guard.
+  - `catalog/midi/tempo_stress/` — the loop+tempo fixtures: `1_basic`
+    (150→60→40→30, one change per bar), `3_trailing` (plus a 200 BPM event at the
+    final tick), `4_gradual` (12 changes, one per beat), `5_all`, and `2_markers`,
+    with loop-marked copies under `loop/` for each marker convention the app
+    reads (CC102/103, CC110/111, lone CC103, lone CC111) plus a
+    conductor-note control. They are not a SoundFont set, so they play through
+    once — unless the stripped DEV region in `usesTrackLoops()` is toggled:
+    `localStorage.cpDevExpandTempoStress = '1'`, then reload.
   - `node dev/test-end-detector.js` — the shared `EndDetector` as used by SID,
     N64 and GSF: trip gate, level+stillness rule, muted voices, restart
     re-arming, N64's config-default length for untagged `.miniusf`, GSF's
@@ -2398,16 +2406,24 @@ only armed when `silenceDuration >= 0`, and both arms must end the song):
   approximate; anything earlier stays gated so quiet intros can't false-fire)
   (probed: bodies 0.03-0.16 mean-abs, tails ≤0.0012) — pure JS, no wasm change.
 - **MIDI:** CC 102/103 region (N64; start left implicit at 0, count ignored)
-  and CC 110/111 (HMI Descent loop track), honored for every file whose
-  markers exist — not just the SoundFont MIDI path. Parsed at load time in
+  and CC 110/111 (HMI Descent loop track). **Detection and expansion are
+  separate**: `findLoopRange` reads the region from any file, but the two-pass
+  expansion is opt-in via `usesTrackLoops(filepath)` — the SoundFont MIDI sets,
+  the gate `master` already had — and the piano roll keys off the *same*
+  predicate (`parseMidiData(buffer, useTrackLoops)`, `Visualizer` derives it from
+  `songPath`), so the roll expands exactly when the audio does and a
+  marker-bearing file elsewhere plays through once. Parsed at load time in
   `midi-helpers` (`findLoopRange` + two-pass `getLoopedEvents`, same shape as
   a two-pass libvgm track), so no catalog work was needed. Repeat One wraps
   the JS event loop to the second-pass start with ringing-note cutoff and
   silent state restore (no panic); the head folds into the band via the
   shared `getLoopBandMs`, with no fade tail (past the band the song ends).
-  Lone CC111 (RPG Maker: loop to song end) expands the same way. Verified on
-  the catalog set (Mario Kart 64 *03 - 3 Raceways, Wario Stadium* [0, 72062],
-  Descent Game01 [100, 200194]) via
+  Lone CC111 (RPG Maker: loop to song end) expands the same way. The expansion
+  moves nothing: a post-loop event keeps its authored offset from the loop end
+  (so a Type-1 conductor's ending tempos keep their timing), and the song's end
+  is the last *note* event, not trailing meta/cleanup (`getLoopedEvents`).
+  Verified on the catalog set (the N64 SoundFont sets: Mario Kart 64 *03 - 3
+  Raceways, Wario Stadium* [0, 72062]) via
   `dev/test-midi-loops.js` (in `dev/run-tests.sh`), which also *builds* minimal
   SMFs for the edge shapes so they do not need a catalog file. **Format 2 (async
   patterns, no shared timeline) gets no band at all** — the expansion is skipped
@@ -2421,10 +2437,10 @@ only armed when `silenceDuration >= 0`, and both arms must end the song):
   the same expanded list (`MIDIFile.getPlaybackEvents`, shared with the
   audio engine), so it stays populated through the second pass and across
   Repeat-One wraps instead of ending at the first loop point. Post-loop
-  content with no notes (controller cleanup, converter track padding like
-  Gyrocopter's END_OF_TRACK a full loop past the loop end) attaches at the
-  loop end instead of inflating the duration with dead air; a composed
-  ending with notes keeps its exact timing.
+  content keeps its authored position and the song's end is the last *note*
+  event, so converter track padding (Gyrocopter's END_OF_TRACK a full loop past
+  the loop end) does not inflate the duration and a composed ending with notes
+  keeps its exact timing.
 - **MDX:** native infinite loop + exact region (see the MDX subsection above);
   seamless, with a slider band.
 - **XMP (MOD/XM/IT/S3M):** native loop count (`xmp_play_buffer`'s loop

@@ -491,10 +491,15 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
     (150→60→40→30, one change per bar), `3_trailing` (plus a 200 BPM event at the
     final tick), `4_gradual` (12 changes, one per beat), `5_all`, and `2_markers`,
     with loop-marked copies under `loop/` for each marker convention the app
-    reads (CC102/103, CC110/111, lone CC103, lone CC111) plus a
-    conductor-note control. They are not a SoundFont set, so they play through
-    once — unless the stripped DEV region in `usesTrackLoops()` is toggled:
-    `localStorage.cpDevExpandTempoStress = '1'`, then reload.
+    reads: a paired `CC102/103`, a paired `CC110/111`, a `CC103`-only implicit
+    start, and a lone-`CC111` **RPG-Maker** file (`*.rpgmaker.mid`) — that one
+    has no partner, so it reads as "loop from here to the song end": its region
+    is the *ending* section, which exercises the RPG-Maker path rather than the
+    loop+tempo one. Plus a conductor-note control. They are not a SoundFont set,
+    so they exercise the default path (region detected, Repeat One wraps the
+    single pass) unless the stripped DEV region in `usesTrackLoops()` is toggled:
+    `localStorage.cpDevExpandTempoStress = '1'`, then reload — which adds the
+    two-pass expansion for the piano roll.
   - `node dev/test-end-detector.js` — the shared `EndDetector` as used by SID,
     N64 and GSF: trip gate, level+stillness rule, muted voices, restart
     re-arming, N64's config-default length for untagged `.miniusf`, GSF's

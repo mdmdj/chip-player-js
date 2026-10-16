@@ -55,6 +55,7 @@ redaxios.get = () => Promise.resolve({ status: 404, data: {} });
 
 const SIDPlayer = require('../src/players/SIDPlayer').default;
 const N64Player = require('../src/players/N64Player').default;
+const GSFPlayer = require('../src/players/GSFPlayer').default;
 const EndDetector = require('../src/players/EndDetector').default;
 
 const SAMPLE_RATE = 44100;
@@ -223,6 +224,50 @@ async function makeN64Player(coreOpts) {
   return { p, core };
 }
 
+// GSF shares the detector and taps its converted float channels like N64. Its
+// driver has no loop region (MP2K loops internally), so the engine flag is what
+// free-runs it and the detector is what re-runs a one-shot that has gone quiet.
+function makeGSFCore({ durationMs = 30000, level = MUSIC_LEVEL } = {}) {
+  const heap = new ArrayBuffer(1 << 20);
+  const state = { positionMs: 0, durationMs, level, seeks: [], zeroSeeks: 0, indefinite: null };
+  const core = {
+    FS: {
+      filesystems: { IDBFS: {} },
+      mkdirTree: () => {},
+      mount: () => {},
+    },
+    HEAPU8: new Uint8Array(heap),
+    HEAPF32: new Float32Array(heap),
+    UTF8ToString: () => 8,
+    _malloc: (n) => { const p = nextPtr; nextPtr += n * 4 + 64; return p; },
+    _free: () => {},
+    getValue: () => Math.round(state.level * 32767),
+    _gsf_render_audio: () => { state.positionMs += STEP_MS; return BUFFER_SIZE; },
+    _gsf_get_position_ms: () => Math.round(state.positionMs),
+    _gsf_get_duration_ms: () => state.durationMs,
+    _gsf_set_indefinite_playback: (v) => { state.indefinite = !!v; },
+    _gsf_get_indefinite_playback: () => state.indefinite,
+    _gsf_get_driver_type: () => 0,
+    _gsf_set_channel_mask: () => {},
+    _gsf_get_channel_mask: () => 0,
+    // A seek-to-0 is how the tail restart shows up on the engine side.
+    _gsf_seek_ms: (ms) => { state.seeks.push(ms); if (ms === 0) state.zeroSeeks++; state.positionMs = ms; },
+    _gsf_shutdown: () => {},
+  };
+  core.state = state;
+  return core;
+}
+
+function makeGSFPlayer(coreOpts) {
+  const core = makeGSFCore(coreOpts);
+  const p = new GSFPlayer(core, SAMPLE_RATE, BUFFER_SIZE);
+  p.audioNode = { context: { state: 'suspended' } };
+  p.setParameter('detectSongEnd', true);
+  p.setParameter('indefinitePlayback', false);
+  p.resume(); // loadData() does this; the stubbed player skips the load.
+  return { p, core };
+}
+
 let passed = 0;
 let xfailed = 0;
 async function check(name, fn) {
@@ -380,6 +425,77 @@ async function main() {
     assert.strictEqual(core.state.indefinite, true,
       'OR-ed from repeat one, so looping tracks free-run instead of fading');
     assert.strictEqual(p.isPlayingIndefinitely(), true);
+  });
+
+  await check('GSF repeat one reaches the engine as indefinite playback', async () => {
+    const { p, core } = makeGSFPlayer({ durationMs: 60000 });
+    p.setLooping(false);
+    assert.strictEqual(core.state.indefinite, false);
+    p.setLooping(true);
+    assert.strictEqual(core.state.indefinite, true,
+      'OR-ed from repeat one, so the driver free-runs instead of fading out');
+    assert.strictEqual(p.isPlayingIndefinitely(), true);
+    // The setting alone must hold it too, with repeat off.
+    p.setLooping(false);
+    p.setParameter('indefinitePlayback', true);
+    assert.strictEqual(core.state.indefinite, true, 'the setting owns indefinite playback');
+    assert.strictEqual(p.isPlayingIndefinitely(), true);
+  });
+
+  await check('GSF a quiet static tail under repeat one restarts the tune', async () => {
+    const { p, core } = makeGSFPlayer({ durationMs: 20000 });
+    p.setLooping(true);
+    runN64(p, core, [[MUSIC_LEVEL, 15], ...Array(7).fill(second(TAIL_LEVEL))]);
+    assert.ok(core.state.zeroSeeks >= 1, 'the tail is detected and the tune re-run');
+    assert.strictEqual(p.stopped, false, 'repeat one keeps it playing');
+  });
+
+  await check('GSF the tail restart lands synchronously', async () => {
+    const { p, core } = makeGSFPlayer({ durationMs: 20000 });
+    p.setLooping(true);
+    // A running context makes muteAudioDuringCall() await suspend() before its
+    // callback; suspend never resolves here, so a restart routed through seekMs()
+    // would never reach the engine (the re-render would read the tail again).
+    p.audioNode = {
+      context: { state: 'running', suspend: () => new Promise(() => {}), resume: () => Promise.resolve() },
+    };
+    runN64(p, core, [[MUSIC_LEVEL, 15], ...Array(7).fill(second(TAIL_LEVEL))]);
+    assert.ok(core.state.zeroSeeks >= 1, 'seek-to-0 happens before the re-render');
+  });
+
+  await check('GSF a tail before the trip window is ignored', async () => {
+    const { p, core } = makeGSFPlayer({ durationMs: 600000 });
+    p.setLooping(true);
+    runN64(p, core, [[MUSIC_LEVEL, 2], ...Array(9).fill(second(TAIL_LEVEL))]);
+    assert.strictEqual(core.state.zeroSeeks, 0,
+      'a quiet intro far from the listed end must stay gated');
+  });
+
+  await check('GSF repeat off: a silent tail is not restarted', async () => {
+    const { p, core } = makeGSFPlayer({ durationMs: 20000 });
+    p.setLooping(false);
+    runN64(p, core, [[MUSIC_LEVEL, 15], ...Array(7).fill(second(TAIL_LEVEL))]);
+    assert.strictEqual(core.state.zeroSeeks, 0, 'the detector is indefinite-playback only');
+  });
+
+  await check('GSF the detectSongEnd toggle keeps the detector out of the way', async () => {
+    const { p, core } = makeGSFPlayer({ durationMs: 20000 });
+    p.setLooping(true);
+    p.setParameter('detectSongEnd', false);
+    runN64(p, core, [[MUSIC_LEVEL, 15], ...Array(8).fill(second(TAIL_LEVEL))]);
+    assert.strictEqual(core.state.zeroSeeks, 0, 'toggle off means no tail restart');
+  });
+
+  await check('GSF a seek resets the detector window', async () => {
+    const { p, core } = makeGSFPlayer({ durationMs: 20000 });
+    p.setLooping(true);
+    // Nearly a full window of tail, then a seek, then the rest of the window:
+    // without the reset the two halves would add up and trip.
+    runN64(p, core, [[MUSIC_LEVEL, 15], ...Array(4).fill(second(TAIL_LEVEL))]);
+    assert.strictEqual(core.state.zeroSeeks, 0, 'not yet a full window');
+    p.seekMs(15000);
+    runN64(p, core, Array(4).fill(second(TAIL_LEVEL)));
+    assert.strictEqual(core.state.zeroSeeks, 0, 'the seek cleared the partial window');
   });
 
   await check('EndDetector: no player tuning uses the module defaults', async () => {

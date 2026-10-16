@@ -5,6 +5,7 @@
 #
 # The large engines are sibling checkouts, as README.md describes --
 # ../libvgm, ../libxmp, ../FluidLite, ../game-music-emu (clone them first).
+# ../libgsf (joshbarrass/viogsf, the GBA core) is a sibling too.
 # libADLMIDI, psflib and lazyusf2 remain vendored in-repo and are built here.
 # Each subproject is built to the exact static library path build-chip-core.js
 # expects.
@@ -185,7 +186,27 @@ build_lazyusf2() {
   echo "   -> lazyusf2/build/liblazyusf2.a"
 }
 
-for name in gme libADLMIDI libxmp libvgm fluidlite psflib lazyusf2; do
+build_viogsf() {
+  echo "== viogsf (GSF / Game Boy Advance core) =="
+  # Upstream's GBA core is joshbarrass/viogsf, cloned as the sibling ../libgsf
+  # (see README.md). Built with the README's plain emcmake/emmake recipe -- no
+  # -Oz/-flto, for the same C++-object-model reason libADLMIDI avoids LTO -- with
+  # one deviation: newer clang rejects VBA-M's i386-only
+  # __attribute__((regparm(n))) outright, so we force-include a compat header
+  # that defines it away rather than patch the sibling (never edit a sibling).
+  [ -d "$ROOT/../libgsf" ] || { echo "   ! ../libgsf missing: git clone https://github.com/joshbarrass/viogsf.git libgsf"; return 0; }
+  rm -rf "$ROOT/../libgsf/build"
+  mkdir -p "$ROOT/../libgsf/build"
+  local compat="$ROOT/dev/emscripten-compat/regparm.h"
+  (
+    cd "$ROOT/../libgsf/build"
+    CXXFLAGS="-include $compat" emcmake cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5 .. >/dev/null
+    CXXFLAGS="-include $compat" emmake make -j"$(nproc)"
+  )
+  echo "   -> libgsf/build/libviogsf.a"
+}
+
+for name in gme libADLMIDI libxmp libvgm fluidlite psflib lazyusf2 viogsf; do
   want "$name" && "build_$name"
 done
 

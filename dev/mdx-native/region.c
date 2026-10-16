@@ -56,6 +56,7 @@
 static int play_ms = 0;
 static int limit_arg = 0;
 static int len_check_limit = 0;
+static int no_onset = 0;
 
 /* One rendered block (mdx_calc_sample's 1024 samples): its position on the
  * engine clock and its RMS. The fade is a gain on every sample, so the RMS
@@ -103,9 +104,18 @@ static int fade_onset_ms(const char *path, const char *dir, blk *fb, int fn, lon
   mdx_get_length(&r);
   render(&r, &rb, &rn, &rcap, bound, 0);
   int onset = -1;
+  double peak = 0;
+  for (i = 0; i < fn && i < rn; i++) {
+    if (rb[i].ms != fb[i].ms) break;
+    if (rb[i].lvl > peak) peak = rb[i].lvl;
+  }
   for (i = 0; i < fn && i < rn; i++) {
     if (rb[i].ms != fb[i].ms) break;   /* the fade run ended: the clocks diverge */
-    if (rb[i].lvl < 5.0) continue;     /* reference near silence: ratio meaningless */
+    /* A floor relative to this file's own level, so a quiet file is still
+       conclusive: the ratio is the engine's gain either way, but dividing by a
+       near-silent reference is noise. An absolute floor made most of the corpus
+       report "no onset", which reads as "no deviation". */
+    if (rb[i].lvl < 0.02 * peak) continue;
     if (fb[i].lvl / rb[i].lvl < 0.96) { onset = fb[i].ms; break; }
   }
   free(rb);
@@ -215,7 +225,12 @@ static void one(const char *path) {
       long bound = section_end > 0 ? section_end + 20000 : played + 900;
       render(&d, &fb, &fn, &fcap, bound, apply);
       ended = d.mdx ? (int)(d.mdx->elapsed_time / 1000) : 0;
-      fade_onset = fade_onset_ms(path, dir, fb, fn, bound);
+      /* --no-onset skips the reference render (half the cost) for corpus
+         sweeps that only need `ended`: the engine stops a whole section early
+         when the gate overcounts, and it can never stop before section_end
+         otherwise, so `ended < section_end` is the signature with no false
+         positives and no dependence on the file's level. */
+      if (!no_onset) fade_onset = fade_onset_ms(path, dir, fb, fn, bound);
     }
     free(fb);
   }
@@ -231,6 +246,7 @@ int main(int argc, char **argv) {
   for (i = 1; i < argc; i++) {
     if (!strcmp(argv[i], "--play")) play_ms = atoi(argv[++i]);
     else if (!strcmp(argv[i], "--limit")) limit_arg = atoi(argv[++i]);
+    else if (!strcmp(argv[i], "--no-onset")) no_onset = 1;
     else if (!strcmp(argv[i], "--length-check")) len_check_limit = atoi(argv[++i]);
     else { fprintf(stderr, "region: unknown argument %s\n", argv[i]); return 2; }
   }

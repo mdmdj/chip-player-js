@@ -346,8 +346,7 @@ class EventIterator {
 // once. Both the audio player and the piano roll key off this one predicate, so
 // the roll expands exactly when the audio does.
 export function usesTrackLoops(filepath) {
-  if (!filepath) return false;
-  return filepath.includes('SoundFont MIDI');
+  return !!filepath && filepath.includes('SoundFont MIDI');
 }
 
 // The event list playback actually renders — and the piano roll must show:
@@ -356,20 +355,12 @@ export function usesTrackLoops(filepath) {
 // can never disagree about what the song contains.
 MIDIFile.prototype.getPlaybackEvents = function (useTrackLoops = false) {
   const tracks = this.tracks.map((_, i) => this.getTrackEvents(i));
-  const range = this.findLoopRange(tracks);
-  // The gate the end rule's policy may key off (see endRule.endLayersFor). It is
-  // remembered so the no-range path -- this.getEvents(), whose patch applies the
-  // same rule -- sees the same condition.
-  this._useTrackLoops = !!useTrackLoops;
-  const layers = endLayersFor({ useTrackLoops });
-  // The loop region is *always* detected; the expansion is the opt-in. Without
-  // it the list is the file's own timeline -- one pass -- and the player wraps
-  // it itself (see MIDIFilePlayer.load); with it, intro + two passes, so the
-  // piano roll can draw across the seam. Both report the region.
-  if (!range) {
+  // Expansion is opt-in, not marker-triggered: findLoopRange only supplies the
+  // region to loop over. Files that do not opt in play exactly once.
+  if (!useTrackLoops) {
     return { events: this.getEvents(), loopStartMs: null, loopEndMs: null };
   }
-  return this.getLoopedEvents(tracks, useTrackLoops ? 2 : 1, range, layers);
+  return this.getLoopedEvents(tracks, 2, this.findLoopRange(tracks));
 };
 
 // Monkey patch MIDIFile class.

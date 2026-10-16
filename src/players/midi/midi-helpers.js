@@ -1,55 +1,390 @@
 import MIDIEvents from './MIDIEvents';
 import MIDIFile from './MIDIFile';
-const { EVENT_MIDI, EVENT_MIDI_CONTROLLER } = MIDIEvents;
+const { EVENT_MIDI, EVENT_MIDI_CONTROLLER, EVENT_MIDI_NOTE_ON, EVENT_MIDI_NOTE_OFF } = MIDIEvents;
 
 const CC_64_SUSTAIN = 64;
+// Loop-point controllers. N64 marks a CC102 (start) / CC103 (end) pair on
+// every track (CC104/105 counts are ignored -- Repeat One loops forever and
+// repeat-off plays the two expanded passes, the two-pass libvgm compromise);
+// HMI (Descent) marks one loop track with CC110/CC111 (others carry CC108
+// alignment marks); a lone CC111 is the RPG Maker convention (loop to the end).
 const CC_102_TRACK_LOOP_START = 102;
 const CC_103_TRACK_LOOP_END = 103;
+const CC_110_HMI_LOOP_START = 110;
+const CC_111_LOOP_END = 111;
 const CC_123_ALL_NOTES_OFF = 123;
 
-class EventIterator {
-  constructor(events) {
-    this.events = events;
-    this.curEvent = events[0];
-    this.pos = 0;
-    this.loopStartPos = null;
-    this.elapsedLoops = 0;
-    this.curTick = 0;
+// Backstop for the merged event list, so a pathological file cannot exhaust
+// memory in the browser: at a few hundred bytes per event this is around half a
+// gigabyte of them. A MIDI runs about four bytes per event, so crossing it takes
+// roughly 2 MB of file inside the loop. It never truncates -- the loop region is
+// dropped and the song plays through once, the shape a file with no markers gives.
+const MAX_MERGED_EVENTS = 1000000;
+
+function isLoopStartCC(cc) {
+  return cc === CC_102_TRACK_LOOP_START || cc === CC_110_HMI_LOOP_START;
+}
+
+function isLoopEndCC(cc) {
+  return cc === CC_103_TRACK_LOOP_END || cc === CC_111_LOOP_END;
+}
+
+function isLoopEvent(event) {
+  return event.type === EVENT_MIDI && event.subtype === EVENT_MIDI_CONTROLLER &&
+    (isLoopStartCC(event.param1) || isLoopEndCC(event.param1));
+}
+
+// The loop region is global to the song: HMI defines it once on its loop
+// track while every other track just plays through it, and N64 sequences
+// repeat the same range on every track. So resolve one absolute-tick range
+// up front instead of looping each track on its own markers.
+//
+// Returns {startTick, endTick} (endTick null = RPG Maker style, loop runs to
+// the end of each track) or null when the file defines no loop.
+MIDIFile.prototype.findLoopRange = function (tracks) {
+  let tpq = 120;
+  try {
+    tpq = this.header.getTicksPerBeat();
+  } catch (e) {
+    // SMPTE timing has no ticks-per-beat; keep the fallback threshold below.
+  }
+  const starts = [];
+  const ends103 = [];
+  const ends111 = [];
+  for (const events of tracks) {
+    let tick = 0;
+    for (const event of events) {
+      if (!event) continue;
+      tick += event.delta || 0;
+      if (event.type === EVENT_MIDI && event.subtype === EVENT_MIDI_CONTROLLER) {
+        if (isLoopStartCC(event.param1)) {
+          starts.push(tick);
+        } else if (event.param1 === CC_103_TRACK_LOOP_END) {
+          ends103.push(tick);
+        } else if (event.param1 === CC_111_LOOP_END) {
+          ends111.push(tick);
+        }
+      }
+    }
   }
 
-  loop() {
-    // Sanity check
-    if (this.curTick < 1000000 && this.elapsedLoops < 1000) {
-      this.pos = this.loopStartPos;
-      console.debug('Channel %d looped at tick %d (loop %d completed)', this.curEvent.channel, this.curTick, this.elapsedLoops);
-      this.elapsedLoops++;
+  let startTick;
+  let endTick;
+  if (starts.length > 0) {
+    // Paired loop points (N64 or HMI): first end past the earliest start.
+    startTick = Math.min(...starts);
+    const ends = ends103.concat(ends111).filter(t => t > startTick);
+    if (!ends.length) return null;
+    endTick = Math.min(...ends);
+  } else if (ends103.length > 0) {
+    // N64 loop end with the start left implicit at 0 (plus a CC104 count).
+    startTick = 0;
+    endTick = Math.min(...ends103);
+  } else if (ends111.length > 0) {
+    // Lone CC111: RPG Maker loop start, running to the end of each track.
+    startTick = Math.min(...ends111);
+    endTick = null;
+  } else {
+    return null;
+  }
+
+  // A loop shorter than a beat is a marker, not a region (e.g. an RPG Maker
+  // "don't loop" jingle flag sitting at the very end of the song).
+  if (endTick != null && endTick - startTick < Math.max(24, Math.floor(tpq / 4))) {
+    return null;
+  }
+  return { startTick, endTick };
+};
+
+// The seam, in one place: a loop's own events re-establish its state, so the
+// iterator intervenes only where no event can -- notes still sounding at the
+// boundary (cut; for a pedal-sustained note that cut is a pedal lift, then the
+// pedal's own seam value is re-applied) -- and where the replay changes what time
+// means (the loop-start tempo latched and restored per pass, which is what gives
+// the replayed pass's events the right ms mapping). Transport policy is the
+// player's business.
+class EventIterator {
+  constructor(events, loop) {
+    // getTrackEvents can trail a null on empty tracks; drop it early so tick
+    // math below never sees it.
+    this.events = (events || []).filter(e => e != null);
+    this.loop = loop || null;
+    this.pos = 0;
+    this.elapsedLoops = 0;
+    this.curTick = 0;
+    // Passes of the loop segment still to play (first pass + repeats).
+    this.passesLeft = loop ? loop.maxLoops : 1;
+    this.absTicks = null;
+    this.startIdx = 0;
+    // Whether the track has real music (note-ons) past the loop end. A noteless
+    // outro (controller cleanup, END_OF_TRACK, converter padding) attaches at
+    // the loop end instead of extending the duration with dead air; a composed
+    // ending with notes keeps its exact timing.
+    this.postHasNotes = false;
+    this.postStarted = false;
+    // Tick shift owed to a skipped replay, applied to the next emitted event's
+    // delta (see next()).
+    this.pendingExtra = 0;
+    if (loop) {
+      // Absolute tick of each event, so the shared range cuts every track at
+      // the same musical point regardless of which track holds the markers.
+      this.absTicks = new Array(this.events.length);
+      let tick = 0;
+      for (let i = 0; i < this.events.length; i++) {
+        tick += this.events[i].delta || 0;
+        this.absTicks[i] = tick;
+      }
+      this.startIdx = this.absTicks.findIndex(t => t >= loop.startTick);
+      if (this.startIdx < 0) this.startIdx = this.events.length;
+      // Each completed pass ends one loop length further along the emitted
+      // timeline; rebaseReplay() uses this so a repeated segment keeps the beat
+      // instead of re-adding the gap from its pre-loop neighbor.
+      //
+      // With no end marker (a lone CC111: the RPG Maker loop-start convention)
+      // the loop runs to the end of the *song*, not this track's own end -- a
+      // part that ends early must keep its trailing silence and wait for the
+      // song end, or it repeats while the longer parts are still on their first
+      // pass. getLoopedEvents resolves that song-wide tick once (songEndTick).
+      const lastTick = this.absTicks.length ? this.absTicks[this.absTicks.length - 1] : 0;
+      const endTick = loop.endTick != null ? loop.endTick
+        : (loop.songEndTick != null ? loop.songEndTick : lastTick);
+      this.boundaryTick = endTick;
+      this.loopLength = endTick - loop.startTick;
+      this.replayDelta = null;
+      // A post-loop event that would otherwise inflate the duration (converter
+      // padding, END_OF_TRACK) is collapsed to the loop boundary -- unless the
+      // track has a real note-on after the loop end, which is a composed outro
+      // that keeps its exact timing.
+      //
+      // Decision (2026-10): a note that starts inside the loop and is released
+      // after it is cut at the seam. Its release is "noteless" (this only sees
+      // note-ons), so the collapse moves it to the boundary. That matches the
+      // DAW default -- Logic/Cubasis cut notes crossing a cycle, Ableton needs a
+      // manual wrap -- and it is the standard-safe choice: letting the note ring
+      // past the boundary would make the replay send a second NoteOn for a still
+      // sounding note, which the MIDI spec calls invalid. The composer should put
+      // the loop where voices resolve. See dev/MIDI_LOOP_TEST_GAPS.md. (The
+      // player's own loop wrap -- MIDIFilePlayer.loopJump -- also cuts any note
+      // still ringing at the seam, so the second pass never overlaps a held
+      // note; this collapse is what keeps the outro from inflating duration.)
+      if (loop.endTick != null) {
+        this.postHasNotes = this.events.some((e, idx) =>
+          this.absTicks[idx] > loop.endTick &&
+          e.type === EVENT_MIDI && e.subtype === EVENT_MIDI_NOTE_ON && e.param2 > 0);
+      }
+      // Notes that cross the seam, released at every replay boundary (see
+      // rebaseReplay). A release sitting past the loop end is still pending when
+      // the replay re-triggers the same pitch, and a second NoteOn for a
+      // sounding note is invalid; the noteless path gets the same cut for free
+      // when it collapses the outro, but a composed ending keeps its own timing,
+      // so the crossing notes have to be tracked and cut explicitly. Nothing is
+      // cut when the loop *plays out* into that ending -- there the release is
+      // the composer's, and the note rings on as written.
+      this.pendingReleases = null;
+      this.seamReleases = [];
+      // Channels whose sustain pedal is down at the seam, with the value it has:
+      // a note released while the pedal is down is gone from `ringing` but still
+      // sounds, so the seam has to lift the pedal as well (see rebaseReplay).
+      this.seamSustain = [];
+      const ringing = new Map();
+      const sustain = new Map();
+      for (let i = 0; i < this.events.length && this.absTicks[i] <= endTick; i++) {
+        const e = this.events[i];
+        if (e.type !== EVENT_MIDI) continue;
+        if (e.subtype === EVENT_MIDI_NOTE_ON && e.param2 > 0) {
+          ringing.set(`${e.channel}-${e.param1}`, { channel: e.channel, pitch: e.param1 });
+        } else if (e.subtype === EVENT_MIDI_NOTE_OFF ||
+                   (e.subtype === EVENT_MIDI_NOTE_ON && e.param2 === 0)) {
+          ringing.delete(`${e.channel}-${e.param1}`);
+        } else if (e.subtype === EVENT_MIDI_CONTROLLER && e.param1 === CC_64_SUSTAIN) {
+          sustain.set(e.channel, e.param2);
+        }
+      }
+      for (const note of ringing.values()) {
+        this.seamReleases.push({
+          delta: 0,
+          type: EVENT_MIDI,
+          subtype: EVENT_MIDI_NOTE_OFF,
+          channel: note.channel,
+          param1: note.pitch,
+          param2: 0,
+          absTick: endTick,
+        });
+      }
+      for (const [channel, value] of sustain) {
+        if (value >= 64) this.seamSustain.push({ channel, value });
+      }
     }
   }
 
   next() {
-    const event = this.events[this.pos++];
-    if (!event) return null;
-
-    this.curTick += event.delta;
-
-    if (event.type === EVENT_MIDI && event.subtype === EVENT_MIDI_CONTROLLER) {
-      if (event.param1 === CC_102_TRACK_LOOP_START) {
-        // console.log('loop start ch %d id %d', event.channel, event.param2);
-        this.loopStartPos = this.pos;
+    // A crossing note's release, queued by the replay that triggered it (see
+    // rebaseReplay), is emitted before the replayed pass resumes.
+    if (this.pendingReleases && this.pendingReleases.length) {
+      return this.pendingReleases.shift();
+    }
+    // A track that runs past the loop end — or ends exactly on it — replays
+    // the loop segment until its passes run out. Anything past the loop end
+    // then plays once as the outro.
+    if (this.loop && this.loop.endTick != null &&
+        (this.pos >= this.events.length || this.absTicks[this.pos] > this.loop.endTick)) {
+      if (this.passesLeft > 1 &&
+          this.startIdx < this.events.length &&
+          this.absTicks[this.startIdx] <= this.loop.endTick) {
+        this.passesLeft--;
+        this.elapsedLoops++;
+        this.rebaseReplay();
+        this.pos = this.startIdx;
+        // The releases queued by rebaseReplay come first: the replay's own
+        // events start on the following call, with replayDelta already set.
+        if (this.pendingReleases && this.pendingReleases.length) {
+          return this.pendingReleases.shift();
+        }
+      } else {
+        if (this.passesLeft > 1) {
+          // Nothing inside the loop to replay (this track's first event is past
+          // the loop end), but the passes still add time: shift the outro past
+          // them so it follows the loop instead of overlapping the last pass,
+          // and never duplicate it.
+          const extra = (this.passesLeft - 1) * this.loopLength;
+          this.pendingExtra = (this.pendingExtra || 0) + extra;
+          this.boundaryTick += extra;
+          this.elapsedLoops += this.passesLeft - 1;
+          this.passesLeft = 1;
+        }
+        if (this.pos >= this.events.length) {
+          return null;
+        } else if (!this.postHasNotes && !this.postStarted) {
+          // Noteless outro: attach it at the loop end (see postHasNotes), not at
+          // the preceding in-loop event's tick, so a replayed note rings to the
+          // boundary instead of being cut short.
+          this.postStarted = true;
+          const event = this.events[this.pos++];
+          if (!event) return null;
+          const delta = Math.max(0, this.boundaryTick - this.curTick);
+          this.pendingExtra = 0;
+          this.curTick += delta;
+          return { ...event, delta, absTick: this.absTicks[this.pos - 1] };
+        }
+        // Else fall through: the outro plays once, then the track ends.
       }
-      if (event.param1 === CC_103_TRACK_LOOP_END) {
-        // console.log('loop end  ch %d id %d', event.channel, event.param2);
-        this.loop();
+      // Else fall through: the outro plays once, then the track ends.
+    } else if (this.pos >= this.events.length) {
+      // RPG Maker style: the loop runs to the end of the track, so replay it.
+      if (this.loop && this.loop.endTick == null && this.passesLeft > 1 &&
+          this.startIdx < this.events.length) {
+        this.passesLeft--;
+        this.elapsedLoops++;
+        this.rebaseReplay();
+        this.pos = this.startIdx;
+        // The releases queued by rebaseReplay come first: the replay's own
+        // events start on the following call, with replayDelta already set.
+        if (this.pendingReleases && this.pendingReleases.length) {
+          return this.pendingReleases.shift();
+        }
+      } else {
+        return null;
       }
     }
 
+    const event = this.events[this.pos++];
+    if (!event) return null;
+
+    // The first event of a replayed pass carries the rebased delta, plus any
+    // shift owed to passes a loop-empty track skipped; every other event keeps
+    // its own delta.
+    // A noteless outro (see postHasNotes) collapses every event to the loop
+    // boundary: the first is rebased in next(), the rest get delta 0 here, so
+    // converter padding / END_OF_TRACK cannot leave a silent tail.
+    const delta = !this.postHasNotes && this.postStarted
+      ? 0
+      : (this.replayDelta != null ? this.replayDelta : event.delta) +
+        (this.pendingExtra || 0);
+    this.replayDelta = null;
+    this.pendingExtra = 0;
+    this.curTick += delta;
+
+    // Sanity cap; jumps are bounded by passesLeft so this is just insurance.
+    if (this.curTick > 100000000 || this.elapsedLoops > 1000) return null;
+
     // Return a copy because track consolidation will mutate the events.
-    return { ...event };
+    return { ...event, delta, absTick: this.absTicks ? this.absTicks[this.pos - 1] : null };
+  }
+
+  // Rebase the first event of a replayed pass onto the loop boundary (see
+  // next()). boundaryTick is where that pass ends; it advances one loop length
+  // per pass. The event's own delta would instead be the gap from its pre-loop
+  // neighbor, which shifts every repeat by that intro gap.
+  rebaseReplay() {
+    // The pass that just ended left its crossing notes sounding (seamReleases):
+    // release them at the boundary, before the replay re-triggers the same
+    // pitch. The first release carries the gap to the boundary, and the
+    // replay's own first event then starts one loop length from there -- where
+    // it would have started anyway -- so only the cut is new.
+    //
+    // A note released while the pedal was down is not in seamReleases (its
+    // NOTE_OFF already ran) but keeps sounding all the same, so the seam also
+    // lifts the pedal -- for the channels that had it down -- and re-arms it for
+    // the next pass. That is the pair loopJump() sends on the live wrap, and the
+    // two have to agree about what the seam sounds like: without the lift a
+    // sustained note runs into the second pass and overlaps its notes.
+    const gap = this.boundaryTick - this.curTick;
+    const replay = this.absTicks[this.startIdx] - this.loop.startTick;
+    const cuts = this.seamReleases ? this.seamReleases.slice() : [];
+    const pedal = (channel, param2) => ({
+      delta: 0,
+      type: EVENT_MIDI,
+      subtype: EVENT_MIDI_CONTROLLER,
+      channel,
+      param1: CC_64_SUSTAIN,
+      param2,
+      absTick: this.boundaryTick,
+    });
+    for (const held of this.seamSustain || []) {
+      cuts.push(pedal(held.channel, 0));
+    }
+    for (const held of this.seamSustain || []) {
+      cuts.push(pedal(held.channel, held.value));
+    }
+    if (cuts.length) {
+      this.pendingReleases = cuts.map((event, i) => ({ ...event, delta: i === 0 ? gap : 0 }));
+      // The releases are emitted at the boundary, so the emitted timeline
+      // reaches it: without this the *next* boundary would add this gap again
+      // (curTick is what the deltas are measured from).
+      this.curTick += gap;
+      this.replayDelta = replay;
+    } else {
+      this.replayDelta = gap + replay;
+    }
+    this.boundaryTick += this.loopLength;
   }
 }
 
+// The event list playback actually renders — and the piano roll must show:
+// loop files expand to intro + two passes, everything else merges once.
+// Single source of truth for the audio engine and the roll parser so the two
+// can never disagree about what the song contains.
+MIDIFile.prototype.getPlaybackEvents = function (useTrackLoops = false) {
+  const tracks = this.tracks.map((_, i) => this.getTrackEvents(i));
+  // Loop expansion runs whenever the file itself defines loop points, not
+  // just on the SoundFont MIDI path; files without any play exactly once.
+  // The SoundFont MIDI path keeps forcing the looped merge (a no-op when the
+  // file has no markers).
+  const range = this.findLoopRange(tracks);
+  if (range || useTrackLoops) {
+    return this.getLoopedEvents(tracks, 2, range);
+  }
+  return { events: this.getEvents(), loopStartMs: null, loopEndMs: null };
+};
+
 // Monkey patch MIDIFile class.
-MIDIFile.prototype.getLoopedEvents = function (tracks, loopCount = 1) {
+//
+// Expands the song-global loop range (see findLoopRange) to intro + two
+// passes — the same shape as a two-pass libvgm track — so duration, slider
+// band and head fold all work the same way. Post-loop content (outro) plays
+// once at the end. Returns {events, loopStartMs, loopEndMs} in first-pass
+// milliseconds; both are null when range is null (plain merge, no looping).
+MIDIFile.prototype.getLoopedEvents = function (tracks, loopCount = 2, range = null) {
   let event;
   let playTime = 0;
   const combinedEvents = [];
@@ -58,9 +393,67 @@ MIDIFile.prototype.getLoopedEvents = function (tracks, loopCount = 1) {
   let i;
   let j;
   let smallestDelta;
-  let loopCountReached = false;
+  // Set when the merge passes MAX_MERGED_EVENTS; the list is then abandoned (see
+  // the fallback below) rather than returned short.
+  let overflowed = false;
   const type = null;
   const subtype = null;
+  // First-pass loop region in ms. The start latches off the first loop-start
+  // controller (0 when implicit); the end is the latest first-pass playTime --
+  // the end of the first iteration, since later passes carry a higher pass
+  // number. One global latch, so only the outermost loop is reported.
+  let loopStartMs = null;
+  let loopEndMs = null;
+  // Tempo in force at the loop start, latched on the first pass and restored at
+  // each replay so an in-loop tempo change reapplies from the top. An implicit
+  // start at tick 0 with no event there never latches below, so seed it.
+  let loopStartTickResolution = range != null && range.startTick === 0 ? tickResolution : null;
+  // In the multi-track merge, restore that tempo once per pass, at the shared
+  // boundary (the first event any track replays in that pass) -- not per track,
+  // or a later track's replay erases a tempo change an earlier one already
+  // re-applied. Keyed by pass rather than a one-shot flag, so a third and later
+  // pass restores it too.
+  let passTempoRestoredAt = 0;
+  const isRpgMaker = range != null && range.endTick == null;
+  // Format-2 tracks have no shared timeline, so a song-global range is
+  // meaningless: they play once and must not report a band. Reporting one
+  // would make the "end of the first iteration" latch degenerate to the end of
+  // the song, highlighting the whole file as the loop region.
+  const expandLoop = range != null && format !== 2;
+  const channelsByTrack = {};
+  const capturePush = (trackIdx, srcElapsedLoops, ev) => {
+    if (ev.channel !== undefined) {
+      (channelsByTrack[trackIdx] || (channelsByTrack[trackIdx] = new Set())).add(ev.channel);
+    }
+    if (!expandLoop) return;
+    if (loopStartMs == null && isLoopEvent(ev) &&
+        (isLoopStartCC(ev.param1) || (isRpgMaker && ev.param1 === CC_111_LOOP_END))) {
+      loopStartMs = playTime;
+    }
+    if (srcElapsedLoops === 0 &&
+        (loopEndMs == null || playTime > loopEndMs)) {
+      loopEndMs = playTime;
+    }
+  };
+
+  // A lone CC111 fixes the loop start but not its end: by the RPG Maker
+  // convention the loop ends at the last track-end event in the song, so resolve
+  // one song-wide end tick (the longest track) and hand it to every iterator. A
+  // shared boundary is what keeps a short part in sync with a longer one.
+  let songEndTick = null;
+  if (expandLoop && range.endTick == null) {
+    songEndTick = 0;
+    for (const trackEvents of tracks) {
+      let tick = 0;
+      for (const event of trackEvents) {
+        if (event) tick += event.delta || 0;
+      }
+      if (tick > songEndTick) songEndTick = tick;
+    }
+  }
+  const loop = expandLoop
+    ? { startTick: range.startTick, endTick: range.endTick, maxLoops: loopCount, songEndTick }
+    : null;
 
   // Reading events
   // if the read is sequential
@@ -68,10 +461,15 @@ MIDIFile.prototype.getLoopedEvents = function (tracks, loopCount = 1) {
     for (i = 0, j = this.tracks.length; i < j; i++) {
       // reset playtime if format is 2
       playTime = 2 === format && playTime ? playTime : 0;
-      const eventIterator = new EventIterator(tracks[i]);
+      const eventIterator = new EventIterator(tracks[i], loop);
+      let lastLoops = 0;
       // loooping through events
       event = eventIterator.next();
       while (event) {
+        if (eventIterator.elapsedLoops !== lastLoops) {
+          lastLoops = eventIterator.elapsedLoops;
+          if (loopStartTickResolution != null) tickResolution = loopStartTickResolution;
+        }
         playTime += event.delta ? event.delta * tickResolution / 1000 : 0;
         if (event.type === MIDIEvents.EVENT_META) {
           // tempo change events
@@ -79,15 +477,25 @@ MIDIFile.prototype.getLoopedEvents = function (tracks, loopCount = 1) {
             tickResolution = this.header.getTickResolution(event.tempo);
           }
         }
+        // Latch the tempo in force at the loop start -- the last tempo event at
+        // or before startTick -- so a replay can restore it.
+        if (expandLoop && event.absTick != null && event.absTick <= range.startTick) {
+          loopStartTickResolution = tickResolution;
+        }
         // push the asked events
         if (
           (!type || event.type === type) &&
           (!subtype || (event.subtype && event.subtype === subtype))
         ) {
           event.playTime = playTime;
+          capturePush(i, eventIterator.elapsedLoops, event);
           combinedEvents.push(event);
         }
         event = eventIterator.next();
+        if (combinedEvents.length > MAX_MERGED_EVENTS) {
+          overflowed = true;
+          break;
+        }
       }
     }
     // the read is concurrent
@@ -99,7 +507,7 @@ MIDIFile.prototype.getLoopedEvents = function (tracks, loopCount = 1) {
     // Creating iterators
     for (i = 0, j = tracks.length; i < j; i++) {
       printTrack(i, tracks[i]);
-      trackIterators[i] = new EventIterator(tracks[i]);
+      trackIterators[i] = new EventIterator(tracks[i], loop);
       trackIterators[i].curEvent = trackIterators[i].next();
     }
     // Filling events
@@ -135,12 +543,22 @@ MIDIFile.prototype.getLoopedEvents = function (tracks, loopCount = 1) {
         }
         // filling values
         event = trackIterators[smallestDelta].curEvent;
+        // Restore the loop-start tempo once per pass, at the shared boundary
+        // (the first event any track replays in that pass), not per track.
+        if (trackIterators[smallestDelta].elapsedLoops > passTempoRestoredAt) {
+          passTempoRestoredAt = trackIterators[smallestDelta].elapsedLoops;
+          if (loopStartTickResolution != null) tickResolution = loopStartTickResolution;
+        }
         playTime += event.delta ? event.delta * tickResolution / 1000 : 0;
         if (event.type === MIDIEvents.EVENT_META) {
           // tempo change events
           if (event.subtype === MIDIEvents.EVENT_META_SET_TEMPO) {
             tickResolution = this.header.getTickResolution(event.tempo);
           }
+        }
+        // Same loop-start tempo latch as the sequential path.
+        if (expandLoop && event.absTick != null && event.absTick <= range.startTick) {
+          loopStartTickResolution = tickResolution;
         }
         // push midi events
         if (
@@ -149,29 +567,52 @@ MIDIFile.prototype.getLoopedEvents = function (tracks, loopCount = 1) {
         ) {
           event.playTime = playTime;
           event.track = smallestDelta;
+          capturePush(smallestDelta, trackIterators[smallestDelta].elapsedLoops, event);
           combinedEvents.push(event);
         }
         // get next event
         trackIterators[smallestDelta].curEvent = trackIterators[smallestDelta].next();
-
-        // check elapsed loops
-        loopCountReached = trackIterators.every(it => it.curEvent == null || it.elapsedLoops >= loopCount);
+        if (combinedEvents.length > MAX_MERGED_EVENTS) {
+          overflowed = true;
+          break;
+        }
       }
-    } while (-1 !== smallestDelta && loopCountReached === false);
+    } while (-1 !== smallestDelta);
+  }
 
-    for (let i = 0; i < trackIterators.length; i++) {
-      if (trackIterators[i]?.curEvent) {
-        combinedEvents.push(allNotesOff(i, trackIterators[i].curEvent.channel, playTime));
-      }
+  if (overflowed) {
+    // A truncated list would end the song early (the appended all-notes-off
+    // closes it out), which is worse than losing the loop: fall back to a single
+    // pass so every note still plays, with no loop region -- the same shape as a
+    // file that defines no markers. Only a file far larger than anything real
+    // reaches this.
+    console.warn('[midi] loop expansion exceeded ' + MAX_MERGED_EVENTS +
+      ' events; playing once with no loop region.');
+    return { events: this.getEvents(), loopStartMs: null, loopEndMs: null };
+  }
+
+  // Same stuck-note fix as the getEvents patch below: release every channel
+  // heard in each track at the end of the list, so the song (and its silence
+  // tail) always terminates when repeat is off.
+  for (const [track, channels] of Object.entries(channelsByTrack)) {
+    for (const ch of channels) {
+      combinedEvents.push(allNotesOff(Number(track), ch, playTime));
+      combinedEvents.push(sustainOff(Number(track), ch, playTime));
     }
   }
+
+  if (expandLoop && loopStartMs == null) loopStartMs = 0;
+  if (!expandLoop || loopEndMs == null || loopEndMs <= loopStartMs) {
+    loopStartMs = null;
+    loopEndMs = null;
+  }
   console.debug(combinedEvents);
-  return combinedEvents;
+  return { events: combinedEvents, loopStartMs, loopEndMs };
 };
 
 function isLoopStart(event) {
   return (
-    event.param1 === CC_102_TRACK_LOOP_START &&
+    isLoopStartCC(event.param1) &&
     event.subtype === EVENT_MIDI_CONTROLLER &&
     event.type === EVENT_MIDI
   );
@@ -179,7 +620,7 @@ function isLoopStart(event) {
 
 function isLoopEnd(event) {
   return (
-    event.param1 === CC_103_TRACK_LOOP_END &&
+    isLoopEndCC(event.param1) &&
     event.subtype === EVENT_MIDI_CONTROLLER &&
     event.type === EVENT_MIDI
   );

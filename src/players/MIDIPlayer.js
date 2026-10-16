@@ -607,8 +607,8 @@ export default class MIDIPlayer extends Player {
     return { startMs: loop.jumpMs, endMs: loop.endMs };
   }
 
-  // Repeat One wraps the JS event loop back to the second pass at the end of
-  // the list. Files without a loop region keep the stop-and-reload fallback.
+  // Repeat One wraps the JS event loop back to the wrap target at the end of the
+  // loop. Files without a loop region keep the stop-and-reload fallback.
   setLooping(looping) {
     super.setLooping(looping);
     if (this.midiFilePlayer) this.midiFilePlayer.setLooping(looping);

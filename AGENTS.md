@@ -1027,12 +1027,17 @@ shared `.usflib`), `mods/` (`.S3M`), `midi/`, a `.vgz`, and `gsf/` (GBA sets,
 companions are intentionally not indexed but must stay next to their song file;
 a gzipped VGM must use the `.vgz` extension (`.gz` is not recognized).
 
-**`psf/` in the catalog is inert.** `.psf`/`.minipsf` are not in `FORMATS` and
-have no parser or player (the merge added GSF only; PSX needs a core we do not
-have), so the builder ignores them -- `VALID_EXTENSIONS` is derived from
-`FORMATS`, so unlisted extensions never even get a `music` row. Adding PS1
-support is a real feature (a PSX core + wrapper + `FORMATS`/`PARSERS` entries),
-not a switch to flip. Their `.psflib` companions are likewise ignored.
+**`psf/` in the catalog is inert (PS1 playback is not wired yet).** The PSF
+*container/tag parser* is already committed upstream (`src/psf.js` ->
+`parsePSF`/`parsePsfTime`, shared by `GSFPlayer`/`N64Player` and the builder's
+`parsePSFTags`), but `.psf`/`.minipsf` have no route to anything: they are not
+in `FORMATS`, so `VALID_EXTENSIONS` gives them no `music` row at all, there is
+no `psf`/`minipsf` entry in `PARSERS` (only gsf/minigsf/miniusf are routed),
+and there is no PSX core or player. Upstream landed GSF first and is still
+working on PS1, so **keep an eye out for a PSX core plus psf/minipsf routing**
+-- when that arrives our `psf/` fixture becomes testable as-is. Do not add
+`psf` to `FORMATS` speculatively: without a real player the row would be
+unplayable, which is worse than absent.
 
 ## Catalog / server data model
 

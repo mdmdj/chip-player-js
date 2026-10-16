@@ -346,7 +346,21 @@ class EventIterator {
 // once. Both the audio player and the piano roll key off this one predicate, so
 // the roll expands exactly when the audio does.
 export function usesTrackLoops(filepath) {
-  return !!filepath && filepath.includes('SoundFont MIDI');
+  if (!filepath) return false;
+  // DEV-BEGIN (stripped for promotion; also expand the local tempo_stress
+  // fixtures, which sit outside a SoundFont folder. Toggle from the browser
+  // console, then reload:
+  //   localStorage.setItem('cpDevExpandTempoStress', '1')   // on
+  //   localStorage.removeItem('cpDevExpandTempoStress')     // off
+  // Inert without a browser (scripts/build-music.js).)
+  try {
+    if (filepath.includes('tempo_stress') &&
+        window.localStorage.getItem('cpDevExpandTempoStress') === '1') {
+      return true;
+    }
+  } catch (e) { /* no window/localStorage (node) */ }
+  // DEV-END
+  return filepath.includes('SoundFont MIDI');
 }
 
 // The event list playback actually renders — and the piano roll must show:

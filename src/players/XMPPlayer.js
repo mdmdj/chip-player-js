@@ -262,6 +262,13 @@ export default class XMPPlayer extends Player {
       this._seekPending = false;
       const snapped = Math.abs(this._positionMs - this._seekRequestedMs) > SEEK_SNAP_MS;
       if (!snapped && !seen.has(pos)) {
+        // The landing order can't be timed, and neither can a poll later in the
+        // same order: the guard has to outlive the poll that saw the seek, or
+        // the order's next poll records a mid-order time as its start and a
+        // later backward jump onto it draws a band from that point. `_skipOrder`
+        // holds until playback leaves the order, like any other arrival from
+        // outside the linear flow.
+        this._skipOrder = pos;
         this._lastPos = pos;
         return;
       }

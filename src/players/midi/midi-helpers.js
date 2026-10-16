@@ -29,6 +29,17 @@ function isLoopEndCC(cc) {
   return cc === CC_103_TRACK_LOOP_END || cc === CC_111_LOOP_END;
 }
 
+// Iterative minimum. `Math.min(...markers)` throws RangeError (argument list too
+// long) for a file carrying ~1e5 loop CCs, before MAX_MERGED_EVENTS could guard
+// the merge. Same value, no argument list.
+function minOf(values) {
+  let min = Infinity;
+  for (const v of values) {
+    if (v < min) min = v;
+  }
+  return min;
+}
+
 function isLoopEvent(event) {
   return event.type === EVENT_MIDI && event.subtype === EVENT_MIDI_CONTROLLER &&
     (isLoopStartCC(event.param1) || isLoopEndCC(event.param1));
@@ -72,17 +83,17 @@ MIDIFile.prototype.findLoopRange = function (tracks) {
   let endTick;
   if (starts.length > 0) {
     // Paired loop points (N64 or HMI): first end past the earliest start.
-    startTick = Math.min(...starts);
+    startTick = minOf(starts);
     const ends = ends103.concat(ends111).filter(t => t > startTick);
     if (!ends.length) return null;
-    endTick = Math.min(...ends);
+    endTick = minOf(ends);
   } else if (ends103.length > 0) {
     // N64 loop end with the start left implicit at 0 (plus a CC104 count).
     startTick = 0;
-    endTick = Math.min(...ends103);
+    endTick = minOf(ends103);
   } else if (ends111.length > 0) {
     // Lone CC111: RPG Maker loop start, running to the end of each track.
-    startTick = Math.min(...ends111);
+    startTick = minOf(ends111);
     endTick = null;
   } else {
     return null;
@@ -116,12 +127,10 @@ class EventIterator {
     this.passesLeft = loop ? loop.maxLoops : 1;
     this.absTicks = null;
     this.startIdx = 0;
-    // Whether the track has real music (note-ons) past the loop end. A noteless
-    // outro (controller cleanup, END_OF_TRACK, converter padding) attaches at
-    // the loop end instead of extending the duration with dead air; a composed
-    // ending with notes keeps its exact timing.
-    this.postHasNotes = false;
-    this.postStarted = false;
+    // Post-loop events keep their authored position (see next()): an event's
+    // offset from the loop end places it after the passes. Nothing is clamped
+    // onto the loop boundary; the song's end comes from the sounding content
+    // (getLoopedEvents), so a converter's note-less tail cannot inflate it.
     // Tick shift owed to a skipped replay, applied to the next emitted event's
     // delta (see next()).
     this.pendingExtra = 0;
@@ -151,35 +160,19 @@ class EventIterator {
       this.boundaryTick = endTick;
       this.loopLength = endTick - loop.startTick;
       this.replayDelta = null;
-      // A post-loop event that would otherwise inflate the duration (converter
-      // padding, END_OF_TRACK) is collapsed to the loop boundary -- unless the
-      // track has a real note-on after the loop end, which is a composed outro
-      // that keeps its exact timing.
-      //
       // Decision (2026-10): a note that starts inside the loop and is released
-      // after it is cut at the seam. Its release is "noteless" (this only sees
-      // note-ons), so the collapse moves it to the boundary. That matches the
-      // DAW default -- Logic/Cubasis cut notes crossing a cycle, Ableton needs a
-      // manual wrap -- and it is the standard-safe choice: letting the note ring
-      // past the boundary would make the replay send a second NoteOn for a still
-      // sounding note, which the MIDI spec calls invalid. The composer should put
-      // the loop where voices resolve. See dev/MIDI_LOOP_TEST_GAPS.md. (The
-      // player's own loop wrap -- MIDIFilePlayer.loopJump -- also cuts any note
-      // still ringing at the seam, so the second pass never overlaps a held
-      // note; this collapse is what keeps the outro from inflating duration.)
-      if (loop.endTick != null) {
-        this.postHasNotes = this.events.some((e, idx) =>
-          this.absTicks[idx] > loop.endTick &&
-          e.type === EVENT_MIDI && e.subtype === EVENT_MIDI_NOTE_ON && e.param2 > 0);
-      }
+      // after it is cut at the seam -- its release is emitted at each replay
+      // boundary (see rebaseReplay) so the replay never sends a second NoteOn for
+      // a still-sounding note, which the MIDI spec calls invalid. The composer's
+      // authored release past the loop end still plays in the outro, at its
+      // authored position. See dev/MIDI_LOOP_TEST_GAPS.md.
       // Notes that cross the seam, released at every replay boundary (see
       // rebaseReplay). A release sitting past the loop end is still pending when
       // the replay re-triggers the same pitch, and a second NoteOn for a
-      // sounding note is invalid; the noteless path gets the same cut for free
-      // when it collapses the outro, but a composed ending keeps its own timing,
-      // so the crossing notes have to be tracked and cut explicitly. Nothing is
-      // cut when the loop *plays out* into that ending -- there the release is
-      // the composer's, and the note rings on as written.
+      // sounding note is invalid, so the crossing notes are tracked and cut
+      // explicitly -- every track, every replay. Nothing is cut when the loop
+      // *plays out* into the outro: there the release is the composer's, and the
+      // note rings on as written.
       this.pendingReleases = null;
       this.seamReleases = [];
       // Channels whose sustain pedal is down at the seam, with the value it has:
@@ -254,19 +247,9 @@ class EventIterator {
         }
         if (this.pos >= this.events.length) {
           return null;
-        } else if (!this.postHasNotes && !this.postStarted) {
-          // Noteless outro: attach it at the loop end (see postHasNotes), not at
-          // the preceding in-loop event's tick, so a replayed note rings to the
-          // boundary instead of being cut short.
-          this.postStarted = true;
-          const event = this.events[this.pos++];
-          if (!event) return null;
-          const delta = Math.max(0, this.boundaryTick - this.curTick);
-          this.pendingExtra = 0;
-          this.curTick += delta;
-          return { ...event, delta, absTick: this.absTicks[this.pos - 1] };
         }
-        // Else fall through: the outro plays once, then the track ends.
+        // Else fall through: the outro plays once, at its authored position,
+        // then the track ends.
       }
       // Else fall through: the outro plays once, then the track ends.
     } else if (this.pos >= this.events.length) {
@@ -292,14 +275,9 @@ class EventIterator {
 
     // The first event of a replayed pass carries the rebased delta, plus any
     // shift owed to passes a loop-empty track skipped; every other event keeps
-    // its own delta.
-    // A noteless outro (see postHasNotes) collapses every event to the loop
-    // boundary: the first is rebased in next(), the rest get delta 0 here, so
-    // converter padding / END_OF_TRACK cannot leave a silent tail.
-    const delta = !this.postHasNotes && this.postStarted
-      ? 0
-      : (this.replayDelta != null ? this.replayDelta : event.delta) +
-        (this.pendingExtra || 0);
+    // its own delta, so a post-loop event keeps its authored offset.
+    const delta = (this.replayDelta != null ? this.replayDelta : event.delta) +
+      (this.pendingExtra || 0);
     this.replayDelta = null;
     this.pendingExtra = 0;
     this.curTick += delta;
@@ -360,21 +338,31 @@ class EventIterator {
   }
 }
 
+// The MIDI files that opt into the two-pass loop expansion -- the SoundFont
+// MIDI sets (the folder master gated on). Loop *detection* is separate
+// (findLoopRange): a file that merely carries loop points still plays through
+// once. Both the audio player and the piano roll key off this one predicate, so
+// the roll expands exactly when the audio does.
+export function usesTrackLoops(filepath) {
+  if (!filepath) return false;
+  return filepath.includes('SoundFont MIDI');
+}
+
 // The event list playback actually renders — and the piano roll must show:
 // loop files expand to intro + two passes, everything else merges once.
 // Single source of truth for the audio engine and the roll parser so the two
 // can never disagree about what the song contains.
 MIDIFile.prototype.getPlaybackEvents = function (useTrackLoops = false) {
   const tracks = this.tracks.map((_, i) => this.getTrackEvents(i));
-  // Loop expansion runs whenever the file itself defines loop points, not
-  // just on the SoundFont MIDI path; files without any play exactly once.
-  // The SoundFont MIDI path keeps forcing the looped merge (a no-op when the
-  // file has no markers).
   const range = this.findLoopRange(tracks);
-  if (range || useTrackLoops) {
-    return this.getLoopedEvents(tracks, 2, range);
+  // The loop region is *always* detected; the expansion is the opt-in. Without
+  // it the list is the file's own timeline -- one pass -- and the player wraps
+  // it itself (see MIDIFilePlayer.load); with it, intro + two passes, so the
+  // piano roll can draw across the seam. Both report the region.
+  if (!range) {
+    return { events: this.getEvents(), loopStartMs: null, loopEndMs: null };
   }
-  return { events: this.getEvents(), loopStartMs: null, loopEndMs: null };
+  return this.getLoopedEvents(tracks, useTrackLoops ? 2 : 1, range);
 };
 
 // Monkey patch MIDIFile class.
@@ -430,7 +418,11 @@ MIDIFile.prototype.getLoopedEvents = function (tracks, loopCount = 2, range = nu
         (isLoopStartCC(ev.param1) || (isRpgMaker && ev.param1 === CC_111_LOOP_END))) {
       loopStartMs = playTime;
     }
+    // End of the first iteration. `srcElapsedLoops === 0` bounds it to the first
+    // pass when there is more than one; the loop-end tick bounds it when the
+    // caller asked for a single pass (no passes to distinguish).
     if (srcElapsedLoops === 0 &&
+        (range.endTick == null || ev.absTick == null || ev.absTick <= range.endTick) &&
         (loopEndMs == null || playTime > loopEndMs)) {
       loopEndMs = playTime;
     }
@@ -591,13 +583,31 @@ MIDIFile.prototype.getLoopedEvents = function (tracks, loopCount = 2, range = nu
     return { events: this.getEvents(), loopStartMs: null, loopEndMs: null };
   }
 
+  // The song ends at the last event that can sound, not at trailing cleanup:
+  // a converter's note-less tail (controller resets, END_OF_TRACK) must not
+  // push the duration out with dead air. Every event keeps its authored
+  // position (EventIterator); only the end comes from the sounding content.
+  let endMs = 0;
+  for (const e of combinedEvents) {
+    if ((e.subtype === EVENT_MIDI_NOTE_ON || e.subtype === EVENT_MIDI_NOTE_OFF) &&
+        e.playTime > endMs) {
+      endMs = e.playTime;
+    }
+  }
+  if (endMs > 0) {
+    for (let k = combinedEvents.length - 1; k >= 0; k--) {
+      if (combinedEvents[k].playTime > endMs) combinedEvents.splice(k, 1);
+    }
+  }
+  const tailMs = endMs > 0 ? endMs : playTime;
+
   // Same stuck-note fix as the getEvents patch below: release every channel
-  // heard in each track at the end of the list, so the song (and its silence
-  // tail) always terminates when repeat is off.
+  // heard in each track at the song's end, so the song (and its silence tail)
+  // always terminates when repeat is off.
   for (const [track, channels] of Object.entries(channelsByTrack)) {
     for (const ch of channels) {
-      combinedEvents.push(allNotesOff(Number(track), ch, playTime));
-      combinedEvents.push(sustainOff(Number(track), ch, playTime));
+      combinedEvents.push(allNotesOff(Number(track), ch, tailMs));
+      combinedEvents.push(sustainOff(Number(track), ch, tailMs));
     }
   }
 
@@ -606,7 +616,6 @@ MIDIFile.prototype.getLoopedEvents = function (tracks, loopCount = 2, range = nu
     loopStartMs = null;
     loopEndMs = null;
   }
-  console.debug(combinedEvents);
   return { events: combinedEvents, loopStartMs, loopEndMs };
 };
 

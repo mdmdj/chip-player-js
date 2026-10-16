@@ -66,6 +66,12 @@ function MIDIPlayer(options) {
   this.looping = false;
   // Note-on pitches still ringing per channel, for a clean loop wrap.
   this.activeNotes = new Map();
+  // Set when the transport plays past the band with Repeat One off, i.e. the
+  // listener is in the outro. Enabling Repeat One there must not rewind one loop
+  // (the Repeat One contract: "never jump the transport backward into the loop"),
+  // so the wrap stays off and the outro plays out to the song's end. Cleared on
+  // load and on a seek, which re-arms it.
+  this.loopRegionLeft = false;
 
   // Disabled due to "Page prevented back/forward cache restoration".
   // window.addEventListener('unload', this.stop);
@@ -78,21 +84,26 @@ MIDIPlayer.prototype.load = function (midiFile, useTrackLoops = false) {
   this.elapsedTime = 0;
   this.loop = null;
   this.activeNotes.clear();
+  this.loopRegionLeft = false;
   // Same expanded list the piano roll parses, so audio and roll agree.
   const { events, loopStartMs, loopEndMs } = midiFile.getPlaybackEvents(useTrackLoops);
   this.events = events;
   if (loopEndMs != null && loopEndMs > (loopStartMs || 0)) {
     const startMs = loopStartMs || 0;
-    const jumpMs = startMs + (loopEndMs - startMs);
+    const lengthMs = loopEndMs - startMs;
+    // The band is the instance the wrap covers: the second pass when the file
+    // is expanded (jump to its start, one loop length past the region), and the
+    // region itself when it is not (jump back to the loop start). Either way
+    // the wrap target and the band are the same span, so a composed ending after
+    // the loop plays only with repeat off (matching the slider band instead of
+    // repeating the ending every pass).
+    const jumpMs = useTrackLoops ? loopEndMs : startMs;
     let jumpIndex = events.findIndex(e => e.playTime >= jumpMs);
     if (jumpIndex < 0) jumpIndex = events.length;
-    // The band ends one loop length past jumpMs. With Repeat One the wrap goes
-    // there, so a composed ending after the loop plays only with repeat off
-    // (matching the slider band instead of repeating the ending every pass).
-    const endMs = jumpMs + (loopEndMs - startMs);
+    const endMs = jumpMs + lengthMs;
     let endIndex = events.findIndex(e => e.playTime >= endMs);
     if (endIndex < 0) endIndex = events.length;
-    this.loop = { startMs, lengthMs: loopEndMs - startMs, jumpMs, jumpIndex, endMs, endIndex };
+    this.loop = { startMs, lengthMs, jumpMs, jumpIndex, endMs, endIndex };
   }
   this.summarizeMidiEvents();
 };
@@ -142,8 +153,11 @@ MIDIPlayer.prototype.processPlaySynth = function (buffer, bufferSize) {
   // applying them here so the wrap below fires at the band end, not the list end.
   // Auditioning (the piano roll's preview) disables both wrap paths below, so
   // the cap must come off with it or events past the band end -- the outro's
-  // note-offs included -- are never applied while auditioning.
-  const loopEndIdx = (this.looping && this.loop && !this.isAuditioning) ? this.loop.endIndex : Infinity;
+  // note-offs included -- are never applied while auditioning. It also comes off
+  // once the region has been left (Repeat One enabled in the outro), so that
+  // outro still plays and the song ends rather than hanging on the band end.
+  const loopEndIdx = (this.looping && this.loop && !this.isAuditioning && !this.loopRegionLeft)
+    ? this.loop.endIndex : Infinity;
 
   for (let samplesRemaining = bufferSize * 2;
        samplesRemaining > 0;
@@ -155,9 +169,15 @@ MIDIPlayer.prototype.processPlaySynth = function (buffer, bufferSize) {
       // Wrap as soon as the clock reaches the band end, inside this batch, so the
       // new pass starts in this same output buffer rather than a whole buffer
       // late (which shows as a gap, or the old pass's held sound, each wrap).
-      if (this.looping && this.loop && !this.isAuditioning &&
+      if (this.looping && this.loop && !this.isAuditioning && !this.loopRegionLeft &&
           this.position >= this.loop.endIndex && this.elapsedTime >= this.loop.endMs) {
         this.loopJump();
+      }
+      // Repeat One off and the clock has passed the band: the listener is in the
+      // outro. Remember it so enabling Repeat One now does not rewind (above).
+      if (!this.looping && this.loop && !this.isAuditioning &&
+          this.elapsedTime > this.loop.endMs) {
+        this.loopRegionLeft = true;
       }
       let pos = this.position;
       for (;
@@ -209,7 +229,7 @@ MIDIPlayer.prototype.processPlaySynth = function (buffer, bufferSize) {
   }
 
   if (!this.paused && !this.isAuditioning) {
-    // Repeat One with a loop region wraps back to the second pass instead of
+    // Repeat One with a loop region wraps back to the wrap target instead of
     // ending: the in-loop note-offs already fired, so only still-ringing
     // notes are cut and the loop continues like a native engine loop.
     //
@@ -217,7 +237,8 @@ MIDIPlayer.prototype.processPlaySynth = function (buffer, bufferSize) {
     // which is often before the clock reaches the band end, so a trailing rest
     // would be dropped on every pass. Wait for elapsedTime to reach endMs
     // before wrapping; until then keep rendering the (silent) remainder.
-    if (this.looping && this.loop && this.position >= this.loop.endIndex) {
+    if (this.looping && this.loop && !this.loopRegionLeft &&
+        this.position >= this.loop.endIndex) {
       if (this.elapsedTime >= this.loop.endMs) {
         this.loopJump();
       }
@@ -260,9 +281,18 @@ MIDIPlayer.prototype.processPlay = function () {
   let message = null;
 
   this.elapsedTime += deltaTime;
+  // Repeat One off and the clock has passed the band: the listener is in the
+  // outro. Same flag as the synth path, so enabling Repeat One there does not
+  // rewind.
+  if (!this.looping && this.loop && !this.isAuditioning &&
+      this.elapsedTime > this.loop.endMs) {
+    this.loopRegionLeft = true;
+  }
   // With Repeat One, stop scheduling at the band end so the outro is skipped;
-  // matches processPlaySynth's loopEndIdx.
-  const loopEndIdx = (this.looping && this.loop && !this.isAuditioning) ? this.loop.endIndex : Infinity;
+  // matches processPlaySynth's loopEndIdx (and it comes off once the region has
+  // been left, so the outro is scheduled and the song ends).
+  const loopEndIdx = (this.looping && this.loop && !this.isAuditioning && !this.loopRegionLeft)
+    ? this.loop.endIndex : Infinity;
   let event = this.events[this.position];
   let wraps = 0;
   for (;;) {
@@ -540,9 +570,13 @@ MIDIPlayer.prototype.setPosition = function (ms) {
 
   this.elapsedTime = ms;
   this.position = endIdx;
+  // A seek re-arms the wrap: wherever it lands, the next pass is judged from
+  // here (Repeat One enabled in the outro of a previous pass is not this one's
+  // business). See loopRegionLeft.
+  this.loopRegionLeft = false;
 };
 
-// Repeat-One wrap to the start of the second pass (the slider band). No
+// Repeat-One wrap to the wrap target (the slider band's start). No
 // panic: the loop is authored to continue, so program/controller state is
 // restored silently and only notes still ringing from the finished pass are
 // cut — the closest a JS event loop gets to a native engine loop.
@@ -551,7 +585,8 @@ MIDIPlayer.prototype.loopJump = function () {
   if (!loop) return;
   const ringing = [...this.activeNotes.keys()];
   this.activeNotes.clear();
-  // The state the second pass starts with: intro plus one full loop pass.
+  // The state the wrap target starts with: intro plus one full loop pass when
+  // expanded (the second pass), the loop start otherwise.
   const { eventList } = this.collectStateEvents(0, loop.jumpMs);
   if (this.useWebMIDI) {
     // These messages belong at the band end, not at the last event the
@@ -590,7 +625,7 @@ MIDIPlayer.prototype.loopJump = function () {
       if (this.synth) this.synth.noteOff(key >> 7, key & 0x7f);
     }
     if (this.synth) {
-      // Same release on the synth, then restore the second pass's state.
+      // Same release on the synth, then restore the wrap target's state.
       for (let ch = 0; ch < 16; ch++) this.synth.controlChange(ch, CC_SUSTAIN_PEDAL, 0);
       this.setPositionSynth(eventList);
     }

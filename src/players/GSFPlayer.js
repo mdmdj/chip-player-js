@@ -189,6 +189,14 @@ export default class GSFPlayer extends Player {
   // Fold one rendered buffer into the tail detector, tapping the converted float
   // channels (GSF's int16 buffer holds no float views, unlike SID).
   updateEndDetector(channels) {
+    // Masking is applied in-engine, so a muted/soloed part reads as silence in
+    // both gates -- stand down while the mask is not clean, exactly as
+    // SIDPlayer does (the JS echo of GME disabling its own silence detection on
+    // any mute).
+    if (!Array.isArray(this.voiceMask) || !this.voiceMask.every(Boolean)) {
+      this.endDetector.reset();
+      return false;
+    }
     return this.endDetector.fold(channels[0], channels[1] || channels[0]);
   }
 

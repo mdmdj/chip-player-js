@@ -3,7 +3,7 @@ import axios from 'redaxios';
 import debounce from 'lodash/debounce';
 import range from 'lodash/range';
 import pathe from 'pathe';
-import MIDIFile from './midi/midi-helpers';
+import MIDIFile, { usesTrackLoops } from './midi/midi-helpers';
 import MIDIFilePlayer from './MIDIFilePlayer';
 import Player from './Player';
 import { SOUNDFONTS, SOUNDFONT_MOUNTPOINT, SOUNDFONT_URL_PATH } from '../config';
@@ -388,13 +388,14 @@ export default class MIDIPlayer extends Player {
       });
 
     const midiFile = new MIDIFile(data);
-    // Checking filepath doesn't work for dragged files. Force to true during development.
-    const useTrackLoops = filepath.includes('SoundFont MIDI');
+    // Which files loop over their markers: the SoundFont MIDI sets (master's
+    // gate). Checking filepath doesn't work for dragged files.
+    const useTrackLoops = usesTrackLoops(filepath);
     this.midiFilePlayer.load(midiFile, useTrackLoops);
-    // Loop region in the shared intro_length/loop_length vocabulary, so the
-    // generic slider band and head fold apply (see Player.getLoopBandMs).
-    // Parsed here at load time from the file's own loop points — N64
-    // CC102/103 or HMI CC110/111 — no catalog work needed.
+    // Loop region in the shared intro_length/loop_length vocabulary, for the head
+    // fold in getDisplayPositionMs (the band itself is getLoopBandMs, which reads
+    // the player's wrap span). Parsed here at load time from the file's own loop
+    // points — N64 CC102/103 or HMI CC110/111 — no catalog work needed.
     const loop = this.midiFilePlayer.getLoopRegion();
     this.metadata = loop && loop.lengthMs > 0
       ? { intro_length: loop.startMs, loop_length: loop.lengthMs }
@@ -590,8 +591,20 @@ export default class MIDIPlayer extends Player {
     return band.startMs + phase;
   }
 
-  // Repeat One wraps the JS event loop back to the second pass at the end of
-  // the list. Files without a loop region keep the stop-and-reload fallback.
+  // The band the transport wraps over and the slider marks: the wrap span
+  // (jumpMs..endMs) -- the second pass when the file is expanded, the loop
+  // region itself when it is not. Overrides the base, whose band is always the
+  // second instance of intro_length/loop_length, which is only right for the
+  // expanded case. (The file player is the nested MIDIFilePlayer; this class is
+  // the one the sequencer holds.)
+  getLoopBandMs() {
+    const loop = this.midiFilePlayer && this.midiFilePlayer.getLoopRegion();
+    if (!loop || !(loop.endMs > loop.jumpMs)) return null;
+    return { startMs: loop.jumpMs, endMs: loop.endMs };
+  }
+
+  // Repeat One wraps the JS event loop back to the wrap target at the end of the
+  // loop. Files without a loop region keep the stop-and-reload fallback.
   setLooping(looping) {
     super.setLooping(looping);
     if (this.midiFilePlayer) this.midiFilePlayer.setLooping(looping);

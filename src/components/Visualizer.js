@@ -2,6 +2,7 @@ import pianoKeys from '../images/piano-keys.png';
 import Spectrogram from '../Spectrogram';
 import PianoRollVisualizer from '../piano-roll/PianoRollVisualizer';
 import { isMidiData } from '../piano-roll/midi-parser';
+import { usesTrackLoops } from '../players/midi/midi-helpers';
 import React, { Fragment, PureComponent } from 'react';
 
 const SPECTROGRAM_MODES = [
@@ -197,6 +198,7 @@ export default class Visualizer extends PureComponent {
           <PianoRollVisualizer
             width={this.props.theaterMode ? '100%' : VIS_WIDTH}
             midiData={this.props.midiData}
+            useTrackLoops={usesTrackLoops(this.props.songPath)}
             getCurrentPositionMs={this.props.getCurrentPositionMs}
             getPlaybackRate={this.props.getPlaybackRate}
             getAudioLatencyMs={this.getAudioLatencyMs}

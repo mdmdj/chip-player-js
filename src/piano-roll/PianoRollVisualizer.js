@@ -47,7 +47,7 @@ export default class PianoRollVisualizer extends PureComponent {
       }
 
       if (this.props.midiData) {
-        this.loadMidi(this.props.midiData);
+        this.loadMidi(this.props.midiData, this.props.useTrackLoops);
       }
 
       if (!this.props.paused) {
@@ -102,7 +102,7 @@ export default class PianoRollVisualizer extends PureComponent {
     }
 
     if (prevProps.midiData !== this.props.midiData) {
-      this.loadMidi(this.props.midiData);
+      this.loadMidi(this.props.midiData, this.props.useTrackLoops);
     }
 
     if (prevProps.paused !== this.props.paused) {
@@ -225,7 +225,7 @@ export default class PianoRollVisualizer extends PureComponent {
     }
   }
 
-  loadMidi(buffer) {
+  loadMidi(buffer, useTrackLoops) {
     if (!buffer) {
       this.currentBuffer = null;
       if (this.engine) this.engine.setMidiData(null);
@@ -233,7 +233,7 @@ export default class PianoRollVisualizer extends PureComponent {
     }
 
     this.currentBuffer = buffer;
-    const parsedMidi = parseMidiData(buffer);
+    const parsedMidi = parseMidiData(buffer, useTrackLoops);
     if (!parsedMidi) {
       if (this.engine) this.engine.setMidiData(null);
       return;

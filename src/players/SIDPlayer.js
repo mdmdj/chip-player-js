@@ -124,6 +124,9 @@ export default class SIDPlayer extends Player {
     // Claim this load. Anything still awaiting below checks it before touching
     // the shared core, so a superseded load cannot restart the previous song.
     const generation = ++this.loadGeneration;
+    // Hold any seek asked for while the metadata fetch below is in flight: this
+    // load re-selects the sub-tune when it resumes, which would discard it.
+    this.loadingAsync = true;
     if (!this.initialized) {
       this.core._sid_init(this.sampleRate);
       this.initialized = true;
@@ -291,6 +294,7 @@ export default class SIDPlayer extends Player {
   }
 
   seekMs(seekMs) {
+    if (this.deferSeekUntilPlaying(seekMs)) return;
     // Drop quiet time accumulated before the seek, so pre-seek audio cannot
     // trip the Repeat One tail restart before the new position has produced a
     // full window (EndDetector's contract: reset on load / seek / sub-tune).

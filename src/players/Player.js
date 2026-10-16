@@ -48,6 +48,15 @@ export default class Player extends EventEmitter {
     this.onSilenceEnd = null;
     this.trailingSilenceSamples = 0;
     this.durationMs = 0;
+    // A seek asked for while an async load is still starting (SID waits for
+    // HVSC metadata, VGM for an OPL4 ROM). It is held until the first rendered
+    // block: some cores block inside a seek until their own clock advances and
+    // there is no clock yet, and a load that finishes afterwards re-selects the
+    // sub-tune and resets the position, which would discard it. App's ?t= timer
+    // fires ~100ms after starting a song, inside this window when the fetch is
+    // slow -- the case that used to lose the link's position.
+    this.loadingAsync = false;
+    this.deferredSeekMs = null;
   }
 
   /**
@@ -389,6 +398,25 @@ export default class Player extends EventEmitter {
     this.trailingSilenceSamples = 0;
   }
 
+  // Holds a seek issued while an async load is still starting (see the fields
+  // in the constructor). True means the caller must not touch the engine yet.
+  deferSeekUntilPlaying(ms) {
+    if (!this.loadingAsync) return false;
+    this.deferredSeekMs = ms;
+    return true;
+  }
+
+  // Runs after each rendered block: the load's first render means the engine's
+  // clock is advancing, so a held seek is safe to hand to the platform now --
+  // and it lands after whatever the load did to the transport, not before it.
+  flushDeferredSeek() {
+    if (!this.loadingAsync) return;
+    this.loadingAsync = false;
+    const ms = this.deferredSeekMs;
+    this.deferredSeekMs = null;
+    if (ms != null) this.seekMs(ms);
+  }
+
   processAudio(output) {
     if (this.silenceSamplesRemaining > 0) {
       for (let ch = 0; ch < output.length; ch++) {
@@ -412,6 +440,7 @@ export default class Player extends EventEmitter {
 
     const start = performance.now();
     this.processAudioInner(output);
+    this.flushDeferredSeek();
     const end = performance.now();
 
     if (this.silenceSamplesRemaining > 0) {

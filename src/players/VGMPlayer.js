@@ -100,6 +100,9 @@ export default class VGMPlayer extends Player {
       this.core.UTF8ToString(this.core._lvgm_get_voice_chip_name(this.vgmCtx, i)).includes('YMF278'));
     if (hasOpl4) {
       console.debug(`${filepath} uses Yamaha OPL4 chip.`);
+      // The ROM fetch is this load's async window: hold a seek issued in it
+      // until playback is running, so it is not lost to _lvgm_start.
+      this.loadingAsync = true;
       await ensureEmscFileWithUrl(this.core, YRW801_ROM_PATH, `${SOUNDFONT_URL_PATH}/yrw801.rom`);
     }
 
@@ -250,6 +253,7 @@ export default class VGMPlayer extends Player {
   }
 
   seekMs(seekMs) {
+    if (this.deferSeekUntilPlaying(seekMs)) return;
     if (this.vgmCtx) {
       // libvgm cancels a fade when seeking before its start; drop the display
       // capture so the fold mapping takes over again.

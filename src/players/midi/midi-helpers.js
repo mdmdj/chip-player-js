@@ -175,7 +175,12 @@ class EventIterator {
       // the composer's, and the note rings on as written.
       this.pendingReleases = null;
       this.seamReleases = [];
+      // Channels whose sustain pedal is down at the seam, with the value it has:
+      // a note released while the pedal is down is gone from `ringing` but still
+      // sounds, so the seam has to lift the pedal as well (see rebaseReplay).
+      this.seamSustain = [];
       const ringing = new Map();
+      const sustain = new Map();
       for (let i = 0; i < this.events.length && this.absTicks[i] <= endTick; i++) {
         const e = this.events[i];
         if (e.type !== EVENT_MIDI) continue;
@@ -184,6 +189,8 @@ class EventIterator {
         } else if (e.subtype === EVENT_MIDI_NOTE_OFF ||
                    (e.subtype === EVENT_MIDI_NOTE_ON && e.param2 === 0)) {
           ringing.delete(`${e.channel}-${e.param1}`);
+        } else if (e.subtype === EVENT_MIDI_CONTROLLER && e.param1 === CC_64_SUSTAIN) {
+          sustain.set(e.channel, e.param2);
         }
       }
       for (const note of ringing.values()) {
@@ -196,6 +203,9 @@ class EventIterator {
           param2: 0,
           absTick: endTick,
         });
+      }
+      for (const [channel, value] of sustain) {
+        if (value >= 64) this.seamSustain.push({ channel, value });
       }
     }
   }
@@ -304,10 +314,33 @@ class EventIterator {
     // pitch. The first release carries the gap to the boundary, and the
     // replay's own first event then starts one loop length from there -- where
     // it would have started anyway -- so only the cut is new.
+    //
+    // A note released while the pedal was down is not in seamReleases (its
+    // NOTE_OFF already ran) but keeps sounding all the same, so the seam also
+    // lifts the pedal -- for the channels that had it down -- and re-arms it for
+    // the next pass. That is the pair loopJump() sends on the live wrap, and the
+    // two have to agree about what the seam sounds like: without the lift a
+    // sustained note runs into the second pass and overlaps its notes.
     const gap = this.boundaryTick - this.curTick;
     const replay = this.absTicks[this.startIdx] - this.loop.startTick;
-    if (this.seamReleases && this.seamReleases.length) {
-      this.pendingReleases = this.seamReleases.map((event, i) => ({ ...event, delta: i === 0 ? gap : 0 }));
+    const cuts = this.seamReleases ? this.seamReleases.slice() : [];
+    const pedal = (channel, param2) => ({
+      delta: 0,
+      type: EVENT_MIDI,
+      subtype: EVENT_MIDI_CONTROLLER,
+      channel,
+      param1: CC_64_SUSTAIN,
+      param2,
+      absTick: this.boundaryTick,
+    });
+    for (const held of this.seamSustain || []) {
+      cuts.push(pedal(held.channel, 0));
+    }
+    for (const held of this.seamSustain || []) {
+      cuts.push(pedal(held.channel, held.value));
+    }
+    if (cuts.length) {
+      this.pendingReleases = cuts.map((event, i) => ({ ...event, delta: i === 0 ? gap : 0 }));
       // The releases are emitted at the boundary, so the emitted timeline
       // reaches it: without this the *next* boundary would add this gap again
       // (curTick is what the deltas are measured from).

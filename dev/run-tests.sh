@@ -33,6 +33,9 @@ echo
 echo "== end detector (sid/n64) =="
 node "$DIR/test-end-detector.js" 2>/dev/null
 echo
+echo "== sid load / deferred seek =="
+node "$DIR/test-sid-load.js" 2>/dev/null
+echo
 echo "== blind loop (slider/loop label state) =="
 node "$DIR/test-blind-loop.js" 2>/dev/null
 echo

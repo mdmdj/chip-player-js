@@ -54,6 +54,9 @@ echo
 echo "== promote strip syntax (C compile, JS parse) =="
 bash "$DIR/test-promote-syntax.sh"
 echo
+echo "== no overlay-only references in what can promote =="
+node "$DIR/check-promotable-refs.js"
+echo
 echo "== clip scenario registry =="
 node "$DIR/record/scenarios.check.mjs"
 echo

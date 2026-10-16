@@ -2187,6 +2187,27 @@ only armed when `silenceDuration >= 0`, and both arms must end the song):
   fail-before) and `check_length ... 2` — and the fix is engine-side, so the app
   needs `node scripts/build-chip-core.js` (the native and JS harnesses both pass
   without it).
+- **A region can outlive its song, and then there is no band (2026-10-16).** The
+  highlighted band is the *second* pass, `[intro + loop, intro + 2*loop)`, and the
+  engine's own length can be shorter than that: FACE04's length is 242 s while its
+  region says intro 182.452 s + loop 45.613 s, so the band reached ~32 s past the
+  end of the song. `getLoopBandMs()` used to clamp the band's end to the duration,
+  which left a 14 s sliver at the very end of the slider, drawn while the engine
+  was already ending — reported from the app as a nonsense band. Clamping was the
+  wrong policy: a band the song cannot reach is not one it plays (its tracks ran
+  out of loops before that pass completed; with Repeat One the engine's own length
+  goes *down*, to 182 s), so it now returns null and the blind-loop UI takes over,
+  with a second of slack for the whole-second length. Measured: 120 of 67,169
+  corpus MDX are in this class (0.18 %, up to whole minutes past the end); in the
+  catalog FACE04, `utabi46b`, `SEIYA_N`, `WBALL0_EX`, plus a 76 ms rounding case
+  that still draws. VGM/GME are unaffected — their load-time durations cover
+  `intro + 2*loop` by construction.
+  **Harness gotcha this exposed:** `dev/test-mdx-loops.js`'s fake
+  `_mdx_get_length` still modelled the *pre-re-measure* figure
+  (`intro + limit/per*loop`) for mixed periods, so it always produced a length
+  that covered the band — which is why this case never showed up there. It models
+  the section grid now (as the native `check_length` fixtures assert), and a
+  `lengthMs` override asks for the short-song class explicitly.
 - **Scoping note: what any-limit support would take (2026-10-16).** The region
   only resolves when every looping track completes **two** loops *inside the parse
   the caller asked for* (a period is only measurable from two crossings), and the

@@ -179,6 +179,28 @@ and it keeps the wrap consistent with the expansion.
 A composer who needs the loop to re-enter a known state writes that state inside
 the loop, which is what "authored to continue" (the `loopJump` comment) means.
 
+**Re-raised 2026-10-16 (greptile, `midi-helpers.js:340`), held again — and the
+measurement says it cannot be reproduced on our files.** The new framing is "even
+with Repeat One off": the *expanded two-pass list*, which is what plays for a
+whole-file loop by default, opens pass 2 with pass 1's end state. My first measure
+("5 of 5 looped files contain program changes inside the loop; 4 of 5 end it with
+a different program in force") was a *precondition*, not the finding — the state
+at the loop's end differing from its start is expected whenever a loop contains
+changes. Measured on what actually matters, the program in force at each pass's
+*first note*, **all five open pass 2 on exactly the same instrument as pass 1**:
+the loop's own event list re-applies its programs before its notes, and a
+whole-file loop naturally begins with the file's own setup. The difference the
+finding describes needs a file whose loop's opening notes depend on a patch set
+*before* the loop start while the loop changes it later; none of ours does.
+
+Held on the recorded grounds as well as that: the expansion and the live wrap
+agree (grounds 2 and 3 above), and the source driver plays a sequence jump by
+carrying state. If it is ever wanted it is a product call, not a bug fix: ~10
+lines across `getLoopedEvents`/`rebaseReplay` (restoring the state recorded at the
+loop's start tick) plus `loopJump`'s `collectStateEvents` tick, and updating the
+checks that pin the agreement today. A synthetic file like the pedal fixture would
+make the difference audible if a decision ever needs hearing.
+
 ## Documented, not fixed: the Web MIDI wrap moves the engine clock one look-ahead early (2026-10-16)
 
 greptile (`MIDIFilePlayer.js:607`, P2) reports that the Web MIDI wrap moves the

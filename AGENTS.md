@@ -2805,7 +2805,14 @@ work will (`scripts/metadata-parsers.js` — we add `ay`/`sid`/`mus` and move
 `src/config/index.js` `FORMATS`). The one deliberate schema move he'd take is
 `music_fts` -> `song`/`song_fts`.
 
-Commits on `dev/overlay`: `88ec89bcf` (GSF core + loop wiring + harness),
-`e4fe9e20a` and `7d5ca591e` (fixture/PSF notes). `./dev/promote.sh` (plan only)
-reports **only `src/players/GSFPlayer.js`** would promote; not armed. The dev tree
-was restarted; `/browse` HTML and `/api` both 200.
+**Promoted (user-armed, 2026-10-16).** `promote-apply.sh` landed
+`src/players/GSFPlayer.js` on the feature branch: feature head `1443c6605`,
+overlay rebased to `acad5034f` (the overlay commit `88ec89bcf` became
+`6cbe99044` — the dev-only remainder), both pushed to origin. The rebase verified
+the tree unchanged. `git diff master..feature/subtunes-as-first-class` is now
+**50 files, +4244/-633** (GSFPlayer joins the diff), and `./dev/promote.sh`
+reports "Nothing to promote". The post-promote dev-tree symptom struck again:
+the running server cached a half-written `server/index.js` and `/browse` 500'd
+with `ReferenceError: resolveDirectoryMetadata is not defined` while `/api`
+stayed 200 — exactly the "kill the trees, restart, check the HTML route" note
+above. It cleared on a fresh `npm run dev`; the on-disk file was never wrong.

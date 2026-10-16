@@ -450,6 +450,19 @@ async function main() {
     assert.strictEqual(p.stopped, false, 'repeat one keeps it playing');
   });
 
+  await check('GSF a muted voice disables the detector (it cannot hear anything)', async () => {
+    const { p, core } = makeGSFPlayer({ durationMs: 20000 });
+    p.setLooping(true);
+    // Masking is applied in-engine, so a muted/soloed part reads as silence in
+    // both gates; the detector must stand down rather than re-run the tune, as
+    // SIDPlayer's guard already does.
+    p.voiceMask = Array(6).fill(true);
+    p.voiceMask[0] = false;
+    runN64(p, core, [[MUSIC_LEVEL, 15], ...Array(8).fill(second(TAIL_LEVEL))]);
+    assert.strictEqual(core.state.zeroSeeks, 0,
+      'a muted voice makes any buffer look quiet and static');
+  });
+
   await check('GSF the tail restart lands synchronously', async () => {
     const { p, core } = makeGSFPlayer({ durationMs: 20000 });
     p.setLooping(true);

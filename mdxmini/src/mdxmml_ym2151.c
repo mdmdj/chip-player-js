@@ -68,6 +68,9 @@ typedef struct _mdxmml_ym2151_instances {
   int64_t loop_first_us;   /* elapsed at the 1st loop (intro + loop) */
   int64_t loop_second_us;  /* elapsed at the 2nd loop (intro + 2 * loop) */
   int loops_per_section;   /* per-track counters one joint section is worth (L / pmax) */
+  int gate_reduced;        /* the gate is not the raw per-track minimum, so the length
+                              parse (which resolves this only afterwards) must be
+                              re-measured on the grid the gate actually uses */
   int loop_region_bad;     /* no usable region: the getters report none */
 } mdxmml_ym2151_instances;
 
@@ -284,28 +287,32 @@ mdx_parse_mml_ym2151_async_finalize(songdata *data)
   ym2151_shutdown(data);
 }
 
-/* The quantity the fade gate compares against max_infinite_loops, in the unit
-   the caller names.
+/* The quantity the fade gate compares against max_infinite_loops: how many joint
+   sections the song has finished.
 
-   The engine's own quantity is the smallest per-track loop count, but the loop
-   region the slider band describes is the *joint* section. One section is
-   several repeats of the longest track when the tracks differ in period
-   (loops_per_section > 1), so a limit in joint sections compared against raw
-   counts fires early. Reducing each live track's count to the sections it has
-   finished and taking the smallest turns at exactly the joint boundary.
+   The engine's own quantity is a per-track loop count, and one section is
+   several repeats of a shorter track, so a limiting count compared against raw
+   counters fires early. Two things have to come out of each counter:
 
-   loops_per_section <= 1 keeps the raw minimum: there the units agree, and the
-   per=1 path must not change. Tracks with no measured period (a one-shot that
-   never loops) contribute their raw count, as they always did. */
+   - its repeats per section (L / p), and
+   - the loops it ran *before the joint start*. The region starts at the last
+     track to enter its loop (see the resolver), so a track that entered earlier
+     has that many loops already on the books, and its count alone reads as
+     sections it has not finished. Measured on a real file (EXES04): the fade
+     began 7.2s early, one whole section, at every play point.
+
+   Tracks with no measured period (a one-shot that never loops) contribute their
+   raw count, as they always did. */
 static int
 loop_gate_value(mdxmml_ym2151_instances *self, int infinite_loops)
 {
-  int64_t L;
+  int64_t L, intro;
   int i, gate = -1;
 
-  if (self->loop_region_bad || self->loops_per_section <= 1)
+  if (self->loop_region_bad)
     return infinite_loops;
   L = self->loop_second_us - self->loop_first_us;
+  intro = self->loop_first_us - L;   /* the getters' anchor, minus one section */
   if (L <= 0)
     return infinite_loops;
 
@@ -317,9 +324,14 @@ loop_gate_value(mdxmml_ym2151_instances *self, int infinite_loops)
     if (self->track_second_us[i] <= 0 || p <= 0) {
       s = self->mdx->track[i].infinite_loop_times;   /* never loops: raw count */
     } else {
-      int64_t r = (L + p / 2) / p;   /* this track's repeats in one section */
+      int64_t r = (L + p / 2) / p;    /* this track's repeats in one section */
+      int64_t start, pre, n;
       if (r <= 0) r = 1;
-      s = self->mdx->track[i].infinite_loop_times / r;
+      start = self->track_first_us[i] - p;           /* where its loop began */
+      pre = intro > start ? (intro - start) / p : 0; /* loops before the joint start */
+      n = self->mdx->track[i].infinite_loop_times - pre;
+      if (n < 0) n = 0;
+      s = n / r;
     }
     if (gate < 0 || s < gate) gate = (int)s;
   }
@@ -446,6 +458,7 @@ int mdx_parse_mml_ym2151_async_get_length(songdata *data)
   self->loop_first_us = 0;
   self->loop_second_us = 0;
   self->loops_per_section = 0;
+  self->gate_reduced = 0;
   self->loop_region_bad = 0;
 
   next = 1;
@@ -519,16 +532,34 @@ int mdx_parse_mml_ym2151_async_get_length(songdata *data)
     self->loops_per_section = ( pmax > 0 && L > 0 ) ? (int)(L / pmax) : 0;
     self->loop_region_bad =
       ( loopers == 0 || !all_second || periods == 0 || L <= 0 || intro + L <= 0 ) ? 1 : 0;
+    /* Whether the gate is anything other than the raw per-track minimum: some
+       track needs the section division, or ran loops before the joint start. The
+       gate itself computes both every time; this is the same test, hoisted so the
+       length parse below can know to re-measure on the gate's own grid. */
+    if (!self->loop_region_bad) {
+      for ( i = 0; i < self->mdx->tracks; i++ ) {
+        int64_t p, r;
+        if ( self->mdx->track[i].infinite_loop_times <= 0 ) continue;
+        if ( self->track_second_us[i] == 0 ) continue;
+        p = self->track_second_us[i] - self->track_first_us[i];
+        if ( p <= 0 ) continue;
+        r = ( L + p / 2 ) / p;
+        if ( r > 1 || self->track_first_us[i] - p < intro ) {
+          self->gate_reduced = 1;
+          break;
+        }
+      }
+    }
   }
 
   /* The parse above measured the length with the fade gate on the raw per-track
-     minimum: loops_per_section is resolved only here, so loop_gate_value
-     short-circuits during that parse. When one joint section is several repeats
-     of the longest track (per > 1) the raw gate turns a section's worth early,
-     so sec is short of the section end -- and MDXPlayer arms its end detector on
-     sec, stopping the song mid-fade. Re-measure with the grid resolved, which is
-     the quantity playback gates on, so sec is the length the engine plays. */
-  if (!self->loop_region_bad && self->loops_per_section > 1) {
+     minimum: the region is resolved only here, so loop_gate_value has nothing to
+     reduce during that parse. When the gate is not that raw minimum it turns a
+     section's worth (or a track's head start) early, so sec is short of the
+     section end -- and MDXPlayer arms its end detector on sec, stopping the song
+     mid-fade. Re-measure with the grid resolved, which is the quantity playback
+     gates on, so sec is the length the engine plays. */
+  if (!self->loop_region_bad && self->gate_reduced) {
     if (!mdx_parse_mml_ym2151_async_rewind(data))
       return 0;
     next = 1;

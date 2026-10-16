@@ -53,7 +53,10 @@ Everything else (20 files) has no loop markers.
   20, `Nurse Edna` 37, `Tentacle Disco` 4, Windows `flourish`/`town` 2) have
   **no loop region** at all.
 - **Post-loop notes (a composed ending after the loop end): none.**
-- **Lone CC111 (RPG Maker "loop to end"): none.**
+- **Lone CC111 (RPG Maker "loop to end"): none in the catalog** — the authored
+  `catalog/midi/tempo_stress/loop/*.rpgmaker.mid` fixtures cover it (note their
+  region is the *ending* section: a lone CC111 has no partner, so it reads as
+  "loop from here to the song end", not "end at this tick").
 - **Format-2 file with markers: none.** All 7 format-2 files (Day of the
   Tentacle) report no range. `scripts/build-music.js` counts format-2 SMFs in
   its run summary precisely to catch if one ever does carry markers.
@@ -74,7 +77,7 @@ Everything else (20 files) has no loop markers.
 | loop-empty track (replay-skip, #6) | synthetic — `Descent FM` is a real instance and unused | **gap** |
 | first event past loop end → outro shifted past the passes (#6) | synthetic only | **gap** |
 | tempo change inside the loop restored on replay (#4) | synthetic only | **gap** |
-| lone CC111 (RPG Maker, loop to track end) | synthetic only | **gap** |
+| lone CC111 (RPG Maker, loop to track end) | synthetic + the `*.rpgmaker.mid` fixtures | gap (real file) |
 | paired marker shorter than a beat (not a region) | synthetic only | **gap** |
 | format-2 with markers | synthetic only | **gap** |
 | post-loop content *with* notes keeps its timing | synthetic only | **gap** |

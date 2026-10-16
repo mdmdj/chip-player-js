@@ -1912,8 +1912,8 @@ hook instead of recomputing the band.
 
 - **Enable (any time):** loop the region natively/forever; no seek, no jump. The
   head cycles inside the band. If enabled after the region, finish the current
-  pass first (via `restartAtEndPending` or the player's native equivalent),
-  never jump the transport backward into the loop. If a fade is already running
+  pass first (the player's native equivalent), never jump the transport backward
+  into the loop. If a fade is already running
   when repeat is enabled (enabled mid-fade), the audio finishes that fade and
   the song ends; the head must proceed through the fade region, not fold back
   into the band — VGM captures the fade start at enable time for this.
@@ -1948,15 +1948,48 @@ Two rules that keep it honest:
   which is what lets one generic base method and one component read a single
   shape.
 
-**TODO — `restartAtEndPending` is a half-landed mechanism.** The base honors it
-in `processAudio` (only when the position reaches the duration), but no engine
-currently leaves it set: `VGMPlayer`/`MDXPlayer`/`MIDIPlayer` all clear it in
-`setLooping` (native/JS-wrap looping would fight the late `seekMs(0)`), and
-`GMEPlayer` restarts the track itself in its `playIndefinitely` block, making
-it partly redundant. Either wire it to a player that actually needs the
-"finish the song, then restart" behavior, or drop it from the base until one
-does. "Who consumes this?" is a fair review question and "nobody yet" is a
-weak answer.
+### What the engine does at the seam — and what it leaves to the loop
+
+A loop is authored to be self-contained: its own events re-establish what its
+notes need, so the engine must not re-send state the file already carries.
+Measured: all five looped catalog MIDI files open pass 2 on exactly the same
+instrument as pass 1, because the loop's own program changes replay before its
+notes. The engine intervenes in exactly two things, both cases a file *cannot*
+express:
+
+- **Notes still sounding at the boundary.** A release past the loop end, or one
+  that already ran under the sustain pedal, leaves a note sounding; a second
+  NoteOn for a sounding note is invalid, so the seam cuts it. A pedal-sustained
+  note's release already ran, so that cut *is* a pedal lift — and the pedal's own
+  value at the seam is then re-applied, which is trust, not invention: it is the
+  state the loop's own events left. Implemented in `EventIterator`
+  (`midi-helpers.js`), and mirrored by `MIDIFilePlayer.loopJump` on the live wrap.
+- **Timing.** The replayed pass is re-timed from the seam, so a tempo announced
+  before the loop — which the replay does not re-emit — is latched at the loop
+  start and restored once per pass (`EventIterator`: single-track restores it per
+  replay, the multi-track merge once at the shared boundary so a later track cannot
+  erase an earlier one's change). Not a UI nicety: the latch is what gives the
+  replayed pass's events the right ms mapping, since the merge computes `playTime`
+  from the tick resolution as it walks. Checks: "a tempo change inside the loop is
+  restored on the replayed pass", and its third-pass version.
+
+The test for the next "restore X at the seam" suggestion: **does X persist in the
+engine (a program, a controller, the pedal — nothing to do, the file carries it),
+or is its effect positional/time-like (then the engine must re-announce it)?**
+That is why the program/controller restore greptile has raised twice is declined —
+it would be the engine inventing state the file did not ask for — while the tempo
+restore is required.
+
+Transport bookkeeping is a third, separate bucket with no musical state in it: the
+pass budget (two passes by default — MIDI's expansion, `DEFAULT_LOOP_COUNT`, the
+wrapper's `loopCount = 2`), the band's placement (the *second* instance, so the
+highlighted region is one the song actually plays), and the wrap target (the same
+point, which is why toggling repeat never shifts the band). Engines with no loop
+API — SID and N64 (free-run + tail restart), GME's in-buffer restart for one-shots
+— have no seam at all and sit outside this.
+
+*(This section replaced a TODO about `restartAtEndPending`; that mechanism was
+dropped in `4c94bf813` — the late-repeat branch was unreachable.)*
 
 ### Repeat One test matrix
 
@@ -2003,9 +2036,8 @@ only armed when `silenceDuration >= 0`, and both arms must end the song):
   (curLoop keeps incrementing; a short loop plays several iterations inside the
   fade), so re-deriving the count on a no-op transition (e.g. the Off→All
   repeat toggle mid-tail) moves the configured fade start past the fade that is
-  already running and the head folds back into the band. `setLooping` clears the
-  base `restartAtEndPending`
-  (libvgm loops natively; the base late-repeat `seekMs(0)` would fight it).
+  already running and the head folds back into the band. `setLooping` keeps to
+  libvgm's own loop (the base's late-repeat `seekMs(0)` would fight it).
 - Leaving repeat one after more than the default loop count sets
   `durationExtended`: the position is already past the load-time duration, so
   the base end detector (re-armed now that looping is off) would end the song

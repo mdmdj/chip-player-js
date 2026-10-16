@@ -45,6 +45,9 @@ echo
 echo "== devtools stall watch =="
 node "$DIR/test-devtools.js" 2>/dev/null
 echo
+echo "== promote strip syntax (C compile, JS parse) =="
+bash "$DIR/test-promote-syntax.sh"
+echo
 echo "== clip scenario registry =="
 node "$DIR/record/scenarios.check.mjs"
 echo

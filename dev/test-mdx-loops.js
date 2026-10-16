@@ -112,14 +112,17 @@ function makeCore({ introMs = A, loopMs = B, withLoopGetters = true, perSection 
   // _mdx_get_length is upstream and _readLoopRegion() calls it unconditionally;
   // only the two region getters are feature-detected.
   //
-  // It is not the section-gated playback length: mdx_get_length's parse runs the
-  // fade gate before loops_per_section is resolved, so the gate counts raw
-  // per-track loops (one section is `per` of them) and the return is whole
-  // seconds. per == 1 leaves only the truncation.
+  // The section-grid length: playback fades at intro + limit*loop whatever the
+  // tracks' periods are, because the engine re-measures on the joint grid once
+  // loops_per_section is resolved (dev/mdx-native/check.sh's check_length
+  // asserts it for per=2 and per=16). It used to model the pre-re-measure figure
+  // (intro + limit/per*loop), which is why the FACE04 band case -- a song
+  // shorter than its region -- never showed up here. lengthMs overrides it for
+  // exactly that class.
   core._mdx_get_length = () => Math.floor(
     (core.lengthMs != null
-      ? core.lengthMs                     // a file whose tracks stop looping early
-      : core.introMs + (core.maxLoop / core.per) * core.loopMs + FADE_MS) / 1000);
+      ? core.lengthMs
+      : core.introMs + core.maxLoop * core.loopMs + FADE_MS) / 1000);
   if (withLoopGetters) {
     core._mdx_get_loop_start_ms = () => core.introMs;
     core._mdx_get_loop_length_ms = () => core.loopMs;
@@ -297,12 +300,12 @@ async function main() {
   });
 
   await check('leaving shallow still outruns a short reported duration (mixed periods)', async () => {
-    // Where the two gates disagree: mdx_get_length reports the per-track figure
-    // (2 x 10s loops + fade = 24s) while playback fades at the joint section end
-    // (2 x 20s + fade = 44s). Leaving at curLoop 1 schedules a fade past the
-    // reported duration, so a detector that trusted 24s would cut 20s of music.
-    const { p, core } = await makePlayer({ perSection: 2 });
-    assert.strictEqual(p.getDurationMs(), 24000, 'per-track-gated reported length');
+    // A file whose tracks run out of loops reports less than the joint section
+    // end (the FACE04 class), so a detector that trusted the reported 24s would
+    // cut 20s of music. The short figure is set explicitly now: the engine
+    // reports the section grid, so this shape has to be asked for.
+    const { p, core } = await makePlayer({ perSection: 2, lengthMs: 24000 });
+    assert.strictEqual(p.getDurationMs(), 24000, 'short reported length');
     p.setSilenceDuration(0);   // arm the base detector so the truncation is observable
     p.setLooping(true);
     core.advanceTo(BAND_START + 1000);

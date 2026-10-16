@@ -490,6 +490,41 @@ check('Repeat One wraps a non-expanded list back to the loop start', () => {
     `the clock lands back in the loop (elapsed=${Math.round(p.elapsedTime)} start=${Math.round(p.loop.startMs)})`);
 });
 
+check('Repeat One enabled in the outro does not rewind the transport', () => {
+  // The contract: enabled after the region, finish the outro and end -- never
+  // jump the transport backward into the loop. The wrap is gated on
+  // `loopRegionLeft`, set when the clock passes the band with Repeat One off.
+  const mf = loopWithIntroGapAndEnding(); // loop [480,1440], composed ending after
+  const p = makePlayer(stubSynth(true));
+  p.load(mf, false);
+  assert.ok(p.loop, 'expected a loop region');
+  p.play(() => {});
+  p.setLooping(false);
+  p.setPosition(p.getDuration() - 200); // in the outro
+  p.processPlaySynth(0, 2048);
+  assert.ok(p.elapsedTime > p.loop.endMs,
+    `parked past the band end: ${Math.round(p.elapsedTime)} > ${Math.round(p.loop.endMs)}`);
+  const before = p.elapsedTime;
+  p.setLooping(true);
+  p.processPlaySynth(0, 2048);
+  assert.ok(p.elapsedTime >= before,
+    `enabling must not rewind: ${Math.round(before)} -> ${Math.round(p.elapsedTime)}`);
+  assert.ok(Math.abs(p.elapsedTime - before) < 200,
+    `and must not jump forward either: +${Math.round(p.elapsedTime - before)} ms`);
+  assert.strictEqual(p.loopRegionLeft, true, 'the region-left flag is set by playing past the band');
+  // The outro keeps playing to the end rather than hanging on the band end.
+  let advanced = false;
+  for (let i = 0; i < 60 && !p.paused; i++) {
+    const t = p.elapsedTime;
+    p.processPlaySynth(0, 2048);
+    if (p.elapsedTime > t) advanced = true;
+  }
+  assert.ok(advanced, 'the outro keeps playing after the toggle');
+  // A seek re-arms the wrap (the flag is per-pass, not per-song).
+  p.setPosition(p.getDuration() - 200);
+  assert.strictEqual(p.loopRegionLeft, false, 'a seek clears it');
+});
+
 check('N64 shape: a CC102/103 pair gives a region and a band', () => {
   // Mario Kart marks the loop with CC102 at 0 and CC103 at the end of the body.
   // The real file is format 1 (measured), so that is the shape to test here;

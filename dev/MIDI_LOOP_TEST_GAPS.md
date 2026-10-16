@@ -233,6 +233,43 @@ loop's start tick) plus `loopJump`'s `collectStateEvents` tick, and updating the
 checks that pin the agreement today. A synthetic file like the pedal fixture would
 make the difference audible if a decision ever needs hearing.
 
+## Fixed 2026-10-16: enabling Repeat One in the outro rewound the transport
+
+An adversarial pass over the whole MIDI loop surface (27 catalog marker files ×
+{1-pass, 2-pass}, probes under `dev/`'s harness shapes) found one real defect: the
+wrap was gated only on `position >= endIndex && elapsed >= endMs`, so a listener
+who played past the band with Repeat One off and then switched it on satisfied
+that condition on the next callback and `loopJump()` rewound one loop. Measured
+`7846 -> 3893 ms` (**-3953**) on the harness's loop+ending shape; both engines
+(Web MIDI `7400 -> 4900`).
+
+Fixed by `loopRegionLeft` (`MIDIFilePlayer.js`): set when the clock passes the band
+with Repeat One off, it gates the wrap and lifts the band-end cap so the outro
+plays out and the song ends -- the VGM `#4` precedent (enabled at the tail: finish
+it and end, never fold back). Cleared on load and on a seek. Pinned by
+`dev/test-midi-loops.js` ("Repeat One enabled in the outro does not rewind the
+transport"), which fails against the unfixed code at that magnitude.
+
+Same pass, two smaller things: `findLoopRange`'s `Math.min(...markers)` spreads
+became an iterative `minOf` (a file with ~1e5 loop CCs would throw `RangeError`
+before the merge cap; behavior identical, max observed marker count 9), and
+master's leftover `console.debug(combinedEvents)` was removed (every marker file
+reaches `getLoopedEvents` now, so Descent was dumping 15097 objects per load).
+
+## Recorded, not fixed: the band can reach a few ms past the song (2026-10-16)
+
+`MIDIPlayer.getLoopBandMs` returns the wrap span as-is, where the base
+`Player.getLoopBandMs` clamps -- or returns null -- when a region reaches past
+`getDurationMs`. Measured across the 54 catalog marker loads: **16 rows differ,
+by 27-458 ms** (`Pilotwings 64/13 - Gyrocopter.mid` band `0..106667` vs duration
+`106640`; `Descent Game01` `100..200194` vs `200144`; the RPG-Maker fixtures
+`6400..24400` vs `24317`).
+
+Not fixed, per the review bar (audio, or a control beyond its own resolution):
+`AppFooter` clamps the band end to 1, `loopStart` is at or below 1 on every real
+file, and `Slider` hides a reversed band, so nothing is drawn off-slider.
+Revisit if those stop clamping.
+
 ## Documented, not fixed: the Web MIDI wrap moves the engine clock one look-ahead early (2026-10-16)
 
 greptile (`MIDIFilePlayer.js:607`, P2) reports that the Web MIDI wrap moves the

@@ -2434,14 +2434,23 @@ greptile P1s on `dev/overlay`. Its commits land on the overlay either way — bu
   while the read decision is per-account, so A's slow toggle plus a switch to B
   can leave B's server favorites unread. Track pending per account.
 
-**Status (same session, later):** both landed on `dev/overlay` (`2f85761f5`, `52b596c26`). Independent re-run:
-native **12 ok** but **2 FAIL on some runs and 0 on others, same tree** — the
-suite is flaky, and `./dev/promote.sh` stayed clean throughout; `dev/test-mdx-loops.js`
-**21**; `check-faves-account-switch.mjs` **20 passed / 0 failed** (was 17/3).
-**Stabilise the native check before trusting a red run** — most likely the
-sample-derived fade onset (block-RMS threshold) or a fixture whose gain step
-lands near it; pin whichever row moves and say why the test, not the engine, is
-wrong — or fix the engine if it is not.
+**Status (same session, later):** both landed on `dev/overlay` (`2f85761f5`,
+`52b596c26`). Independent re-run: native **12 ok**, `./dev/promote.sh` stayed
+clean throughout; `dev/test-mdx-loops.js` **21**;
+`check-faves-account-switch.mjs` **20 passed / 0 failed** (was 17/3).
+
+**The native check is NOT flaky — "2 FAIL then 0, same tree" was a stale pre-fix
+binary (2026-10-16).** The harness is deterministic: 200 `--length-check` runs on
+`DES_80.MDX` each reported delta 251; 50 runs × 9 fixtures agreed on
+`intro,loop`; 30 `--play 6911` runs agreed on the onset; and a clean rebuild gave
+0 FAIL on three consecutive full runs. The red signature — exactly two FAILs,
+the `check_length` rows for `DES_80`/`MTS2_32` — is the *pre-fix* engine's
+signature, and it reproduces only by running a pre-fix `region`: the script did
+`[ -x ./region ] || make region`, so a binary left over from a fail-before
+control is run with no rebuild. `check.sh` now always runs `make -s region`
+(a no-op when current), so a stale binary can no longer read as a red run. The
+lesson is about the control, not the test: a fail-before run must rebuild after
+it restores the fix.
 
 **Next promote carries those two fixes.** PR head is `b0a717dba`. Arming the
 promote is the user's act; afterwards refresh the squash — `pr/subtunes-as-first-class`

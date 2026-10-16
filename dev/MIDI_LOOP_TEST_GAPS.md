@@ -96,10 +96,13 @@ Everything else (20 files) has no loop markers.
 
 ## Decision: a note crossing the loop end is cut at the seam
 
-`EventIterator` collapses post-loop events that carry no note-on to the loop
-boundary (so converter padding cannot inflate the duration). A note that
-*starts* inside the loop and is *released* after it looks the same to that test,
-so its release is moved to the boundary and the note is cut.
+The expansion never moves an event: a post-loop event keeps its authored offset
+from the loop end, and the song's end is taken from the last *note* event
+(`getLoopedEvents`), so converter padding cannot inflate the duration. A note
+that *starts* inside the loop and is *released* after it is cut at each *replay*
+boundary (`seamReleases`), so the replay never sends a second NoteOn for a
+still-sounding note (the MIDI spec calls that invalid); the composer's authored
+release still plays in the outro, at its written position.
 
 This is deliberate and conventional:
 
@@ -115,25 +118,43 @@ This is deliberate and conventional:
 A file whose loop marker sits mid-note is an authoring error — the loop should
 be placed where voices resolve — and cutting is what we do.
 
+**Corrected 2026-10-16 — the per-track collapse is gone.** The cut used to be
+the *track's* job: a track with no post-loop note-on had its whole outro moved
+onto the loop boundary (`postHasNotes` / `postHasContent`), which cut a crossing
+release and dropped converter padding in one move. That gate keyed on the wrong
+property. A Type-1 conductor track carries the ending's *tempo changes* and no
+notes, so its tempos were collapsed onto the boundary while the note tracks kept
+their timing, and the ending played at the wrong tempo (greptile P1 on PR #13).
+"Noteless" is not "dead air", and no per-track property can be — so the two
+concerns it fused are now separate rules, and nothing is moved:
+
+- **The cut is the replay boundary's job** (`seamReleases`), for every track: the
+  notes ringing at the loop end are released at each replay, so the replay never
+  sends a second NoteOn for a still-sounding note. This is the 2026-10-15 fix
+  below, now uniform instead of gated.
+- **Position is the file's**: a post-loop event (a release included) keeps its
+  authored offset from the loop end, landing after the passes.
+- **The duration is the sounding content**: `getLoopedEvents` ends the song at the
+  last note event and drops trailing meta/cleanup, which is what actually kept
+  converter padding from inflating the duration.
+
+Both rules are pinned by `dev/test-midi-loops.js`. The earlier measurement stands
+— on the synthetic shape (release one tick past the end, plus a composed ending)
+`on@0 off@500 on@2000 on@4000 off@6500`, the replay no longer runs the note
+underneath its own re-trigger.
+
 **Corrected 2026-10-15 (greptile's `midi-helpers.js:176`).** This section used to
 end "there is no note-tracking to add", reasoning that a release "looks the same
-to that test" as padding. That holds only when the track has no note-on past the
-loop end: the collapse is gated on `!postHasNotes`, so with a composed ending the
-release keeps its deferred position and the note is *not* cut — and the replay
-then sends a second NoteOn for a still-sounding note, the very thing this
-decision calls invalid. Measured on a synthetic shape (release one tick past the
-end, plus a composed ending): `on@0 off@500 on@2000 on@4000 off@6500` — the note
-running underneath its own re-trigger. `EventIterator` now tracks the notes
-ringing at the loop end (`seamReleases`) and releases them at every *replay*
-boundary, so the expanded two-pass list cuts the way the Repeat One wrap
-(`loopJump`) already does.
+to that test" as padding. Under the old collapse that held only when the track had
+no note-on past the loop end. `EventIterator` already tracks the notes ringing at
+the loop end (`seamReleases`) and releases them at every *replay* boundary, so the
+expanded two-pass list cuts the way the Repeat One wrap (`loopJump`) already does.
 
-The cut is still **not** applied at the loop → *outro* transition. There the
-release is the composer's own and the note rings into the ending as written —
-`off@6500` in the same measurement — which is what "a composed ending keeps its
-exact timing" means. Pinned by `dev/test-midi-loops.js` ("a note crossing the
-seam is cut at the replay, composed ending or not"), which fails with the cut
-disabled.
+The cut is **not** applied at the loop → *outro* transition. There the release is
+the composer's own and the note rings into the ending as written — `off@6500` in
+the same measurement — which is what "a composed ending keeps its exact timing"
+means. Pinned by `dev/test-midi-loops.js` ("a note crossing the seam is cut at the
+replay, composed ending or not"), which fails with the cut disabled.
 
 ## Decision: the wrap restores the state at the jump target, not at the loop entry (2026-10-15)
 

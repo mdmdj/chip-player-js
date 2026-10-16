@@ -14,6 +14,13 @@ const CC_110_HMI_LOOP_START = 110;
 const CC_111_LOOP_END = 111;
 const CC_123_ALL_NOTES_OFF = 123;
 
+// Backstop for the merged event list, so a pathological file cannot exhaust
+// memory in the browser: at a few hundred bytes per event this is around half a
+// gigabyte of them. A MIDI runs about four bytes per event, so crossing it takes
+// roughly 2 MB of file inside the loop. It never truncates -- the loop region is
+// dropped and the song plays through once, the shape a file with no markers gives.
+const MAX_MERGED_EVENTS = 1000000;
+
 function isLoopStartCC(cc) {
   return cc === CC_102_TRACK_LOOP_START || cc === CC_110_HMI_LOOP_START;
 }
@@ -346,6 +353,9 @@ MIDIFile.prototype.getLoopedEvents = function (tracks, loopCount = 2, range = nu
   let i;
   let j;
   let smallestDelta;
+  // Set when the merge passes MAX_MERGED_EVENTS; the list is then abandoned (see
+  // the fallback below) rather than returned short.
+  let overflowed = false;
   const type = null;
   const subtype = null;
   // First-pass loop region in ms. The start latches off the first loop-start
@@ -442,8 +452,8 @@ MIDIFile.prototype.getLoopedEvents = function (tracks, loopCount = 2, range = nu
           combinedEvents.push(event);
         }
         event = eventIterator.next();
-        if (combinedEvents.length > 200000) {
-          console.warn('getLoopedEvents: event cap reached, truncating.');
+        if (combinedEvents.length > MAX_MERGED_EVENTS) {
+          overflowed = true;
           break;
         }
       }
@@ -522,12 +532,23 @@ MIDIFile.prototype.getLoopedEvents = function (tracks, loopCount = 2, range = nu
         }
         // get next event
         trackIterators[smallestDelta].curEvent = trackIterators[smallestDelta].next();
-        if (combinedEvents.length > 200000) {
-          console.warn('getLoopedEvents: event cap reached, truncating.');
+        if (combinedEvents.length > MAX_MERGED_EVENTS) {
+          overflowed = true;
           break;
         }
       }
     } while (-1 !== smallestDelta);
+  }
+
+  if (overflowed) {
+    // A truncated list would end the song early (the appended all-notes-off
+    // closes it out), which is worse than losing the loop: fall back to a single
+    // pass so every note still plays, with no loop region -- the same shape as a
+    // file that defines no markers. Only a file far larger than anything real
+    // reaches this.
+    console.warn('[midi] loop expansion exceeded ' + MAX_MERGED_EVENTS +
+      ' events; playing once with no loop region.');
+    return { events: this.getEvents(), loopStartMs: null, loopEndMs: null };
   }
 
   // Same stuck-note fix as the getEvents patch below: release every channel

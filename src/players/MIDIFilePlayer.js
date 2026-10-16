@@ -267,14 +267,19 @@ MIDIPlayer.prototype.processPlay = function () {
   let wraps = 0;
   for (;;) {
     // Wrap and reschedule the new pass in this same invocation, so events at
-    // the band start are not a whole callback late.
+    // the band start are not a whole callback late. The wrap fires as soon as
+    // the look-ahead window reaches the band end, not when the clock does:
+    // Web MIDI schedules by absolute time, so the new pass's opening events
+    // have to be queued now, at their future timestamps -- waiting for the
+    // clock leaves them unscheduled until the first callback past the boundary,
+    // which lands them up to a block late.
     if (loopEndIdx !== Infinity && this.position >= loopEndIdx) {
-      if (this.elapsedTime >= this.loop.endMs && wraps++ < 4) {
+      if (this.elapsedTime + BUFFER_AHEAD >= this.loop.endMs && wraps++ < 4) {
         this.loopJump();
         event = this.events[this.position];
         continue;
       }
-      break; // still waiting for the clock to reach the band end
+      break; // the look-ahead window has not reached the band end yet
     }
     if (!(this.events[this.position] && event.playTime < this.elapsedTime + BUFFER_AHEAD)) break;
     message = null;
@@ -574,12 +579,16 @@ MIDIPlayer.prototype.loopJump = function () {
       this.setPositionSynth(eventList);
     }
   }
-  // The clock can be up to a processing block past the band end when the wrap
-  // is detected (the synth renders whole buffers; Web MIDI is called on a
-  // timer). Carry that overshoot: it keeps the loop in absolute time, and for
-  // Web MIDI it is what schedules the new pass against the original boundary
-  // rather than the late callback, so the loop does not drift.
-  this.elapsedTime = loop.jumpMs + Math.max(0, this.elapsedTime - loop.endMs);
+  // The wrap can be detected up to a processing block away from the band end:
+  // the synth renders whole buffers (clock past endMs), and Web MIDI wraps
+  // within its look-ahead window (clock still before endMs). Carry the signed
+  // difference -- exactly `elapsedTime - loop.lengthMs`, since jumpMs is the
+  // band start one loop length back from endMs. That keeps the clock a pure
+  // music time mod the loop length whichever way it is detected, so the new
+  // pass is scheduled against the original boundary rather than the callback
+  // that noticed it: the loop does not drift, and a Web MIDI note at the band
+  // start is queued for the boundary instead of being sent already late.
+  this.elapsedTime = loop.jumpMs + (this.elapsedTime - loop.endMs);
   this.position = loop.jumpIndex;
 };
 

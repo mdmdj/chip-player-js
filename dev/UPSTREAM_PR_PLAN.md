@@ -15,7 +15,38 @@ State when this was written (2026-10-16):
 - No overlay-only paths in the diff (no `dev/`, `AGENTS.md`, `.nvmrc`, `package.json`),
   and `dev/check-promotable-refs.js` is green.
 
-## Phase 1 — sync upstream, then prove the diff is the feature
+## Phase 1 — DONE 2026-10-16 (merge `9e2003419`)
+
+Done: `master` fast-forwarded to `upstream/master` (`e90f505cc`, pushed); upstream merged into
+the feature branch; overlay rebased (275 commits) onto the merge. Two conflicts, both
+resolved additively:
+
+- `scripts/metadata-parsers.js` — his `parsePSF` import and gsf/minigsf/miniusf entries
+  kept alongside our subtune-headers import and sid/mus entries.
+- `src/players/N64Player.js` — our end-detector reset kept where his side was empty; his
+  `parsePSF` metadata setup follows it. The merge supersedes two of our lines with his
+  parser (our `_lib=` scrape → `parsePSF`/`psf.libraries`, our placeholder metadata →
+  `this.metadata = psf`), which is the intended direction; `git diff HEAD` on the file
+  confirmed nothing else of ours was dropped.
+
+**Gate passed:** `git diff --stat master..feature` now reads the feature alone — **49 files,
++4149/−625** (it read +4159/−2266 before, with upstream's own commits counted backwards).
+
+Verified after the rebase: `./dev/run-tests.sh` exit 0; native MDX check green; core rebuild
+green. `promote.sh` reports nothing to promote.
+
+Two dev-side consequences worth remembering:
+
+- `scripts/build-chip-core.js` (in the feature tree, i.e. upstream's copy) now has his GSF
+  engine entry expecting `../libgsf/build/libviogsf.a`. **Overlay-only guard:** our copy
+  sets `enabled` to whether that sibling exists, so the local build skips GSF instead of
+  failing. Build `../libgsf` if GSF audio is wanted locally. Path-listed, never promotes.
+- The post-rebase `html=500, api=200` returned as documented: the running server had
+  cached a half-written `server/index.js`. Restarted; the file itself was intact (import
+  present, identical to the feature's).
+
+**Original plan, for the record:**
+
 
 1. `git fetch upstream` (done; re-run before starting).
 2. In the feature worktree:

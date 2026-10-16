@@ -2407,18 +2407,22 @@ only armed when `silenceDuration >= 0`, and both arms must end the song):
   (probed: bodies 0.03-0.16 mean-abs, tails ≤0.0012) — pure JS, no wasm change.
 - **MIDI:** CC 102/103 region (N64; start left implicit at 0, count ignored)
   and CC 110/111 (HMI Descent loop track). **Detection and expansion are
-  separate**: `findLoopRange` reads the region from any file, but the two-pass
-  expansion is opt-in via `usesTrackLoops(filepath)` — the SoundFont MIDI sets,
-  the gate `master` already had — and the piano roll keys off the *same*
-  predicate (`parseMidiData(buffer, useTrackLoops)`, `Visualizer` derives it from
-  `songPath`), so the roll expands exactly when the audio does and a
-  marker-bearing file elsewhere plays through once. Parsed at load time in
-  `midi-helpers` (`findLoopRange` + two-pass `getLoopedEvents`, same shape as
-  a two-pass libvgm track), so no catalog work was needed. Repeat One wraps
-  the JS event loop to the second-pass start with ringing-note cutoff and
-  silent state restore (no panic); the head folds into the band via the
-  shared `getLoopBandMs`, with no fade tail (past the band the song ends).
-  Lone CC111 (RPG Maker: loop to song end) expands the same way. The expansion
+  separate**: `findLoopRange` reads the region from any file and it is always
+  reported, so the slider band appears and Repeat One wraps — but the *expansion*
+  is opt-in via `usesTrackLoops(filepath)` (the SoundFont MIDI sets, the gate
+  `master` already had). Without it the list is the file's own timeline (one
+  pass) and the wrap goes from the loop end back to the loop start; with it,
+  intro + two passes, so the wrap goes to the second pass and the piano roll
+  draws across the seam. The roll keys off the *same* predicate
+  (`parseMidiData(buffer, useTrackLoops)`, `Visualizer` derives it from
+  `songPath`), so it expands exactly when the audio does. Parsed at load time in
+  `midi-helpers` (`findLoopRange` + `getLoopedEvents`, the two-pass case the same
+  shape as a two-pass libvgm track), so no catalog work was needed. Repeat One
+  wraps the JS event loop to the wrap target with ringing-note cutoff and
+  silent state restore (no panic); the head folds into the band, which is the
+  wrap span (`MIDIPlayer.getLoopBandMs`: the region by default, the second pass
+  when expanded), with no fade tail (past the band the song ends).
+  Lone CC111 (RPG Maker: loop to song end) works the same way. The expansion
   moves nothing: a post-loop event keeps its authored offset from the loop end
   (so a Type-1 conductor's ending tempos keep their timing), and the song's end
   is the last *note* event, not trailing meta/cleanup (`getLoopedEvents`).

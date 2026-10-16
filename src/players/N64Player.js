@@ -2,12 +2,14 @@ import Player from "./Player.js";
 import EndDetector, { DETECT_SONG_END_HINT } from './EndDetector.js';
 import { ensureEmscFileWithData, ensureEmscFileWithUrl, pathJoin } from '../util';
 import { CATALOG_PREFIX } from '../config';
+import { parsePSF } from '../psf';
 import pathe from 'pathe';
 import autoBind from 'auto-bind';
 import React from 'react'; // For the icon in the detectSongEnd label
 
 const fileExtensions = [
   'miniusf',
+  'usf',
 ];
 const MOUNTPOINT = '/n64';
 const INT16_MAX = 32767; // 2^15 - 1
@@ -68,18 +70,14 @@ export default class N64Player extends Player {
     let err;
     this.filepathMeta = Player.metadataFromFilepath(filename);
 
-    const decoder = new TextDecoder('latin1');
-    const miniusfStr = decoder.decode(data);
-    const usflibs = miniusfStr.match(/_lib=([^\n]+)/).slice(1);
-    if (usflibs.length === 0) {
-      throw new Error(`No .usflib references found`);
-    }
+    const psf = parsePSF(data, { filename, defaultSystem: 'Nintendo 64' });
+    this.metadata = psf;
 
     const dir = pathe.dirname(filename);
     const fsFilename = pathJoin(MOUNTPOINT, filename);
     const filePromises = [
       ensureEmscFileWithData(this.core, fsFilename, data),
-      ...usflibs.map(usflib => {
+      ...psf.libraries.map(usflib => {
         const fsUsflibFilename = pathJoin(MOUNTPOINT, dir, usflib);
         const url = pathJoin(CATALOG_PREFIX, dir, usflib);
         return ensureEmscFileWithUrl(this.core, fsUsflibFilename, url);
@@ -100,7 +98,6 @@ export default class N64Player extends Player {
         }
 
         this.resolveParamValues(persistedSettings);
-        this.metadata = { title: pathe.basename(filename) };
 
         this.resume();
         this.emit('playerStateUpdate', {

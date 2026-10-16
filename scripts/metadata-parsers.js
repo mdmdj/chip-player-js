@@ -20,6 +20,7 @@ const {
   parseSID,
   extractDate,
 } = require('./subtune-headers');
+const { parsePSF } = require('../src/psf');
 
 /**
  * Extract metadata from a buffer based on the file extension.
@@ -64,6 +65,9 @@ const PARSERS = {
   mid: parseMIDI,
   midi: parseMIDI,
   mdx: parseMIDI, // Fallback: MDX often uses SMF-like structures or no header, but standard MIDI parser won't hurt if format is different.
+  gsf: (buf) => parsePSFTags(buf, 'Game Boy Advance'),
+  minigsf: (buf) => parsePSFTags(buf, 'Game Boy Advance'),
+  miniusf: (buf) => parsePSFTags(buf, 'Nintendo 64'),
   sid: parseSID,
   mus: parseSID, // The single-tune C64 Sidplayer format has no PSID header; parseSID only supplies its C64 label.
 };
@@ -190,6 +194,11 @@ function parseIT(buf) {
   };
 }
 
+function parsePSFTags(buf, defaultSystem = 'Game Boy Advance') {
+  return parsePSF(buf, { defaultSystem });
+}
+
+
 module.exports = {
   parseMetadata,
   guessMetadataFromPath,
@@ -203,4 +212,5 @@ module.exports = {
   cleanString,
   decodeBuffer,
   readStr,
+  parsePSFTags,
 };

@@ -3,7 +3,7 @@ import { FORMATS } from '../config';
 import { songRefListsEqual } from '../util';
 import bytes from 'bytes';
 
-const formatList = FORMATS.filter(f => f !== 'miniusf').map(f => `.${f}`);
+const formatList = FORMATS.filter(f => f !== 'miniusf' && f !== 'minigsf').map(f => `.${f}`);
 const splitPoint = Math.floor(formatList.length / 2);
 const formatsLine1 = formatList.slice(0, splitPoint).join(' ');
 const formatsLine2 = formatList.slice(splitPoint).join(' ');

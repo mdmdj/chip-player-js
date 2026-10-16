@@ -330,7 +330,7 @@ MIDIPlayer.prototype.processPlay = function () {
       }
     }
     if (message) {
-      const scaledPlayTime = (event.playTime - this.elapsedTime) / this.speed + this.lastProcessPlayTimestamp;
+      const scaledPlayTime = this.wallTimeFor(event.playTime);
       this.send(message, scaledPlayTime + throttleDelayMs);
       throttleDelayMs += delay;
       this.lastSendTimestamp = scaledPlayTime;
@@ -348,6 +348,13 @@ MIDIPlayer.prototype.processPlay = function () {
     this.position = 0;
     this.paused = true;
   }
+};
+
+// Wall-clock time (performance.now() base) at which `ms` of song time occurs,
+// for Web MIDI's absolute scheduling. Song time runs `speed` times faster than
+// wall time, and elapsedTime is the song time as of lastProcessPlayTimestamp.
+MIDIPlayer.prototype.wallTimeFor = function (ms) {
+  return this.lastProcessPlayTimestamp + (ms - this.elapsedTime) / this.speed;
 };
 
 MIDIPlayer.prototype.handleProgramChange = function (channel, program) {
@@ -547,16 +554,25 @@ MIDIPlayer.prototype.loopJump = function () {
   // The state the second pass starts with: intro plus one full loop pass.
   const { eventList } = this.collectStateEvents(0, loop.jumpMs);
   if (this.useWebMIDI) {
+    // These messages belong at the band end, not at the last event the
+    // scheduler sent: the last in-band event can sit a whole rest before the
+    // boundary (and the wrap fires inside the look-ahead window), so that
+    // timestamp cuts held notes and switches the sound while the pass is still
+    // playing. The new pass's events are queued at or after the boundary, and
+    // same-timestamp messages keep their send order, so this can share it. A
+    // wrap detected past the boundary sends as soon as possible, which is all
+    // a past timestamp can mean.
+    const boundary = Math.max(this.wallTimeFor(loop.endMs), this.lastProcessPlayTimestamp);
     for (const key of ringing) {
       this.send([(MIDIEvents.EVENT_MIDI_NOTE_OFF << 4) + (key >> 7), key & 0x7f, 0],
-        this.lastSendTimestamp);
+        boundary);
     }
     // Release pedal-held notes before restoring the next pass's controller
     // state: a note whose NOTE_OFF already ran is no longer in `ringing`, but
     // keeps sounding while sustain is on, and the restore would leave it on.
     for (let ch = 0; ch < 16; ch++) {
       this.send([(MIDIEvents.EVENT_MIDI_CONTROLLER << 4) + ch, CC_SUSTAIN_PEDAL, 0],
-        this.lastSendTimestamp);
+        boundary);
     }
     for (const event of eventList) {
       let message = null;
@@ -567,7 +583,7 @@ MIDIPlayer.prototype.loopJump = function () {
       } else if (event.subtype === MIDIEvents.EVENT_MIDI_CONTROLLER) {
         message = [(event.subtype << 4) + event.channel, event.param1, event.param2];
       }
-      if (message) this.send(message, this.lastSendTimestamp);
+      if (message) this.send(message, boundary);
     }
   } else {
     for (const key of ringing) {

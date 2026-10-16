@@ -115,7 +115,7 @@ MIDIFile.prototype.findLoopRange = function (tracks) {
 // pedal's own seam value is re-applied) -- and where the replay changes what time
 // means (the loop-start tempo latched and restored per pass, which is what gives
 // the replayed pass's events the right ms mapping). Transport policy is the
-// player's business.
+// player's business. See AGENTS.md, "What the engine does at the seam".
 class EventIterator {
   constructor(events, loop) {
     // getTrackEvents can trail a null on empty tracks; drop it early so tick

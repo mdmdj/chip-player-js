@@ -349,37 +349,52 @@ catalogCheck(MARIO, 'piano roll covers the same two passes the audio plays (Mari
   assert.ok(roll.notes.some(n => n.startMs >= bandStart), 'no notes in second pass');
 });
 
-catalogCheck(DESCENT, 'Descent is not expanded: the roll and the audio both play it once', () => {
-  // Descent carries HMI loop markers but is not a SoundFont MIDI set, so it
-  // opts out of the expansion: audio once, roll once, no band. The markers
-  // still define a region when opted in, which is what the loop checks above
-  // exercise.
+catalogCheck(DESCENT, 'Descent: the region is detected, the roll and the audio both play it once', () => {
+  // Descent carries HMI loop markers but is not a SoundFont MIDI set, so it opts
+  // out of the expansion: the region is still detected (band + Repeat One), but
+  // the list is one pass, so the roll and the audio both play it through once.
   const mf = loadMidi(DESCENT);
   const { events, loopStartMs, loopEndMs } = mf.getPlaybackEvents(false);
-  assert.strictEqual(loopStartMs, null);
-  assert.strictEqual(loopEndMs, null);
+  assert.ok(loopEndMs > loopStartMs, 'the HMI markers are detected without the opt-in');
   const audioDur = events[events.length - 1].playTime;
   const roll = rollFor(DESCENT);
   assert.ok(Math.abs(roll.durationMs - audioDur) < 1, `roll=${roll.durationMs} audio=${audioDur}`);
   const expanded = mf.getPlaybackEvents(true);
-  assert.ok(expanded.loopEndMs > 0, 'the HMI markers still define a region when opted in');
+  assert.ok(expanded.events[expanded.events.length - 1].playTime - audioDur >
+    (loopEndMs - loopStartMs) * 0.9, 'the opt-in adds a pass the default does not');
 });
 
-check('expansion is opt-in: loop markers alone do not expand', () => {
-  // The PR briefly expanded every marker-bearing file; the gate is the
-  // SoundFont MIDI sets (usesTrackLoops), and detection only supplies the
-  // region. Pins the decoupling.
+check('expansion is opt-in: the region is detected, the list stays one pass', () => {
+  // The gate is the SoundFont MIDI sets (usesTrackLoops). Detection is not
+  // gated -- a marker-bearing file reports its region and wraps it in
+  // MIDIPlayer -- but the *expansion* is, so the piano roll draws across the
+  // seam only where the opt-in applies.
   assert.strictEqual(usesTrackLoops('Nintendo 64 (SoundFont MIDI)/Pilotwings 64/13 - Gyrocopter.mid'), true);
   assert.strictEqual(usesTrackLoops('midi/Game MIDI_Descent (PC∕DOS, 1995)_Game01.mid'), false);
   assert.strictEqual(usesTrackLoops('local/dropped.mid'), false);
   assert.strictEqual(usesTrackLoops(null), false);
   const mf = loopWithIntroGapAndEnding(); // CC110/CC111 markers
-  assert.strictEqual(mf.findLoopRange(mf.tracks.map((_, i) => mf.getTrackEvents(i))) != null, true);
+  assert.ok(mf.findLoopRange(mf.tracks.map((_, i) => mf.getTrackEvents(i))) != null);
   const off = mf.getPlaybackEvents(false);
-  assert.strictEqual(off.loopStartMs, null, 'markers alone do not expand');
-  assert.strictEqual(off.loopEndMs, null);
   const on = mf.getPlaybackEvents(true);
-  assert.ok(on.loopEndMs > 0, 'the opt-in expands');
+  assert.ok(off.loopEndMs > off.loopStartMs, 'the region is detected without the opt-in');
+  assert.deepStrictEqual({ s: off.loopStartMs, e: off.loopEndMs }, { s: on.loopStartMs, e: on.loopEndMs },
+    'the region does not depend on the opt-in');
+  const offDur = off.events[off.events.length - 1].playTime;
+  const onDur = on.events[on.events.length - 1].playTime;
+  assert.ok(onDur - offDur > (off.loopEndMs - off.loopStartMs) * 0.9,
+    `the opt-in adds about one loop length: off=${Math.round(offDur)} on=${Math.round(onDur)}`);
+  // The wrap: expanded jumps to the second pass, default goes back to the start.
+  const p1 = makePlayer(stubSynth(true));
+  p1.load(mf, false);
+  assert.ok(p1.loop, 'a loop region is installed without the opt-in');
+  assert.strictEqual(p1.loop.jumpMs, off.loopStartMs, 'default wraps at the loop start');
+  assert.strictEqual(p1.loop.endMs, off.loopEndMs);
+  assert.deepStrictEqual(p1.getLoopBandMs(), { startMs: off.loopStartMs, endMs: off.loopEndMs });
+  const p2 = makePlayer(stubSynth(true));
+  p2.load(mf, true);
+  assert.strictEqual(p2.loop.jumpMs, on.loopEndMs, 'expanded wraps at the second pass');
+  assert.deepStrictEqual(p2.getLoopBandMs(), { startMs: on.loopEndMs, endMs: p2.loop.endMs });
 });
 
 catalogCheck(DOOM, 'piano roll unchanged for files without loops (DOOM)', () => {
@@ -444,6 +459,25 @@ check('Repeat One wraps at the band end, leaving the composed ending', () => {
   p.processPlaySynth(0, 2048);
   assert.ok(p.position >= p.loop.jumpIndex, 'wrapped at the band end, not the list end');
   assert.ok(!p.paused, 'still playing after the wrap');
+});
+
+check('Repeat One wraps a non-expanded list back to the loop start', () => {
+  // No opt-in: the list is the file's own timeline, and the wrap goes from the
+  // loop end back to the loop start (the band is the region itself).
+  const mf = loopWithIntroGapAndEnding();
+  const p = makePlayer(stubSynth(true));
+  p.load(mf, false);
+  assert.ok(p.loop, 'expected a loop region without the opt-in');
+  assert.strictEqual(p.loop.jumpMs, p.loop.startMs, 'the wrap target is the loop start');
+  assert.ok(p.loop.endIndex < p.events.length, 'the composed ending is past the loop end');
+  p.play(() => {});
+  p.setLooping(true);
+  p.setPosition(p.loop.endMs - 10);
+  p.processPlaySynth(0, 2048);
+  assert.ok(p.position >= p.loop.jumpIndex, 'wrapped to the loop start, not the list end');
+  assert.ok(!p.paused, 'still playing after the wrap');
+  assert.ok(Math.abs(p.elapsedTime - p.loop.startMs) < p.loop.lengthMs,
+    `the clock lands back in the loop (elapsed=${Math.round(p.elapsedTime)} start=${Math.round(p.loop.startMs)})`);
 });
 
 check('N64 shape: a CC102/103 pair gives a region and a band', () => {

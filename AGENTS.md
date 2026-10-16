@@ -2468,15 +2468,21 @@ ss -ltnp | grep -E ':(3000|8080)'                               # kill those PID
 curl -s -o /dev/null -w '%{http_code}\n' mms-1:8080/browse/mdx  # the HTML route, not just /api
 ```
 
-**The DEV-region stripper is wrong for non-JS files (found 2026-10-16, not fixed).**
-`dev/promote-plan.sh:93-101` calls itself "brace balance" but is a raw **open-brace
-count** — `tr -cd '{' | wc -c` over `HEAD:<file>` versus the stripped text, with
-closing braces never counted. Removing a *balanced* region therefore changes the
-count, so whole-function DEV regions in C are rejected as false positives:
-`mdxmini/src/mdxmini.c` (73 -> 71) and `mdxmml_ym2151.c` (165 -> 158) both strip to
-balanced text and both pass `gcc -fsyntax-only` / `emcc -fsyntax-only` with exit 0.
-The same code creates the stripped temp file as `mktemp --suffix=.js`, so a real
-parse would hand C to the JS validator. Fix: compile the stripped non-JS file
-(`-fsyntax-only`, flags taken from the build scripts) instead of counting braces,
-and test it with a synthetic accept/reject pair. Reproducer: commit `45e0226cc`
-(the failing wrap), reverted in `22547bcfe`.
+**The DEV-region stripper's non-JS check is a compile now (fixed 2026-10-16,
+`ad7936197`).** It used to count only **open braces** — `tr -cd '{' | wc -c` over
+`HEAD:<file>` versus the stripped text, closing braces never counted — so removing
+a *balanced* whole-function DEV region in C changed the count and was rejected as
+a false positive (`mdxmini/src/mdxmini.c` 73 -> 71 and `mdxmml_ym2151.c`
+165 -> 158, both of which compile), while a region that really broke the file (it
+dropped a semicolon) left the count untouched and was accepted. It also wrote the
+stripped temp file as `mktemp --suffix=.js`, so any real parse would have handed C
+to the JS validator. `dev/promote-plan.sh` now compiles the stripped text with
+`-fsyntax-only` (`cc` first, matching `dev/mdx-native`'s native build and its
+`emscripten.h` stub; `emcc` fallback) and keeps the source basename so messages
+name the real file; the JS/JSX path (`node --check` plus the `@babel/core` jsx
+fallback) is unchanged. A language with no checker is **refused** rather than
+silently accepted — deliberate, and free today: every non-listed candidate is JS
+or C. `dev/test-promote-syntax.sh` pins both directions plus the JSX path and the
+refusal over a throwaway repo (13 checks; against the old planner 3 pass / 10
+fail), wired into `dev/run-tests.sh`. Reproducer: commit `45e0226cc` (the failing
+wrap), reverted in `22547bcfe`.

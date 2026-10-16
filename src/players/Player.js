@@ -353,7 +353,12 @@ export default class Player extends EventEmitter {
     if (this.getLoopBandMs()) return false;
     const duration = this.getDurationMs();
     if (!(duration > 0)) return false;
-    if (!this.isPlaying()) return false;
+    // Not merely "not playing": a paused song is still in its indefinite loop,
+    // and only the transport is held. Pausing must keep the Loop label and the
+    // climbing elapsed time, so the term is for a player that really stopped
+    // (the engine reported the end) -- never for the paused state, which every
+    // player reports as not playing.
+    if (!this.isPlaying() && !this.isPaused()) return false;
     return this.getPositionMs() >= duration;
   }
 

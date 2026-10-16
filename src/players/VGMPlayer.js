@@ -101,8 +101,9 @@ export default class VGMPlayer extends Player {
     if (hasOpl4) {
       console.debug(`${filepath} uses Yamaha OPL4 chip.`);
       // The ROM fetch is this load's async window: hold a seek issued in it
-      // until playback is running, so it is not lost to _lvgm_start.
-      this.loadingAsync = true;
+      // until playback is running, so it is not lost to _lvgm_start -- and drop
+      // anything held from a previous load.
+      this.beginAsyncLoad();
       await ensureEmscFileWithUrl(this.core, YRW801_ROM_PATH, `${SOUNDFONT_URL_PATH}/yrw801.rom`);
     }
 

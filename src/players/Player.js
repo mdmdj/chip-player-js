@@ -329,7 +329,17 @@ export default class Player extends EventEmitter {
     const startMs = meta.intro_length + meta.loop_length;
     let endMs = meta.intro_length + 2 * meta.loop_length;
     const durationMs = this.getDurationMs();
-    if (durationMs > 0) endMs = Math.min(endMs, durationMs);
+    if (durationMs > 0) {
+      // A song can be shorter than its region claims: MDX files whose tracks run
+      // out of loops before the second pass completes end inside the band
+      // (FACE04: a 242s song against a band ending at 273.7s -- 120 of 67k
+      // corpus files, by up to whole minutes). Clamping there left a sliver the
+      // song never plays, drawn while it was already fading out. No band is the
+      // honest answer, and the blind-loop UI covers it. The second of slack
+      // absorbs the whole-second length.
+      if (endMs > durationMs + 1000) return null;
+      endMs = Math.min(endMs, durationMs);
+    }
     return endMs > startMs ? { startMs, endMs } : null;
   }
 
@@ -396,6 +406,20 @@ export default class Player extends EventEmitter {
     this.silenceSamplesRemaining = 0;
     this.onSilenceEnd = null;
     this.trailingSilenceSamples = 0;
+    // A suspended player is not loading anything any more, and a seek it was
+    // still holding was asked for by the load that just got cancelled -- it
+    // must not survive into the next song.
+    this.loadingAsync = false;
+    this.deferredSeekMs = null;
+  }
+
+  // Called at the top of a load that waits on something before playback starts
+  // (SID's HVSC metadata, VGM's OPL4 ROM). Any seek still held from an earlier
+  // load is dropped here: it belongs to the song it was asked for, and carrying
+  // it into this one would skip the new song to the old link's time.
+  beginAsyncLoad() {
+    this.loadingAsync = true;
+    this.deferredSeekMs = null;
   }
 
   // Holds a seek issued while an async load is still starting (see the fields

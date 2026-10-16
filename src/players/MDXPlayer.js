@@ -124,7 +124,9 @@ export default class MDXPlayer extends Player {
       const loopMs = core._mdx_get_loop_length_ms(this.mdxCtx);
       if (loopMs > 0) {
         // The shared intro_length/loop_length vocabulary maps MDX onto the
-        // generic loop hooks, exactly as VGMPlayer does for libvgm.
+        // generic loop hooks, exactly as VGMPlayer does for libvgm. The band the
+        // slider highlights is the second pass; Player.getLoopBandMs() hides it
+        // when the song cannot reach that far (see there).
         this.metadata.intro_length = introMs;
         this.metadata.loop_length = loopMs;
       }

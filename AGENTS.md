@@ -2175,13 +2175,56 @@ only armed when `silenceDuration >= 0`, and both arms must end the song):
   end now. The harness gained `--no-onset` (skip the reference render: half the
   cost) and a level-*relative* onset floor — the old absolute floor made most of
   the corpus report "no onset", which reads as "no deviation". The exhaustive
-  post-fix sweep over all 67k costs ~5 h of single-threaded rendering (~65×
-  realtime, 8 cores) and is the one open check; the sample is 5 deviants before
-  vs 0 after. `check.sh` asserts both halves on `EXES04.MDX` — `check_sections
+  check then needed no rendering at all: the fix moves `mdx_get_length` by exactly
+  the deviation, so a *parse-only* differential (a pre-fix binary vs the fixed
+  one, plain mode) covers every file — **46,339 regions compared, 543 where the
+  pre-fix gate turned early (1.2 %), up to 252 s early.** That is the figure at
+  the engine's *default* limit (3); the app measures at whatever limit
+  `MDXPlayer` asks for (2), and the region only resolves when `intro + 2L` fits
+  inside that parse, so the app-visible subset is smaller — see the scoping note
+  below. `check.sh` asserts both halves on `EXES04.MDX` — `check_sections
   ... 1` (its `per > 1` gate is gone: a per=1 row with a head start is a genuine
   fail-before) and `check_length ... 2` — and the fix is engine-side, so the app
   needs `node scripts/build-chip-core.js` (the native and JS harnesses both pass
   without it).
+- **Scoping note: what any-limit support would take (2026-10-16).** The region
+  only resolves when every looping track completes **two** loops *inside the parse
+  the caller asked for* (a period is only measurable from two crossings), and the
+  parse is ended by the fade gate. So a region exists only when
+  `intro + 2L ≲ length-at-the-asked-limit`, and the app asks at limit 2
+  (`DEFAULT_LOOP_COUNT`, `MDXPlayer._readLoopRegion`). `popm25` (L = 52 s)
+  resolves at 2 and is fixed — the app's length goes 57 s → 217 s, with a band.
+  `DAR2_4` (L = 168 s, so 2L = 336 s against the ~183 s the raw gate allows) does
+  **not**: `loop_region_bad`, no band, and the gate correction cannot reach it
+  (183 s on both binaries; only at the engine default 3 does it move, 267 → 519).
+  That is the app's limit-2 measurement being the success criterion, and it is
+  met wherever the region resolves. If it were ever changed, in the order worth
+  considering:
+  1. **Engine: a region-only pass before the gated one** (`mdxmml_ym2151.c`).
+     Parse with the limit lifted until every looping track has its 2nd loop — a
+     new early exit, so it does not run to the 1200 s cap — resolve the region,
+     rewind, then do today's gated parse for the length. The parse is cheap
+     (~0.1 ms per song-second; a typical gated parse is 12–30 ms), so even a
+     10-minute loop costs ~0.1 s of load time. ~40–70 lines; the rewind machinery
+     already exists (`mdx_parse_mml_ym2151_async_rewind`, which the re-measure
+     uses), and with the region resolved *before* the gated parse the
+     region-specific re-measure can be dropped. Verify with the golden rows, then
+     the pre-fix-vs-fixed differential at limit **2** instead of the default —
+     which also yields the app-visible count the 543 figure is not.
+  2. **JS: warm the region up at a lifted limit** before measuring the duration
+     (~3–5 lines in `_readLoopRegion`). It works — the native harness does it by
+     accident, calling `mdx_get_length` at the engine default before its
+     `--play` run, and the correction then applies at limit 2 (`DAR2_4` 345.7 s
+     vs 177.6 s). Cost: one extra parse (12–30 ms typical, ~120 ms worst) and the
+     *displayed duration* of long-loop files becomes the grid's figure rather
+     than the raw gate's (`DAR2_4` 3:03 → ~5:50), which is the fix, not a
+     regression. Cheaper, but it leaves region resolution to a second parse
+     rather than the engine owning it, and the lifted limit must be bounded
+     (0 runs to the 1200 s cap).
+  3. **Static analysis of the MML, or `get_length(k)` differences** — no. A
+     difference cancels a constant head-start offset (it only exposes a unit
+     error), the fade length is tempo-dependent, and a hand-rolled MML scan is how
+     the XMP band went wrong. A wrong band is worse than none.
 - **Player.** `MDXPlayer` mirrors `VGMPlayer`: `setLooping` drives
   `_mdx_set_max_loop` (0 while repeating, else `max(2, curLoop+1)` when actually
   leaving so the current pass finishes and the engine fades), `getDisplayPositionMs`

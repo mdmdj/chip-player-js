@@ -448,6 +448,19 @@ async function main() {
   // even when one section is several repeats of the longest track. MDXPlayer
   // hands it that count directly (mdxmml_ym2151.c's loop_gate_value does the
   // projection per track), so the old per-track projection must not reappear.
+  await check('a seek re-arms the finite budget after leaving a deep repeat', async () => {
+    const { p, core } = await makePlayer();
+    p.setLooping(true);
+    await drive(p, core, [BAND_END + 1000]); // curLoop 2
+    p.setLooping(false);
+    assert.strictEqual(p._maxLoopCount, 3, `leaving deep extends the budget (${p._maxLoopCount})`);
+    assert.strictEqual(p.durationExtended, true);
+    p.seekMs(0);
+    assert.strictEqual(p._maxLoopCount, 2, `a seek re-arms the two-pass floor (${p._maxLoopCount})`);
+    assert.strictEqual(core.maxLoop, 2, 'and the engine is handed it');
+    assert.strictEqual(p.durationExtended, false, 'and the end detector is back');
+  });
+
   await check('leaving repeat hands the engine the joint section count', async () => {
     const { p, core } = await makePlayer({ perSection: 2 });
     p.setLooping(true);

@@ -804,7 +804,7 @@ Build env vars (all optional):
 - `CHIP_INITIAL_MEMORY`, `CHIP_STACK_SIZE` — heap/stack sizing.
 
 Status: **GME, libvgm, libxmp, N64 (lazyusf2), V2M, MDX, fluidlite MIDI, SID,
-libADLMIDI (OPL3 MIDI)** build and run.
+libADLMIDI (OPL3 MIDI), GSF (viogsf)** build and run.
 
 Provenance: the built `src/chip-core.wasm` links the sibling clones on this box
 plus the in-repo `libADLMIDI`/`psflib`/`lazyusf2`; the four siblings' revisions are
@@ -1805,8 +1805,11 @@ checks no longer work. Compare a live context to a stored one with
      and `startAtZero` (re-seek to 0 at the flash; default on for `preload`, off for
      `preRoll`, opt-in for a share link). See `dev/record/README.md` §4/§5.
 4. Known unsupported formats (don't add to `FORMATS` without a player/parser):
-   plain `.usf` sets (only `.miniusf` is supported), PSF/PSX (`psflib` is reused
-   only by the USF loader; no PSX core), and PSM (`libxmp-lite` = it/mod/s3m/xm;
+   plain `.usf` sets (only `.miniusf` is supported), PSF/PSX (the container/tag
+   parser `src/psf.js` is committed and shared with GSF/N64, but there is no PSX
+   *core* or player yet -- upstream landed GSF first and is still working on PS1,
+   so watch for a PSX core plus `psf`/`minipsf` routing; do not add `psf` to
+   `FORMATS` before that), and PSM (`libxmp-lite` = it/mod/s3m/xm;
    the files here are the MASI variant, which needs full libxmp).
 4. **Audio engine roadmap** (separate from the feature; see "Building the real
    chip-core"). Ordered by impact × risk:
@@ -2748,3 +2751,61 @@ or C. `dev/test-promote-syntax.sh` pins both directions plus the JSX path and th
 refusal over a throwaway repo (13 checks; against the old planner 3 pass / 10
 fail), wired into `dev/run-tests.sh`. Reproducer: commit `45e0226cc` (the failing
 wrap), reverted in `22547bcfe`.
+
+## Handoff (2026-10-16, later) — GSF (GBA) core built, and GSF Repeat One
+
+Upstream's merge adds GSF via `src/bindings/gsf-wrapper.cpp`, but the sibling was
+never built here, so the core skipped the engine — and the guard that skips it
+resolved the wrong path. Both fixed, on `dev/overlay`:
+
+- **`../libgsf` = joshbarrass/viogsf**, cloned and built with emscripten per
+  upstream's README (`emcmake cmake .. && emmake make`). Newer clang rejects
+  VBA-M's i386-only `__attribute__((regparm(n)))` outright, so the build
+  force-includes `dev/emscripten-compat/regparm.h` (defines the attribute away) —
+  we never patch a sibling. `scripts/build-subprojects.sh` now builds it (the
+  `viogsf` target). The core links **11 archives, no clashes**; the wasm grew
+  ~531 KB. Status line above updated.
+- **The guard** in the path-listed `scripts/build-chip-core.js` now checks
+  `path.resolve(__dirname, '../../libgsf/build/libviogsf.a')` (the sibling
+  convention `normalizeInput` uses); the old `scripts/../libgsf` never existed,
+  so GSF was silently off. Its comment is kept PR-clean because the hand-carry
+  gate (`dev/check-promotable-refs.js`) scans hand-carried files **in full** — a
+  comment mentioning `promote-paths.txt` failed it.
+- **GSF loop logic** (`src/players/GSFPlayer.js`, the only promotable file):
+  viogsf has **no loop region** (MP2K loops internally, like NSF), so GSF got the
+  GME/N64 treatment it lacked — `setLooping` ORs Repeat One and the Indefinite
+  Playback setting into `_gsf_set_indefinite_playback`; `isPlayingIndefinitely()`;
+  a `detectSongEnd` toggle + the shared `EndDetector` (reset on load and seek);
+  and a **synchronous `restartTrack()`** (seek-to-0), *not* `seekMs()` — the
+  latter's `muteAudioDuringCall` is async and would re-render the tail. No band,
+  so the blind-loop UI applies (`getLoopBandMs()` is null).
+- **Verified live** (catalog rebuilt: 2107 `.minigsf` indexed and searchable): the
+  transport advances; Repeat One with the setting *off* shows the engine flag
+  `true`; the position runs **past the listed length with no engine end**, then a
+  single `_gsf_seek_ms(0)` re-runs it — same song, no refetch. Pinned by seven GSF
+  checks in `dev/test-end-detector.js` (25 total); all three positive ones fail
+  against the pre-change player, and the sync one also fails against an
+  async-seek variant.
+- **`catalog/psf/` is inert** (see "Dev catalog fixtures"): `.psf`/`.minipsf` are
+  not in `FORMATS`, have no `PARSERS` entry, and have no PSX core/player. The PSF
+  container/tag parser (`src/psf.js`) *is* committed upstream; PS1 playback is
+  not. Don't add `psf` to `FORMATS` ahead of a player.
+
+**Will our DB change break Matt's PSF parser? No.** `src/psf.js` is byte-identical
+between `master` and our feature head (we never touch it); `PARSERS`/`FORMATS`
+PSF routing is unchanged; our schema is purely additive (the only `DROP TABLE`s
+are tables/indexes we ourselves add, inside our own reset paths — no `music` drop
+or rename); and the one parser-contract change is additive (`+ date`; a parser
+that omits it binds NULL). Even a partial step is safe: `parseMetadata` returns
+`{}` (no throw) for an extension with no parser, so adding `psf` to `FORMATS`
+before its parser indexes with filename titles instead of crashing. The real
+friction is **merge conflicts**, not breakage: we edit the same files his PSF
+work will (`scripts/metadata-parsers.js` — we add `ay`/`sid`/`mus` and move
+`parseNSF`/`parseNSFe` into `scripts/subtune-headers.js`; `scripts/build-music.js`;
+`src/config/index.js` `FORMATS`). The one deliberate schema move he'd take is
+`music_fts` -> `song`/`song_fts`.
+
+Commits on `dev/overlay`: `88ec89bcf` (GSF core + loop wiring + harness),
+`e4fe9e20a` and `7d5ca591e` (fixture/PSF notes). `./dev/promote.sh` (plan only)
+reports **only `src/players/GSFPlayer.js`** would promote; not armed. The dev tree
+was restarted; `/browse` HTML and `/api` both 200.

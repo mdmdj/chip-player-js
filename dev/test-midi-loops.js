@@ -841,17 +841,20 @@ check('a note crossing the seam is cut at the replay, composed ending or not', (
 // that carries no markers, so the global loop end is set elsewhere and its last
 // in-loop event sits before that boundary: gap > 0, which the marker-at-the-end
 // shape cannot show.
-check('a seam release moves the emitted timeline to the boundary', () => {
+check('a note released past the loop end rings into the ending at its authored offset', () => {
   const mf = parseBytes(buildMidi([
     [tempo(), cc(110), ccAt(TPQ * 4, 111)],              // loop [0, 480]
     [noteOnAt(0), noteOffAt(TPQ * 5)],                   // on@0, released at 600 -- past the end
   ]));
   const { events, loopEndMs } = mf.getPlaybackEvents(true);
   const last = events[events.length - 1];
-  // Two passes: the noteless release lands on the second boundary, 960 ticks.
-  const expected = 2 * loopEndMs;
+  // The release sits one TPQ past the loop end (a quarter of the 4-TPQ loop), so
+  // it sounds a quarter of a loop length past the second boundary instead of
+  // being clamped onto it. The replay-boundary cut is separate and covered by
+  // 'a note crossing the seam is cut at the replay, composed ending or not'.
+  const expected = 2 * loopEndMs + loopEndMs / 4;
   assert.ok(Math.abs(last.playTime - expected) < 1,
-    `last event at ${Math.round(last.playTime)}ms, expected the second boundary ${Math.round(expected)}ms`);
+    `last event at ${Math.round(last.playTime)}ms, expected ${Math.round(expected)}ms (2 boundaries + the authored offset)`);
 });
 
 // The two-pass expansion is the real work bound (EventIterator stops after its

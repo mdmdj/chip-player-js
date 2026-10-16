@@ -49,6 +49,17 @@ function loadMidi(rel) {
 function tracksOf(mf) {
   return mf.tracks.map((_, i) => mf.getTrackEvents(i));
 }
+
+// Raw event count for a whole file, one event at a time: a stress file's events
+// will not fit in an array here.
+function countTrackEvents(mf) {
+  let count = 0;
+  for (let t = 0; t < mf.tracks.length; t++) {
+    const parser = MIDIEvents.createParser(mf.tracks[t].getTrackContent(), 0, false);
+    while (parser.next()) count++;
+  }
+  return count;
+}
 function stubSynth(silent = true) {
   return {
     log: [],
@@ -80,6 +91,10 @@ function makePlayer(synth) {
 const MARIO = 'Nintendo 64 (SoundFont MIDI)/Mario Kart 64/03 - 3 Raceways, Wario Stadium.mid';
 const DESCENT = 'midi/Game MIDI_Descent (PC∕DOS, 1995)_Game01.mid';
 const DOOM = 'midi/DOOM/Game MIDI_Doom (PC∕DOS, 1993)_02 - At Doom\'s Gate (E1M1).mid';
+// Deliberately dense MIDI (black-MIDI style). Nothing musical depends on it: it
+// is here only to calibrate what the merge ceiling means in file size, and the
+// check that uses it skips when this catalog has none.
+const STRESS = 'midi/black/2 million notes in a second 60 Million BPM.mid';
 
 // Catalog is user-supplied and gitignored, so a missing file skips its check rather
 // than failing it -- but per fixture, which this did not used to be. A single
@@ -261,6 +276,39 @@ function buildMidi(events, { format = 1, division = TPQ } = {}) {
     (chunks.length >> 8) & 0xff, chunks.length & 0xff,
     (division >> 8) & 0xff, division & 0xff];
   return new Uint8Array([...header, ...chunks.flat()]);
+}
+
+// The merge ceiling is a constant in the source; read it here so that raising it
+// cannot leave the overflow check quietly under it.
+const MAX_MERGED_EVENTS = Number(
+  fs.readFileSync(path.join(ROOT, 'src/players/midi/midi-helpers.js'), 'utf8')
+    .match(/const MAX_MERGED_EVENTS = (\d+)/)[1]);
+
+// One track holding `count` controller events inside a CC110..CC111 region,
+// written byte by byte. buildMidi above is fine for the small fixtures but takes
+// seconds at the size the merge ceiling needs. extraTracks adds marker-less
+// tracks, which is what sends the merge down its concurrent path.
+function buildBulkMidi(count, extraTracks = 0) {
+  const mainLen = 7 + 4 + count * 4 + 4 + 4; // tempo, loop start, count CC7, loop end, end
+  const total = 14 + (8 + mainLen) + extraTracks * (8 + 11);
+  const out = new Uint8Array(total);
+  let p = 0;
+  const put = (...bytes) => { for (const b of bytes) out[p++] = b; };
+  const chunk = (len) => put(0x4d, 0x54, 0x72, 0x6b,
+    (len >>> 24) & 0xff, (len >>> 16) & 0xff, (len >>> 8) & 0xff, len & 0xff);
+  put(0x4d, 0x54, 0x68, 0x64, 0, 0, 0, 6, 0, 1, 0, 1 + extraTracks, 0, TPQ);
+  chunk(mainLen);
+  put(0x00, 0xff, 0x51, 0x03, 0x07, 0xa1, 0x20); // tempo, 500000us/beat
+  put(0x00, 0xb0, 110, 0);                        // loop start
+  for (let i = 0; i < count; i++) put(0x01, 0xb0, 7, i & 127);
+  put(0x01, 0xb0, 111, 0);                        // loop end
+  put(0x00, 0xff, 0x2f, 0x00);                    // end of track
+  for (let t = 0; t < extraTracks; t++) {
+    chunk(11);
+    put(0x00, 0xff, 0x51, 0x03, 0x07, 0xa1, 0x20);
+    put(0x00, 0xff, 0x2f, 0x00);
+  }
+  return out;
 }
 
 // Set the tempo so the ms assertions are exact (default 500000 us/beat = 120bpm).
@@ -680,6 +728,11 @@ check('Repeat One Web MIDI: the wrap reschedules the new pass in the same call',
   // The new pass must be scheduled now, not on the next callback.
   assert.ok(sends.length > 0, 'no events scheduled during the wrap call');
   assert.ok(p.position < p.loop.endIndex, 'position did not move into the new pass');
+  // A wrap detected past the boundary keeps the clock absolute (overshoot
+  // carried), so the pass still lines up with the original boundary. The reset
+  // itself advances the clock by the call's own deltaTime, hence the slack.
+  assert.ok(p.elapsedTime >= p.loop.jumpMs && p.elapsedTime - p.loop.jumpMs < 10,
+    `clock should be jumpMs + overshoot, got ${p.elapsedTime}`);
 });
 
 check('multi-track: a track replayed after an in-loop tempo change keeps that tempo', () => {
@@ -773,6 +826,139 @@ check('a seam release moves the emitted timeline to the boundary', () => {
   const expected = 2 * loopEndMs;
   assert.ok(Math.abs(last.playTime - expected) < 1,
     `last event at ${Math.round(last.playTime)}ms, expected the second boundary ${Math.round(expected)}ms`);
+});
+
+// The two-pass expansion is the real work bound (EventIterator stops after its
+// passes); a fixed cap on the merged list instead cut the second pass off
+// mid-way, appended all-notes-off and ended the song early (greptile,
+// midi-helpers.js:527, 2026-10-16). The ceiling now sits several times above an
+// ordinary song -- and crossing it drops the loop region rather than the music,
+// see the next check -- so a loop this size still gets both passes and its band.
+check('a large loop keeps both passes and its band', () => {
+  const N = 101000;
+  const list = [tempo(), cc(110)];
+  for (let i = 0; i < N; i++) list.push(ccAt(1, 7, i % 128));
+  list.push(ccAt(1, 111));
+  // getLoopedEvents debug-logs its whole list (master's, pre-existing); silence
+  // it here or this check prints ~200k objects.
+  const debug = console.debug;
+  console.debug = () => {};
+  try {
+    // The sequential (one track) and concurrent (multi-track) merges each had
+    // their own copy of the cap, so exercise both.
+    for (const tracks of [list, [list, [tempo()]]]) {
+      const { events, loopEndMs } = parseBytes(buildMidi(tracks)).getPlaybackEvents(false);
+      const data = events.filter(e => e.subtype === MIDIEvents.EVENT_MIDI_CONTROLLER && e.param1 === 7);
+      assert.strictEqual(data.length, 2 * N,
+        `expected both passes, got ${data.length} of ${2 * N}`);
+      const last = events[events.length - 1].playTime;
+      assert.ok(Math.abs(last - 2 * loopEndMs) < 1, `two-pass duration ${last} vs ${2 * loopEndMs}`);
+    }
+  } finally {
+    console.debug = debug;
+  }
+});
+
+// Crossing the ceiling must not drop music: the merge is abandoned and the song
+// falls back to one full pass with no loop region -- the same shape a file with
+// no markers gives. A short list (all-notes-off appended, song over) would be a
+// worse bug than the memory the ceiling guards.
+check('an expansion past the merge ceiling plays one full pass, dropping nothing', () => {
+  const N = Math.floor(MAX_MERGED_EVENTS / 2) + 1000; // two passes cross the ceiling
+  const msPerTick = (500000 / TPQ) / 1000; // 500000us per beat, TPQ ticks per beat
+  const debug = console.debug;
+  const warn = console.warn;
+  const warnings = [];
+  console.debug = () => {};
+  console.warn = (...args) => warnings.push(args.join(' '));
+  try {
+    // Both merges carry their own copy of the ceiling test.
+    for (const extraTracks of [0, 1]) {
+      const { events, loopStartMs, loopEndMs } =
+        parseBytes(buildBulkMidi(N, extraTracks)).getPlaybackEvents(false);
+      assert.strictEqual(loopStartMs, null, 'expected no loop region');
+      assert.strictEqual(loopEndMs, null, 'expected no loop band');
+      const overflowWarnings = warnings.filter(w => w.includes('loop expansion exceeded'));
+      assert.strictEqual(overflowWarnings.length, 1, `expected one warning, got ${warnings.length}`);
+      const data = events.filter(e =>
+        e.subtype === MIDIEvents.EVENT_MIDI_CONTROLLER && e.param1 === 7);
+      assert.strictEqual(data.length, N,
+        `expected every controller event once, got ${data.length} of ${N}`);
+      // One pass, not two: the last of them sits where its own tick puts it.
+      const last = data[data.length - 1].playTime;
+      assert.ok(Math.abs(last - N * msPerTick) < 1,
+        `one-pass duration ${Math.round(last)}ms vs ${Math.round(N * msPerTick)}ms`);
+      warnings.length = 0;
+    }
+  } finally {
+    console.debug = debug;
+    console.warn = warn;
+  }
+});
+
+// The ceiling is written in events, but the number a reader needs is the file
+// size it means. A MIDI runs about four bytes per event, so a whole-file loop
+// crosses it around 2 MB; measure that ratio on a real dense file rather than
+// trusting the arithmetic, and hold the constant's stated size to it.
+catalogCheck(STRESS, 'the merge ceiling works out to a few MB of dense file', () => {
+  const bytes = fs.statSync(path.join(ROOT, 'catalog', STRESS)).size;
+  const events = countTrackEvents(loadMidi(STRESS));
+  const bytesPerEvent = bytes / events;
+  assert.ok(bytesPerEvent > 3.5 && bytesPerEvent < 4.5,
+    `${bytesPerEvent.toFixed(2)} bytes per event`);
+  // Two passes over every event, so the ceiling is crossed by this much file.
+  const triggerMB = (MAX_MERGED_EVENTS / 2) * bytesPerEvent / 1048576;
+  assert.ok(triggerMB > 1.5 && triggerMB < 2.5,
+    `ceiling works out to ${triggerMB.toFixed(2)} MB of file`);
+});
+
+// The band (second pass) begins on a distinctive note, so the send can be told
+// apart from the wrap's own cleanup traffic.
+check('Repeat One Web MIDI: the next pass is queued from inside the look-ahead window', () => {
+  const sends = [];
+  const p = new MIDIFilePlayer({
+    programChangeCb: () => {},
+    useWebMIDI: true,
+    output: { send: (message, timestamp) => sends.push([message, timestamp]) },
+    skipSilence: false,
+    sampleRate: 44100,
+    synth: stubSynth(true),
+  });
+  // Loop region [4000, 5000] ms, so the band (second pass) is [5000, 6000].
+  const mf = parseBytes(buildMidi([
+    tempo(),
+    noteOnAt(0, 0, 40), noteOffAt(TPQ, 0, 40),        // intro, ticks 0..120
+    ccAt(TPQ * 3, 110),                               // loop start, tick 480
+    noteOnAt(0, 0, 72), noteOffAt(TPQ, 0, 72),        // the band-start note
+    cc(111),                                          // loop end, tick 600
+    noteOnAt(TPQ * 6, 0, 50), noteOffAt(TPQ, 0, 50),  // composed ending
+  ]));
+  p.load(mf, false);
+  assert.ok(p.loop, 'expected a loop region');
+  p.play(() => {});
+  p.setLooping(true);
+  // This is where the scheduler really sits once the last in-band event has
+  // been sent: `position` has reached the band-end index, but the clock is
+  // still one look-ahead window short of the boundary. Waiting for the clock
+  // (the old behaviour) queued nothing, so the band-start note was sent on the
+  // callback after the boundary -- up to a block late.
+  const now = performance.now();
+  p.lastProcessPlayTimestamp = now;
+  p.lastSendTimestamp = now;
+  p.elapsedTime = p.loop.endMs - 20;
+  p.position = p.loop.endIndex;
+  sends.length = 0;
+  p.processPlay();
+  assert.ok(sends.length > 0,
+    'the next pass must be queued in the wrap call, not on the callback after the boundary');
+  // Wrapped, not merely parked: the clock is a music time mod the loop length.
+  assert.ok(Math.abs(p.elapsedTime - (p.loop.jumpMs - 20)) < 1,
+    `clock should have wrapped to ${p.loop.jumpMs - 20}ms, got ${p.elapsedTime}`);
+  // The band-start note is queued for the boundary -- 20 ms out, i.e. ahead of
+  // the callback, not sent on it (Web MIDI sends a past timestamp immediately).
+  const ts = Math.max(...sends.map(s => s[1]));
+  assert.ok(ts - now > 5 && ts - now <= 33,
+    `band-start event scheduled ${(ts - now).toFixed(1)}ms out, expected the boundary at ~20ms`);
 });
 
 console.log(`\n${passed} checks passed${process.exitCode ? ' (WITH FAILURES)' : ''}.`);

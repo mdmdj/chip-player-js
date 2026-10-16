@@ -1012,4 +1012,41 @@ check('Repeat One Web MIDI: the wrap cleanup lands on the band end, not the last
     `the restore belongs at the band end (${boundary.toFixed(0)}), got ${program[1].toFixed(0)}`);
 });
 
+// The expanded two-pass list is what the audio engine plays for a whole-file
+// loop (and what the piano roll shows), and it has to sound like the live wrap:
+// loopJump() lifts the sustain pedal at the seam, so the list must too. A note
+// released while the pedal is down is gone from the seam's ring scan but still
+// sounds, so without the lift it carries into the second pass and overlaps its
+// notes.
+check('the MIDI seam lifts a pedal-held note like the live wrap does', () => {
+  const withPedal = parseBytes(buildMidi([
+    tempo(),
+    cc(64, 127),                               // pedal down
+    noteOnAt(0, 0, 60), noteOffAt(TPQ, 0, 60), // released under the pedal: still sounding
+    ccAt(TPQ, 110),                            // loop start
+    noteOnAt(0, 0, 64), noteOffAt(TPQ, 0, 64),
+    cc(111),                                   // loop end
+  ]));
+  const { events, loopEndMs } = withPedal.getPlaybackEvents(false);
+  assert.ok(loopEndMs > 0, `expected a loop region, got ${loopEndMs}`);
+  const seam = events.filter(e => e.subtype === MIDIEvents.EVENT_MIDI_CONTROLLER &&
+    e.param1 === 64 && Math.abs(e.playTime - loopEndMs) < 1);
+  const lift = seam.findIndex(e => e.param2 === 0);
+  assert.ok(lift >= 0,
+    `the pedal is lifted at the seam (values there: ${seam.map(e => e.param2).join(',') || 'none'})`);
+  assert.ok(seam.slice(lift + 1).some(e => e.param2 >= 64),
+    'and re-armed, so the next pass still sustains what it should');
+  // Negative control: the same shape without a pedal must add no pedal traffic.
+  const bare = parseBytes(buildMidi([
+    tempo(),
+    noteOnAt(0, 0, 60), noteOffAt(TPQ, 0, 60),
+    ccAt(TPQ, 110),
+    noteOnAt(0, 0, 64), noteOffAt(TPQ, 0, 64),
+    cc(111),
+  ])).getPlaybackEvents(false);
+  const bareSeam = bare.events.filter(e => e.subtype === MIDIEvents.EVENT_MIDI_CONTROLLER &&
+    e.param1 === 64 && Math.abs(e.playTime - bare.loopEndMs) < 1);
+  assert.strictEqual(bareSeam.length, 0, 'nothing was sustained, so nothing is added');
+});
+
 console.log(`\n${passed} checks passed${process.exitCode ? ' (WITH FAILURES)' : ''}.`);

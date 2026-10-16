@@ -6,7 +6,15 @@ after the review round that added `dev/test-midi-loops.js` coverage. The point
 is to record **which edge cases our catalog MIDI files exercise and which they
 do not**, so a future round can decide whether to author real fixtures.
 
-Set aside for now: no fixture work was done, this is documentation only.
+Two modes, per `getPlaybackEvents(useTrackLoops)`: **detection is always on** —
+the region is reported from any file, the slider band shows, and Repeat One wraps
+(`MIDIPlayer`); the **expansion is the opt-in** (the SoundFont MIDI sets) — intro
++ two passes so the piano roll draws across the seam. Without the opt-in the list
+is the file's own timeline and the wrap goes from the loop end back to the loop
+start; with it, to the second pass, and the band marks that last instance.
+Loop+tempo fixtures now live in `catalog/midi/tempo_stress/` (see AGENTS.md); they
+are not a SoundFont set, so they exercise the default path unless the stripped
+`cpDevExpandTempoStress` toggle is set.
 
 ## How the suite gets its coverage
 

@@ -17,6 +17,23 @@ A file that holds several songs (NSF/NSFE, SID, GBS, AY) becomes a **song folder
 5. **Engine surface:** `src/bindings/*.cpp`, `mdxmini/`, `scripts/build-chip-core.js`
 6. **Share links & SEO:** `App.js`, `AppFooter.js`, `scripts/build-sitemap.js`
 
+## Behaviour Changes vs `master`
+
+- **MIDI loop regions are honoured for any file that marks one** (CC 102/103,
+  CC 110/111, or a lone CC 111), not only the SoundFont MIDI sets: the slider
+  draws the band and Repeat One wraps the file's own timeline back to the loop
+  start. The SoundFont sets additionally expand the list to intro + two passes —
+  so the piano roll draws across the seam — and wrap to the second pass instead.
+  The expansion **moves no event**: a post-loop event keeps its authored offset
+  from the loop end (so a Type-1 conductor's ending tempo changes keep their
+  timing), and the song's end is the last **note** event, so a converter's padded
+  `END_OF_TRACK` cannot inflate the duration.
+- Consequence for existing catalog files: a marker-bearing MIDI outside the
+  SoundFont sets (`Descent`) now reports a loop region and, under Repeat One,
+  loops. Its reported duration becomes its last note rather than its padded end
+  (`203790 → 200144 ms`); the audio is unchanged. The N64 SoundFont sets are
+  unaffected.
+
 ## ⚠ Before Deploying
 
 - **Rebuild the catalog:** `node scripts/build-music.js` (no `--reset-db`, no `-n`). The new statements reference `subtune` / `song_fts` / `music.subtune_count`; against an old catalog the server throws `SqliteError: no such table: subtune` **at require time** and `/top`, `/search`, `/browse`, `/user/favorites` go down. ~12 s on the full catalog. `playbacks.subtune` and favorites need no migration.

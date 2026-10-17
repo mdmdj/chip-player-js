@@ -1322,6 +1322,33 @@ function bendFixture() {
   ]);
 }
 
+// The same region, but the bend is authored BEFORE the loop start: the loop start is the
+// CC110 one tick in, so the bend at tick 0 is state the resumed pass has to open with.
+function bendBeforeLoopFixture() {
+  return buildMidi([
+    tempo(500000), bendAt(24, 0, 0x0000), ccAt(1, 110, 0),
+    noteOnAt(0, 0, 60), noteOffAt(120, 0, 60),
+    noteOnAt(0, 0, 64), noteOffAt(48, 0, 64),
+    cc(111),
+  ]);
+}
+
+// A region that writes a controller the loop start does not leaves no authored value to
+// restore, so the value the finished pass ended with would open the next one. Volume is
+// authored on both sides (the loop start's wins); pan only inside.
+function wrapStateFixture() {
+  return buildMidi([[
+    tempo(500000),
+    ccAt(24, 7, 42),      // volume, before the loop start
+    ccAt(1, 110, 0),      // loop start (tick 25)
+    noteOnAt(0, 0, 60), noteOffAt(120, 0, 60),
+    ccAt(1, 7, 20),       // ... and again inside the region
+    ccAt(1, 10, 0),       // pan, authored ONLY inside the region
+    noteOnAt(0, 0, 64), noteOffAt(120, 0, 64),
+    ccAt(1, 111, 0),      // loop end
+  ]]);
+}
+
 check('a wrap centres a bend the file never authored (no expansion)', () => {
   const synth = stubSynth(true);
   const p = makePlayer(synth);
@@ -1338,20 +1365,76 @@ check('a wrap centres a bend the file never authored (no expansion)', () => {
     'expected a centre bend at the wrap: ' + JSON.stringify(bends));
 });
 
-check('and the expanded wrap still restores the bend the file did author', () => {
+function wrapLogs(fixture, expanded) {
   const synth = stubSynth(true);
   const p = makePlayer(synth);
-  p.load(parseBytes(bendFixture()), true);
+  p.load(parseBytes(fixture()), expanded);
   p.play(() => {});
   p.setLooping(true);
   p.setPosition(p.getDuration() - 30);
   synth.log.length = 0;
   p.processPlaySynth(0, 2048);
-  const bends = synth.log.filter(([k]) => k === 'bend');
+  return { p, synth, bends: synth.log.filter(([k]) => k === 'bend'), ccs: synth.log.filter(([k]) => k === 'cc') };
+}
+const lastCc = (ccs, controller) => [...ccs].reverse().find(([, , c]) => c === controller);
+
+check('and the wrap still restores a bend the loop start authors', () => {
+  const { bends } = wrapLogs(bendBeforeLoopFixture, true);
   assert.ok(bends.length > 0, 'expected bends at the wrap: ' + JSON.stringify(bends));
   // The reset lands first, the collected value after: the pass opens authored.
   assert.strictEqual(bends[bends.length - 1][2], 0,
     'the authored bend must survive the reset: ' + JSON.stringify(bends));
+});
+
+check('a bend authored only inside the region does not open the next pass', () => {
+  // Taken at the wrap target -- one region later -- this bend was restored at the
+  // boundary, so the pass opened bent where the first pass opened centred. It belongs to
+  // the region's own events, which replay it at its authored position instead.
+  const { bends, p } = wrapLogs(bendFixture, true);
+  assert.ok(bends.length > 0, 'expected the centring at the wrap');
+  assert.strictEqual(bends[bends.length - 1][2], 8192,
+    'the pass opens centred, as the first pass did: ' + JSON.stringify(bends));
+  assert.ok(p.events.slice(p.loop.jumpIndex).some(e => e.subtype === MIDIEvents.EVENT_MIDI_PITCH_BEND),
+    'and the region carries its own bend into the pass');
+});
+
+check('the wrap opens in the loop start state, defaulting what it does not author', () => {
+  // Both merges: the loop start is the wrap target only when the file is not expanded,
+  // so the collection point is the same there and one region earlier when it is.
+  for (const expanded of [false, true]) {
+    const dial = expanded ? 'expanded' : 'one pass';
+    const { ccs } = wrapLogs(wrapStateFixture, expanded);
+    const vol = lastCc(ccs, 7);
+    assert.ok(vol, `${dial}: expected the volume restored at the wrap`);
+    assert.strictEqual(vol[3], 42,
+      `${dial}: the loop start's volume, not the region end's: ` + JSON.stringify(vol));
+    const pan = lastCc(ccs, 10);
+    assert.ok(pan, `${dial}: expected a pan at the wrap`);
+    assert.strictEqual(pan[3], 64,
+      `${dial}: an unauthored controller opens at its GM default: ` + JSON.stringify(pan));
+  }
+});
+
+check('a repeated sostenuto down does not re-capture notes that started after it', () => {
+  // Sostenuto holds the notes that were down when it landed; a second down while it is
+  // already down is a no-op in the spec. Re-snapshotting there captures a note that
+  // started in between, and that note's own note-off stops ending the song, so a
+  // converter's padding stays inside the duration.
+  const bytes = buildMidi([[
+    tempo(500000),
+    cc(66, 127),                        // pedal down, A sounding
+    noteOnAt(0, 0, 60), noteOffAt(TPQ, 0, 60),
+    noteOnAt(TPQ, 0, 64),               // B starts after the pedal went down
+    cc(66, 127),                        // a redundant down: must not capture B
+    noteOffAt(TPQ, 0, 64),              // B released -- this ends the song
+    ccAt(TPQ * 4, 1, 0),                // converter padding, four beats of it
+  ]]);
+  const { events } = parseBytes(bytes).getPlaybackEvents(false);
+  const lastNoteOff = Math.max(...events
+    .filter(e => e.subtype === MIDIEvents.EVENT_MIDI_NOTE_OFF).map(e => e.playTime));
+  const end = events[events.length - 1].playTime;
+  assert.ok(Math.abs(end - lastNoteOff) < 1,
+    `the ending must stop at the last note-off: ${Math.round(end)}ms vs ${Math.round(lastNoteOff)}ms`);
 });
 
 // One class of event per layer, toggled independently: the state layers (what is

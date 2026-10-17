@@ -541,6 +541,18 @@ MIDIPlayer.prototype.collectStateEvents = function (fromIdx, toMs) {
     b[event.param1] = event;
     bankInForce.set(channel, b);
   };
+  // A *forward* seek collects from the current event, so the bank a channel is already
+  // on lives before `fromIdx`. Without this seed a program change inside the range whose
+  // bank was selected earlier looks like it has none, and the default-bank rule below
+  // claims bank 0 for a channel the file had on another. The wrap collects from 0, so
+  // this loop is empty there.
+  for (let i = 0; i < fromIdx; i++) {
+    const e = this.events[i];
+    if (e.subtype === MIDIEvents.EVENT_MIDI_CONTROLLER &&
+        (e.param1 === CC_BANK_SELECT_MSB || e.param1 === CC_BANK_SELECT_LSB)) {
+      noteBank(e.channel, e);
+    }
+  }
   let pos = fromIdx;
   while (this.events[pos] && this.events[pos].playTime < toMs) {
     const event = this.events[pos];

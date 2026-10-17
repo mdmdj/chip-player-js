@@ -1411,11 +1411,51 @@ check('end layers: a note-off for a note that never played does not hold the end
     { ...END_LAYERS }), 900, 'a real pedal-held release still runs to the lift');
 });
 
+// What the patch is after a list plays: the bank each program was consumed with, and
+// the bank left pending for the next program change. Shared by the seek and wrap checks,
+// which assert the *patch* rather than the event order -- an order-only assertion passed
+// a fix that still played the wrong instrument.
+function patchAfter(events) {
+  const applied = new Map(); const pending = new Map();
+  for (const e of events) {
+    if (e.subtype === MIDIEvents.EVENT_MIDI_CONTROLLER && (e.param1 === 0 || e.param1 === 32)) {
+      const b = pending.get(e.channel) || { 0: 0, 32: 0 };
+      b[e.param1] = e.param2;
+      pending.set(e.channel, b);
+    } else if (e.subtype === MIDIEvents.EVENT_MIDI_PROGRAM_CHANGE) {
+      const b = pending.get(e.channel) || { 0: 0, 32: 0 };
+      applied.set(e.channel, `bank ${b[0]}/${b[32]} program ${e.param1}`);
+    }
+  }
+  return { applied: Object.fromEntries(applied), pending: Object.fromEntries(pending) };
+}
+
 // Bank select is pending until a program change consumes it, so "the state at the
 // target" is the bank each program was authored with -- *not* the latest bank, which
 // may be a selection made afterwards. The assertion is on the resulting patch, not on
 // the event order: an order-only check passed while the wrap still selected the
 // program on the wrong bank.
+check('a forward seek keeps the patch the file is on', () => {
+  // setPosition collects from the current event, so a forward seek starts its walk
+  // mid-stream: a program change inside the range whose bank was selected earlier has no
+  // bank in view, and the collector must seed that history from the file's start rather
+  // than claim the default bank for it.
+  const bytes = buildMidi([[
+    tempo(), cc(0, 1), cc(32, 0), programChangeAt(0, 0, 2), noteOnAt(0, 0, 60), noteOffAt(TPQ, 0, 60),
+    programChangeAt(TPQ, 0, 3), noteOnAt(TPQ, 0, 62), noteOffAt(TPQ, 0, 62),
+  ]]);
+  const p = makePlayer(stubSynth(true));
+  p.load(parseBytes(bytes), false);
+  p.play(() => {});
+  p.setPosition(500);                     // forward from 0: `position` now passes the
+  const fromIdx = p.position;             // first program change
+  p.setPosition(1500);                    // the forward seek under test
+  const collected = p.collectStateEvents(fromIdx, 1500).eventList;
+  const file = patchAfter(p.events.filter((e) => e.playTime <= 1500));
+  assert.deepStrictEqual(patchAfter(collected), file,
+    'the seek must leave the patch the file is on, not the default bank');
+});
+
 check('a wrap restores the patch the pass was using, bank and program together', () => {
   const bytes = buildMidi([[
     tempo(), cc(0, 0), cc(32, 0), programChangeAt(0, 0, 2), noteOnAt(0, 0, 60), noteOffAt(TPQ, 0, 60),
@@ -1425,22 +1465,6 @@ check('a wrap restores the patch the pass was using, bank and program together',
   const p = makePlayer(stubSynth(true));
   p.load(parseBytes(bytes), false);
   assert.ok(p.loop, 'expected a loop region');
-  // What the patch is after a list plays: the bank each program was consumed with,
-  // and the bank left pending for the next program change.
-  const patchAfter = (events) => {
-    const applied = new Map(); const pending = new Map();
-    for (const e of events) {
-      if (e.subtype === MIDIEvents.EVENT_MIDI_CONTROLLER && (e.param1 === 0 || e.param1 === 32)) {
-        const b = pending.get(e.channel) || { 0: 0, 32: 0 };
-        b[e.param1] = e.param2;
-        pending.set(e.channel, b);
-      } else if (e.subtype === MIDIEvents.EVENT_MIDI_PROGRAM_CHANGE) {
-        const b = pending.get(e.channel) || { 0: 0, 32: 0 };
-        applied.set(e.channel, `bank ${b[0]}/${b[32]} program ${e.param1}`);
-      }
-    }
-    return { applied: Object.fromEntries(applied), pending: Object.fromEntries(pending) };
-  };
   const firstPass = patchAfter(p.events.filter((e) => e.playTime < p.loop.jumpMs));
   assert.deepStrictEqual(patchAfter(p.collectStateEvents(0, p.loop.jumpMs).eventList), firstPass,
     'the wrap must leave the same patch, and the same pending bank, as the pass');

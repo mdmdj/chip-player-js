@@ -1095,19 +1095,18 @@ export const scenarios = [
     watch: [
       'Repeat One sets the engine’s own indefinite flag, so the track keeps rendering past the length the file reports — 1:54 here.',
       'The position climbs through 1:54 and keeps going, with no rewind: the cycle boundary is the engine’s own, not a reload.',
-      'The take starts partway through the song, because a seek on this format is slow enough to be worth keeping off camera.',
+      'The take starts partway through the song: where a seek lands is not repeatable between runs, so it is kept off camera.',
     ],
     before: 'master faded and reloaded the track on every cycle.',
     harness: 'dev/test-end-detector.js',
     browse: '/?play=TkTO3bP2',
     fixture: 'n64/Blast Corps/04 Time to Get Moving!.miniusf',
-    // Off-screen seek, so the sluggishness is not in the clip. N64’s seek renders
-    // forward to the target and the catch-up is visible and slow, so seeking on
-    // camera would show a lurch rather than a cut. Measured on this file: asking
-    // 105000 reads 4395 immediately, and 92260 or 112995 once settled, after ~9 s. The
-    // landing is NOT repeatable between runs, so the script does not schedule around
-    // a particular number -- it asks for a point, lets the pre-roll settle, and
-    // asserts the behavior after it. settleMs is generous for that reason.
+    // The seek stays off camera because its landing is not repeatable, not because
+    // it takes long to look at: measured on this file, asking for 105000 ms reads
+    // 4395 immediately, and 92260 or 112995 once settled, after about 9 s. So the
+    // script does not schedule around a number -- it asks for a point, lets the
+    // pre-roll settle, and asserts the behavior after it. settleMs is generous for
+    // exactly that reason.
     preRoll: { seek: 105000, settleMs: 12000, minMs: 400 },
     // No preload: the share link loads the song in App’s mount handler, and a
     // preload would click a row this clip is deliberately not using.

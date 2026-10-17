@@ -852,6 +852,66 @@ carried, with the counts above as the evidence that it costs nothing audible her
 The same comment in `loopJump` states the scope, so the next reader sees a
 contract rather than a gap.
 
+## Recorded, not fixed: the expanded lone-CC111 loop keeps a padded body (2026-10-17)
+
+Greptile's closing summary named the RPG-Maker (lone CC111) region on the
+**expanded** path as a fix-before-merge. It is real, and the obvious fix is a
+half-mechanism. Measured, not reasoned about.
+
+**The shape.** A lone CC111 means "loop to the end of the song", so the region's
+end is latched from the last event of the first pass -- the file's last event,
+padding included. The one-pass merge then trims the list at its audible end, so
+the clamp added 2026-10-17 (`Math.min(latch, the list's last event)`) lands the
+region on the music. In the **expanded** list that clamp is a no-op: the padding
+sits before the untrimmed end *and* is replayed inside a later pass, so the list's
+last event is seconds out and the region end keeps the padding. On
+`catalog/midi/tempo_stress/loop/4_gradual.rpgmaker.mid`: region `[6400, 16909]`
+expanded against `[6400, 16826]` one-pass -- **83 ms of silence inside the loop,
+replayed on every wrap**; the same on `5_all.rpgmaker.mid`, 0 ms on the other
+three, whose last event is their last audible one.
+
+**Why the region alone cannot be fixed.** `MIDIFilePlayer` builds the wrap from
+the region: `jumpMs = useTrackLoops ? loopEndMs : startMs`, `lengthMs = loopEndMs
+- startMs`, `endMs = jumpMs + lengthMs`. The step the expansion replays by comes
+from the merge's `songEndTick` (the file's last event), so the two are one *padded*
+body apart. Bounding only the region was implemented and measured: the expanded
+region becomes 16826, but the second pass still spans `[16909, 27335]` while the
+player's iteration runs `[16826, 27252]` -- it opens with the 83 ms of silence and
+**cuts the last 83 ms of the pass**. Worse than the defect, in the direction that
+is heard.
+
+**Why the other two candidates fail** (both implemented, both measured, both
+reverted). Taking the first iteration's audible end from the merge's own pass
+bookkeeping (`elapsedLoops === 0`) excludes the events *at* the region boundary,
+which the merge attributes to the next pass -- and a multi-track file's shared
+boundary is exactly those events (`lone CC111, multi-track` in the harness: the
+long part's note-off at 3 s is dropped and the region collapses to the short
+part's 1 s). Taking it from the **plain merge's** last event is exact for one track
+and wrong for several for a different reason: the end rule keys notes by channel
+and pitch, so two parts on the same pitch and channel alias, crediting stops at the
+first part's note-off, and `getEvents()` is trimmed there -- the same fixture
+reports 1 s where the parts' shared body is 3 s.
+
+**The complete fix, for whoever picks it up.** Bound the *body the iterators
+replay by* (`songEndTick`), not only the region, to the audible end of the file
+played once -- computed **per track** and then maximised, so parts of different
+lengths keep their shared boundary while cross-track pitch aliasing cannot collapse
+them -- from the same `endRule` the trim uses, so there is one notion of "audible"
+rather than two. Then the region end and the replay step agree by construction,
+which is the invariant the harness states.
+
+**Reachability: not on any file we have.** The expansion is gated by
+`usesTrackLoops(filepath)` -- the SoundFont MIDI sets -- and the five
+`*.rpgmaker.mid` fixtures are expanded only through the DEV toggle
+(`localStorage.cpDevExpandTempoStress`, a stripped DEV region). The catalog holds
+no other RPG-Maker file, and the 83 ms shape in these is a tempo event at the final
+tick, which is fixture construction rather than a measured real shape. So the
+finding fails the bar twice over -- no reachable file, and the obvious fix is
+incomplete -- and the harness pins it instead: `dev/test-midi-loops.js` keeps the
+one-pass checks green and carries `xcheck('a lone CC111 keeps one region across
+both merges')` as a stated known failure. A passing `xcheck` means the defect was
+fixed and the check should be unwrapped.
+
 ## How to regenerate the inventory
 
 A scanner was used to produce the table above (parse each file with the repo's

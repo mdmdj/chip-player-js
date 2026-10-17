@@ -896,12 +896,15 @@ between the archives. The Gens force this replaced is deleted (GPGX was never
 broken); YM2612 loop verification through any core is valid anyway, since all
 loop state is `PlayerA`-level and core-independent.
 
-**Known issue — N64 seek freeze (pre-existing, not our feature):**
+**N64 seek — no longer reproduces, kept as a watch item (updated 2026-10-17):**
 `N64Player.seekMs` → `_n64_seek_ms` → `decode_seek`
-(`src/bindings/lazyusf2-wrapper.cpp:368`) synchronously renders every sample to
-the target on the main thread, freezing the UI (felt as ~5s). GME avoids this
-with a timesliced seek (`GMEPlayer.doIncrementalSeek`, `requestIdleCallback`).
-N64 would need the same treatment.
+(`src/bindings/lazyusf2-wrapper.cpp:368`) still renders every sample to the
+target synchronously on the main thread. That used to be felt as a ~5 s UI freeze
+with glitchy audio on `.miniusf`; neither reproduces any more, so this is no
+longer a known defect — but all the work is still done before the seek returns,
+and a slower machine or a longer file could bring the symptom back. GME avoids
+the shape with a timesliced seek (`GMEPlayer.doIncrementalSeek`,
+`requestIdleCallback`).
 
 **SID:** built by `scripts/build-libsidplayfp.sh` from **mmontag/libsidplayfp**
 (branch `montag-dev-2.14`) (not vendored; clones to `../libsidplayfp`). It is
@@ -1782,9 +1785,9 @@ checks no longer work. Compare a live context to a stored one with
   built-in loop (see "MDX (mdxmini)").
 - **Still broken / missing:** SID `seek()` to a non-zero position (fork WIP and
   tune-dependent: some tunes resume after a brief dip, others stay silent; a
-  seek before first render hangs; seek-to-0 works); N64 seek freezes ~5s
-  (master's synchronous `seekMs` — a timesliced version was tried and reverted
-  as out of scope; parity with prod). See "Audio engine roadmap" for the ordered
+  seek before first render hangs; seek-to-0 works). (N64's seek freeze is off
+  this list: it no longer reproduces — see the note above.) See "Audio engine
+  roadmap" for the ordered
   plan.
 
 ## Remaining TODO / roadmap
@@ -1899,11 +1902,12 @@ checks no longer work. Compare a live context to a stored one with
      the `~DosBoxOPL3` abort is avoided by building Nuked instead (see
      "libADLMIDI" above). Isolation (step 3) would still shrink the blob and
      contain its OPL cores, but is no longer required to ship OPL3 MIDI.
-   - **(5) N64 seek freeze — out of scope / reverted.** A timesliced
-      `N64Player.seekMs` (idle-callback chunks, like `GMEPlayer`) was tried but
-      dropped: it is unrelated to the sub-tunes feature and, being no faster than
-      master's blocking seek, was not worth the risk. N64 keeps master's
-      synchronous `seekMs` (a pre-existing freeze, parity with prod).
+   - **(5) N64 seek — the freeze no longer reproduces (2026-10-17).** A timesliced
+      `N64Player.seekMs` (idle-callback chunks, like `GMEPlayer`) was tried and
+      dropped: unrelated to the sub-tunes feature, and no faster than master's
+      blocking seek. N64 keeps master's synchronous `seekMs`; the glitch and the
+      ~5 s freeze that motivated this item are not observable any more, so it is a
+      watch item rather than work in flight.
    - **(6) MDX loop region, native Repeat One, seek accuracy — done.**
       `mdxmini` records exact loop points and loops natively via
       `mdx_set_max_loop`; the fade end is now latched and `position_ms`

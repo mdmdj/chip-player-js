@@ -78,8 +78,7 @@ export const header = {
     <li>There is a fix in vendored mdxmini</li>
     </ul>
 
-    <p><strong>There may be unexpected differences in your build due to the sibling libraries not being version pinned.<br>
-    ⚠Specifically, seeking N64 miniusf files has glitchy audio in my version and I'm not sure how it's fixed on your side.</strong></p>
+    <p><strong>There may be unexpected differences in your build due to the sibling libraries not being version pinned.</strong></p>
     <h4>Auth</h4>
     <p>This feature was developed using a mock user shim,
     best effort was made to mock the user properly,

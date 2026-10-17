@@ -525,6 +525,23 @@ check('Repeat One enabled in the outro does not rewind the transport', () => {
   assert.strictEqual(p.loopRegionLeft, false, 'a seek clears it');
 });
 
+check('the slider follows the audio out of the band once the region is left', () => {
+  // getDisplayPositionMs folds past the band only for a live wrap. With
+  // loopRegionLeft set the audio is playing the outro, so the head must run
+  // live there too instead of folding into a band the transport left.
+  const band = { startMs: 0, endMs: 6400 };
+  const make = (flag) => ({
+    metadata: { intro_length: 0, loop_length: 6400 },
+    looping: true,
+    midiFilePlayer: { loopRegionLeft: flag },
+    getPositionMs: () => 9000,
+    getLoopBandMs: () => band,
+  });
+  const fold = (flag) => MIDIPlayerClass.prototype.getDisplayPositionMs.call(make(flag));
+  assert.strictEqual(fold(false), 2600, 'a live wrap folds 9000 into the band');
+  assert.strictEqual(fold(true), 9000, 'left the region: the head stays with the audio');
+});
+
 check('N64 shape: a CC102/103 pair gives a region and a band', () => {
   // Mario Kart marks the loop with CC102 at 0 and CC103 at the end of the body.
   // The real file is format 1 (measured), so that is the shape to test here;

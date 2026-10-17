@@ -571,6 +571,13 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
     rather than a number, so it is engine-version-agnostic, and it fails against
     the pre-fix code (`target=2 curLoop=0`). Needs the dev server and
     `mods/TECHTRIS.MOD`; skips (exit 2) without it.
+  - `dev/record/check-midi-roll-gate.mjs` — the piano roll's loop gate, on a real
+    browser: what the roll parsed must equal what the engine plays, on the load
+    where the roll first appears. React component wiring, so neither fake-core nor
+    node harness can reach it; it fails against the pre-fix code with
+    `roll=72062 audio=144125` (one pass drawn against two played). Needs the dev
+    server and a SoundFont MIDI; skips (exit 2) without one. See the 2026-10-17
+    handoff.
   - `./dev/run-tests.sh` — runs all of the above. Dev-only, not part of the PR.
   - `dev/README.md` documents the shims.
   - Two tracked seams keep the untracked overrides loadable without touching
@@ -2848,3 +2855,60 @@ the running server cached a half-written `server/index.js` and `/browse` 500'd
 with `ReferenceError: resolveDirectoryMetadata is not defined` while `/api`
 stayed 200 — exactly the "kill the trees, restart, check the HTML route" note
 above. It cleared on a fresh `npm run dev`; the on-disk file was never wrong.
+
+## Handoff (2026-10-17) — the piano roll's loop gate, and what the fix costs
+
+**The bug (first load only, SoundFont MIDI).** The roll's pass count comes from
+`usesTrackLoops(filepath)`, the gate both consumers share. Its *data* was read
+from the sequencer (the live song buffer) while that *gate* came from App's
+`songPath` state, which lags one render. On a load the App renders once with the
+buffer already live and the path still null, so the roll parsed **one** pass and
+latched: `midiData` never changed (it is the same buffer object), so
+`componentDidUpdate` never re-parsed. Measured on the Mario Kart MIDI: the roll
+drew 72062 ms while the audio played 144125. A *song change* self-healed (state's
+buffer changed, so the roll re-parsed), which is why it read as a first-load
+oddity rather than a persistent one.
+
+**The fix (`dev/overlay`).** Both inputs now come from one source, so they cannot
+disagree: `App` takes `midiData` from `sequencer.getCurrSongBuffer()` (state's
+copy only as a fallback), `Visualizer` takes the gate from
+`sequencer.getCurrSongPath()`, and `PianoRollVisualizer` re-parses when
+`useTrackLoops` changes as well as when `midiData` does — the belt-and-braces, so
+a gate that ever arrives late expands the timeline instead of latching the single
+pass. Three client files, nothing on the audio path. All three are ordinary
+promote candidates (no DEV regions, no path-list entry), joining the six already
+in the plan.
+
+**Fail-before → pass-after** (`dev/record/check-midi-roll-gate.mjs`): 6 passed /
+1 failed against the pre-fix bundle (`on the first load the roll timed the same
+two passes the audio plays -- roll=72062 audio=144125`), 7/7 after. The same
+assertion was also driven by hand through the t3 preview for the A/B, including
+the switch cases (SoundFont → plain → SoundFont) in both directions.
+
+**What it costs (measured, best-of-N, catalog fixtures).** The only added work is
+the roll's parse on the first load of a gate-on file: **+7…+10 ms** (Wario 9.6 →
+19.3 ms, Gyrocopter 8.4 → 13.2 ms), once, at the render where the roll already
+parsed before. Nothing else moves — the fix touches no file on the audio path:
+
+| operation | Wario | Gyrocopter | Descent |
+| --- | --- | --- | --- |
+| load (the audio event list) | 12–15 ms | 9–11 ms | 23–28 ms |
+| seek (`setPosition`, mid-list) | 0.5–0.8 ms | 0.1–0.3 ms | 0.5–0.8 ms |
+| wrap in band (expanded, one block) | 0.2–0.6 ms | 0.01–0.03 ms | — |
+| wrap whole song (one pass, one block) | 0.007–0.02 ms | 0.01–0.02 ms | 0.007 ms |
+| steady block | 0.002–0.02 ms | 0.01 ms | 0.002 ms |
+
+A browser wall-clock A/B cannot resolve a 10 ms delta against its own load noise,
+so those numbers come from a deterministic node probe and the browser is used only
+for the correctness assertion. Two measurement traps worth keeping: `setPosition`
+short-circuits when asked to move where it already is, so a timed seek needs a
+rewind first and a "best of N" over repeated identical seeks measures 0.00 ms;
+and `processPlaySynth` must be parked *outside* the timer or the parking seek
+dominates the wrap.
+
+**Also observed, not this fix:** a *plain* MIDI's roll parse costs more than the
+same file expanded (Descent 69–75 ms at one pass vs 34–40 ms at two passes) —
+the opposite of what its event counts predict. Neither `parseMidiData` nor the
+event-list builder changed here, so this is pre-existing and unexplained;
+recorded rather than guessed at. If the load path ever needs trimming, that is
+where to look.

@@ -2456,7 +2456,8 @@ only armed when `silenceDuration >= 0`, and both arms must end the song):
   note at its own track's `END_OF_TRACK` is one shared pass
   (`insertTrackEndReleases`), so the plain and marker merges cannot disagree about
   when a held note stops; the collected state replays the bank each program was
-  *authored* with, the program, then any selection still pending (see the 2026-10-17
+  *authored* with, the program, then any selection still pending -- seeded from the
+  file's start for a forward seek, which collects mid-stream (see the 2026-10-17
   entries there); the *end* of a MIDI
   comes from the layered rule in `endRule.js` (notes, the pedal family -- the damper
   and sostenuto, released by Reset All Controllers -- and the panics), so converter

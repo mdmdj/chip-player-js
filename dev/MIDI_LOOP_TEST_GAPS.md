@@ -256,6 +256,42 @@ before the merge cap; behavior identical, max observed marker count 9), and
 master's leftover `console.debug(combinedEvents)` was removed (every marker file
 reaches `getLoopedEvents` now, so Descent was dumping 15097 objects per load).
 
+## Fixed 2026-10-17: seeking into the ending rewound the transport (greptile, `MIDIFilePlayer.js:576`)
+
+Same contract as the outro toggle above, reached through the seek: `setPosition()`
+cleared `loopRegionLeft` outright, so a listener who sought into the ending — with
+Repeat One on, or before enabling it — had the next callback wrap and pull the
+transport back into the band, overriding the position they asked for.
+
+Both wrap guards read that flag (`processPlaySynth` returns into `loopJump()` when
+`position >= loop.endIndex`; `processPlay` at its look-ahead), and it is only ever
+*set* when `!this.looping`, so with Repeat One already on nothing re-set it.
+Measured on the synth path (the default — the app's MIDI output is the dummy one),
+an 8 s file with a region `[0,1000]`:
+
+| seek | the first block after it |
+| --- | --- |
+| 7800 ms (the ending), repeat on | **rewound 6954 ms**, landing at 846 ms inside the band |
+| 500 ms (inside the band) | held position (546 ms), then wraps at the band end |
+
+Fixed by deriving the flag from where the seek landed instead of clearing it:
+
+```js
+this.loopRegionLeft = !!(this.loop && !this.isAuditioning && ms > this.loop.endMs);
+```
+
+So the ending plays out and the song ends — which is the ending Repeat One then
+repeats — while a seek inside the band still re-arms the wrap. Both paths share the
+flag, so Web MIDI is fixed by the same line.
+
+Pinned by `dev/test-midi-loops.js`: the existing outro check now expects the flag
+*set* after a seek into the ending (it asserted the cleared flag, which was the bug
+itself), plus "a seek into the ending does not rewind, in either repeat order"
+(seeking first and then enabling, and repeat already on) and "a Web MIDI seek into
+the ending does not rewind either". All three fail against the previous code, and
+the same check keeps a seek into the band wrapping at the band end, so the fix
+cannot quietly disable the wrap.
+
 ## Recorded, not fixed: the band can reach a few ms past the song (2026-10-16)
 
 `MIDIPlayer.getLoopBandMs` returns the wrap span as-is, where the base

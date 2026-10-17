@@ -461,13 +461,22 @@ router.get('/browse', cache1Hour, async (req, res) => {
       const result = children.map((child) => {
         // A file containing multiple sub-tunes is presented as a folder.
         const isSongFolder = child.type === 'file' && child.subtune_count > 1;
+        // A song folder is one row that the client expands into its sub-tunes
+        // (`listingToContext` in src/util.js), so it owns `count` slots in the
+        // play context: its idx is the first sub-tune's, and the counter runs
+        // past the rest so the row after it still names its own slot.
+        let childIdx = null;
+        if (child.type !== 'directory') {
+          childIdx = idx;
+          idx += isSongFolder ? child.subtune_count : 1;
+        }
         return {
           path: normalizedPath ? `${normalizedPath}/${child.path}` : child.path,
           type: isSongFolder ? 'songfolder' : child.type,
           size: child.size,
           // Prefer the parsed release date over the file system mtime.
           mtime: toUnixSeconds(child.release_date || child.mtime),
-          idx: child.type === 'directory' ? null : (idx++),
+          idx: childIdx,
           count: isSongFolder ? child.subtune_count : (child.count || 0),
           url: child.type === 'directory' || isSongFolder
             ? null

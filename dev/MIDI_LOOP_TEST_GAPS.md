@@ -454,6 +454,68 @@ file and the plain one must both end at the authored lift, with the region intac
 before/after probe over all 54 files — merged list and its duration, plain list and
 its duration, `songEndMs` — is byte-identical.
 
+## Fixed 2026-10-17: sostenuto is a hold, and the reset releases it (greptile, `endRule.js:170`)
+
+CC66 (sostenuto) holds the notes that were *down* when it landed, until it comes up.
+The rule modelled only the damper, so it ended the song at the note-off while the note
+was really held — and `finishEventList` then deleted the authored CC66 release,
+leaving a list whose All-Notes-Off + damper-off pair cannot release a sostenuto hold at
+all. On an engine that implements it (libADLMIDI does; FluidLite has no sostenuto, so
+the default synth was never affected) the last sound stayed stuck.
+
+| shape | before | after |
+| --- | --- | --- |
+| CC66 down 100 ms, note-off 500 ms, CC66 up 1500 ms | **500 ms** | **1500 ms** |
+| CC66 down and never lifted | **500 ms** | **4000 ms** |
+| a damper-held note when CC66 lands | 700 ms | 700 ms — not in the snapshot |
+| a note struck after CC66 landed | 500 ms | 500 ms — not in the snapshot |
+| CC66 hands the note to the damper when it releases first | 1600 ms | 1600 ms |
+
+Fixed in three places, one concept: the rule tracks `sostoHeld` under the existing
+`sustain` layer (the pedal family) and hands a note to the other pedal when its own
+releases; the emitted tail carries `sostenutoOff` beside every `sustainOff` — the
+per-track injection and the song-end append — which is what lets a file that never
+releases the pedal terminate; and the wrap releases CC66 alongside CC64 on both output
+paths, since a sostenuto-held note is not in `activeNotes` and the ringing-note cut
+cannot reach it.
+
+Pinned by `the wrap releases the whole pedal family, on both paths`, an eleven-row shape
+table (`the pedal family holds, and the reset that releases it`), a check that a file
+with no CC66 release still gets one in both merge paths, and the enumeration whose
+alphabet grew to note/damper/sostenuto/panic: **37449 sequences, 562 end later, none
+earlier**.
+
+### The spec sweep this prompted (2026-10-17)
+
+The control-change table walked against the rule, the emitted tail and the wrap:
+
+- **CC121 Reset All Controllers** (RP-015) turns the whole pedal family off, and is not
+  an all-notes-off. The rule ignored it, so a file that reset mid-stream left the model
+  holding a note that had been released — the same stale-state class as the CC120
+  pedal-reset fixed earlier. Now handled: the holds are released, a note whose key is
+  still down keeps sounding (pinned), and it is *modelled*, so it is no longer "padding"
+  for the trailing-controller layer — one existing check's fixture moved from CC121 to
+  CC11 (an unmodelled controller) so it still tests what it was testing.
+- **CC69 Hold 2 is not a hold.** The table names it beside the damper, but it lengthens
+  the *release*, not the sounding time ("the note may eventually fade out despite the
+  musician still holding down the key and this pedal"). No rule change; recorded so the
+  next reader does not add it.
+- **CC65 portamento, CC67 soft, CC68 legato, CC122 local control**: no hold, nothing to
+  do.
+- **Channel mode messages (124-127) and sysex (GM/GS/XG reset)** can reset a channel,
+  which would leave the model stale the same way CC121 did. Recorded, not fixed: no
+  catalog file uses them, they are a live-performance idiom, and the `sysex` layer
+  already exists as the knob for the sysex half.
+- **A program change may reset controllers on some engines.** That is receiver
+  behaviour, not a message the rule can see, and the rule follows the file; the
+  collector already replays the last-wins controller state at a wrap or seek. Recorded.
+
+Reachability for the CC66 finding: **0 of 54** catalog files use CC66 at all (measured
+on raw track data). The emitted-tail change is visible on every file — one event per
+(track, channel), one more from the marker path's injection — with **every duration and
+end identical** across all 54 (Wario 9080 → 9096 events, Descent 15097 → 15131, both
+durations unchanged).
+
 ## Recorded, not fixed: the band can reach a few ms past the song (2026-10-16)
 
 `MIDIPlayer.getLoopBandMs` returns the wrap span as-is, where the base

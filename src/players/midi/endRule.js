@@ -36,6 +36,30 @@ const CC_ALL_NOTES_OFF = 123;
  *                     "last event wins" behaviour the unpatched merge had.
  *     controller, program, bend, aftertouch, sysex, meta
  *
+ * Which control messages can change what is sounding, and where each one stands here
+ * (MIDI 1.0 / RP-015), so the next reader does not rediscover it one round at a time:
+ *
+ *   modelled      64 damper                 holds a released note until it lifts
+ *                 66 sostenuto              holds the notes that were DOWN when it
+ *                                          landed -- a snapshot, not a running hold
+ *                 120 all sounds off        silences the channel, holds included,
+ *                                          without changing the pedals' own values
+ *                 121 reset all controllers releases the pedal family, nothing else
+ *                 123 all notes off         silences what is not pedal-held
+ *
+ *   not a hold     5 portamento time, 65 portamento, 67 soft, 68 legato, 84 portamento
+ *                  control: they change how notes play, not whether they sound.
+ *                  69 hold 2 lengthens the RELEASE rather than holding the note
+ *                  ("the note may eventually fade out despite the musician still
+ *                  holding down the key and this pedal"), so it stays out.
+ *
+ *   out of reach   124-127 omni/mono/poly mode and sysex resets (GM/GS/XG) can reset a
+ *                  channel, which would leave this walk stale exactly the way CC121
+ *                  did. No catalog file uses them, they are a live-performance idiom,
+ *                  and the `sysex` layer is the knob for the sysex half. A program
+ *                  change resetting controllers is receiver behaviour, not a message
+ *                  this walk can see.
+ *
  * The default is the standard we trust: notes, the pedal, and all-sounds-off.
  * Nothing here knows a file path, an engine, or a setting -- see `endLayersFor`
  * for the policy, which is the one place that decides who gets which layers.
@@ -142,15 +166,14 @@ export function songEndMs(events, layers = END_LAYERS) {
           }
           sostenuto.set(e.channel, e.param2);
         } else if (e.param1 === CC_RESET_ALL_CONTROLLERS && layers.panic) {
-          // RP-015 turns the whole pedal family off, so the holds it was carrying
-          // are released -- but it is not an all-notes-off: a note still held down
-          // keeps sounding. Zero the pedal *state* first: clearSosto hands notes
-          // back to `pedalHeld` while the damper still reads down, and they would
-          // survive the reset that way.
+          // RP-015 turns the whole pedal family off, so the holds it was carrying are
+          // released -- but it is not an all-notes-off: a note still held down keeps
+          // sounding. The values are zeroed because a reset changes them; the holds are
+          // dropped rather than handed over, so nothing here depends on statement order.
           pedal.set(e.channel, 0);
           sostenuto.set(e.channel, 0);
           clearHeld(e.channel);
-          clearSosto(e.channel);
+          dropSosto(e.channel);
         } else if ((e.param1 === CC_ALL_SOUNDS_OFF || e.param1 === CC_ALL_NOTES_OFF) && layers.panic) {
           // The two panic messages are not the same thing. All Sounds Off silences
           // the channel outright, pedal-held notes included; All Notes Off leaves
@@ -166,8 +189,12 @@ export function songEndMs(events, layers = END_LAYERS) {
             if (e.param1 === CC_ALL_NOTES_OFF && layers.sustain && pedalDown) pedalHeld.add(k);
           }
           if (e.param1 === CC_ALL_SOUNDS_OFF) {
+            // Silenced outright, so both holds are *dropped*: handing the sostenuto's
+            // notes to the damper (what clearSosto does) would let a note this message
+            // already silenced keep the song open. The pedal values stay as they are --
+            // All Sounds Off changes no pedal for the notes that follow.
             clearHeld(e.channel);
-            clearSosto(e.channel);
+            dropSosto(e.channel);
           }
         } else if (layers.controller) {
           endMs = Math.max(endMs, e.playTime);
@@ -206,8 +233,13 @@ export function songEndMs(events, layers = END_LAYERS) {
   function clearHeld(channel) {
     for (const k of [...pedalHeld]) if (channelOf(k) === channel) pedalHeld.delete(k);
   }
-  // Sostenuto's release hands each note it was holding to the damper if that is
-  // still down -- the same move `endNote` makes, in the other direction.
+  // Sostenuto's OWN release hands each note it was holding to the damper if that is
+  // still down -- the same move `endNote` makes, in the other direction. A panic that
+  // silences the channel instead drops them (`dropSosto`): transferring there would
+  // put a note the message already silenced back into `pedalHeld`.
+  function dropSosto(channel) {
+    for (const k of [...sostoHeld]) if (channelOf(k) === channel) sostoHeld.delete(k);
+  }
   function clearSosto(channel) {
     for (const k of [...sostoHeld]) {
       if (channelOf(k) !== channel) continue;

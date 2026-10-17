@@ -570,10 +570,12 @@ MIDIPlayer.prototype.setPosition = function (ms) {
 
   this.elapsedTime = ms;
   this.position = endIdx;
-  // A seek re-arms the wrap: wherever it lands, the next pass is judged from
-  // here (Repeat One enabled in the outro of a previous pass is not this one's
-  // business). See loopRegionLeft.
-  this.loopRegionLeft = false;
+  // A seek is a transport move, so the flag describes where it landed rather than
+  // being cleared: past the band the region has been left -- the ending plays out
+  // and the song ends, which is the ending Repeat One then repeats -- and inside
+  // it the pass plays on and wraps as usual. Clearing it outright rewound a
+  // listener who sought into the ending. See loopRegionLeft.
+  this.loopRegionLeft = !!(this.loop && !this.isAuditioning && ms > this.loop.endMs);
 };
 
 // Repeat-One wrap to the wrap target (the slider band's start). No

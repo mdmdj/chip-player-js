@@ -376,6 +376,42 @@ Checks: `a wrap replays bank select before the program that uses it` asserts the
 collector's order *and* the order the synth is called in at the wrap; it fails
 against the previous code with `P0:2` first.
 
+## Fixed 2026-10-17: a note-off for a note that never played held the end open (greptile, `endRule.js`)
+
+`endNote` handed any note-off to the pedal whenever the channel's pedal was down,
+without asking whether the note was playing:
+
+```js
+sounding.delete(key);
+if (layers.sustain && (pedal.get(e.channel) || 0) >= 64) pedalHeld.add(key);
+```
+
+A converter's trailing cleanup can release a note that was never on, so a phantom
+sat in `pedalHeld`, `held()` stayed true, and the end ran on to the pedal release —
+or, since the dangling rule credits a trailing event, to the track end — with
+nothing playing:
+
+| shape | before | after |
+| --- | --- | --- |
+| pedal lifted at 2000 ms, `END_OF_TRACK` at 6000 ms | **2000 ms** | **500 ms** |
+| pedal never lifted, `END_OF_TRACK` at 6000 ms | **6000 ms** | **500 ms** |
+| a note that *did* sound, released under the pedal | 900 ms | 900 ms |
+
+The fix is the gate greptile suggested — `const wasSounding = sounding.delete(key)`
+and only then add to `pedalHeld` — which also makes a second note-off for a note the
+pedal already holds a no-op, i.e. what it is: the hold was taken when the note
+stopped sounding.
+
+**Reachability: the shape is on disk, the effect is not.** 1 of the 54 catalog files
+has a pedal-down note-off for a note that never sounded, and 0 have an inflated end
+— on that file something else is genuinely audible later. A before/after probe over
+all 54 (merged list and its duration, the plain list and its duration, and
+`songEndMs`): **byte-identical**, so nothing shipped moves.
+
+Check: `end layers: a note-off for a note that never played does not hold the end`
+pins both shapes and the real pedal case; it fails against the previous code at
+2000/6000.
+
 ## Recorded, not fixed: the band can reach a few ms past the song (2026-10-16)
 
 `MIDIPlayer.getLoopBandMs` returns the wrap span as-is, where the base

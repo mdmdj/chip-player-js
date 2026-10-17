@@ -346,6 +346,96 @@ reviewer. If a durable suite is ever wanted, the same harnesses move to a tracke
 `test/` dir under `node --test` with no new dependencies. No new information since
 that decision, so: not a bug, documented.
 
+## Fixed on the overlay, not on the PR head: held MIDI endings were shortened (F-B, 2026-10-17)
+
+greptile P1 on PR #15 (`midi-helpers.js:602`): "For a MIDI file with loop markers,
+the last `NOTE_OFF` can occur while the sustain pedal still holds the note. This
+code deletes the later authored pedal release and adds `sustainOff` at the last
+note event instead. That cuts the held sound early, even with Repeat One off."
+
+**Real against the PR head, and the overlay already fixes it.** The head's
+`getLoopedEvents` takes the end from the NOTE_ON/NOTE_OFF classes alone:
+
+```js
+for (const e of combinedEvents)
+  if ((e.subtype === EVENT_MIDI_NOTE_ON || e.subtype === EVENT_MIDI_NOTE_OFF) && e.playTime > endMs)
+    endMs = e.playTime;
+if (endMs > 0) splice everything with playTime > endMs;   // the pedal lift is a CC64 -> deleted
+```
+
+Measured on the shape (markers, `on@0`, `CC64=127@100`, `off@500`, `CC111`,
+`CC64=0@1500` — the release last, which is what the finding needs):
+
+| tree | last event | CC64 events | duration |
+| --- | --- | --- | --- |
+| `feature/subtunes-as-first-class` (PR head) | **500 ms** | `100=127`, `500=0` (appended) | **500 ms** |
+| `dev/overlay` | 1500 ms | `100=127`, `1500=0` (authored), `1500=0` (appended) | 1500 ms |
+
+So the held ending is cut at the last note-off (500 ms) on the head and runs to
+its authored pedal lift (1500 ms) on the overlay. The fix is the layered end rule
+(`endRule.js`, `a9786dd64`) — unpromoted, which is why the PR head still has it.
+`endLayersFor`'s `sustain` layer credits the pedal lift (`songEndMs`), the splice
+only drops events *after* that end, and the appended `sustainOff` lands on it.
+Pinned by the harness check "end layers: the sustain pedal is what makes a held
+ending audible". **Disposition: a promote, not a commit.**
+
+## Recorded, not fixed: the wrap's state restore has no value for a control the target never changed (F-C, 2026-10-17)
+
+greptile P1 on PR #15 (`MIDIFilePlayer.js:590`): "`loopJump()` leaves the finished
+pass's pitch bend in place when the file has no bend message before the loop
+start... For a non-expanded MIDI that starts centered and bends later in the loop,
+`collectStateEvents(0, loop.jumpMs)` returns no bend to restore. The next pass
+therefore opens bent instead of centered. Restore default values for changed
+controls that have no earlier authored value, then replay the saved state."
+
+**Real, and reproduced.** Synthetic non-expanded fixture (markers, a bend after
+the loop start, no bend before it), wrap at the band end:
+
+| | `pitchBend` calls at the wrap |
+| --- | --- |
+| gate off (the file's own timeline, `jumpMs` = loop start) | **none** — the finished pass's bend is carried |
+| gate on (expanded, `jumpMs` = second pass) | `[pitchBend 0, value 0]` — the collected state, restored |
+
+**This is a hole the permissive loop change opened, not a policy choice.**
+`collectStateEvents` returns only the values the file *changed*, so "the state at
+the jump target" is under-determined when the target's value is the engine's
+initial one (a centred bend): there is no entry to restore, and the finished
+pass's value silently wins. The wrap code is unchanged (`MIDIFilePlayer.js:590` is
+identical on both branches) — it was written for the *expanded* case, where
+`jumpMs` is a continuation point and the collected state is the carry. What
+changed is that `80cbba069` ("detect the loop region always") made the
+non-expanded wrap the **default path for every marker file**; before it, a file
+outside a SoundFont set had no region at all, so the path did not exist.
+
+**Reachability measured: 0 of 24.** Scanner over the catalog (57 MIDIs, 27 with a
+region, 24 of those non-expanded): only **2** bend inside the loop — both Descent —
+and **both also bend before the loop start**, where the target-state restore
+applies and nothing leaks. The shape is absent from the arbiter (`catalog/`; there
+is no MIDI corpus in `dev/`). So it does not clear the review bar's criterion 2
+(reachable on real content), and it is recorded rather than fixed. The convention
+where it is most likely to appear in the wild is the lone-CC111 RPG-Maker one
+(loop from the marker to the song end), where a late bend is plausible and the
+catalog has only the authored `*.rpgmaker.mid` fixtures (no bends).
+
+Two resolutions, both small, and they differ in what they cost:
+
+- **(A) Complete the target state** — before replaying the collected list, reset
+  the controls whose target value the file never authored to their engine-initial
+  value. Unambiguous for pitch bend (8192); the general case needs a per-control
+  notion of "initial" (synth/soundfont vs receiver defaults), which is the same
+  design question as the two entries above. **Zero catalog delta today**: both
+  Descent files bend before their loop start, so their collected value does not
+  change. ~4 lines plus a synthetic check.
+- **(B) Take the carry literally** — grounds 2 and 3 of the 2026-10-15 decision
+  say the wrap should match the expansion and the sequence-jump driver, so make
+  the non-expanded wrap collect from the loop *end* (or restore nothing at all)
+  and stop presenting the intro's value. **This is the one with an audible catalog
+  effect**: the two Descent files would open pass 2 with the body's last bend
+  instead of the intro's. ~2 lines, plus updating the `collectStateEvents`
+  pitch-bend comment and the checks that pin today's agreement.
+
+Not chosen yet: (A) changes nothing real, (B) changes two real files.
+
 ## How to regenerate the inventory
 
 A scanner was used to produce the table above (parse each file with the repo's

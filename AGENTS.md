@@ -2441,7 +2441,10 @@ only armed when `silenceDuration >= 0`, and both arms must end the song):
   pitch bend (the collected state can only restore values the file authored --
   see "F-C" in `dev/MIDI_LOOP_TEST_GAPS.md`) and silent state restore (no panic);
   a seek says where it landed rather than re-arming the wrap, so seeking into the
-  ending does not rewind (see the 2026-10-17 entry there); the head folds into the
+  ending does not rewind (see the 2026-10-17 entry there); the release that cuts a
+  note at its own track's `END_OF_TRACK` is one shared pass
+  (`insertTrackEndReleases`), so the plain and marker merges cannot disagree about
+  when a held note stops; the head folds into the
   band, which is the
   wrap span (`MIDIPlayer.getLoopBandMs`: the region by default, the second pass
   when expanded), with no fade tail (past the band the song ends).

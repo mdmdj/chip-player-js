@@ -28,6 +28,7 @@ A file that holds several songs (NSF/NSFE, SID, GBS, AY) becomes a **song folder
 | issue | status  |
 | --- | --- |
 | V2M: reported duration doesn't match the engine, so Repeat One keeps the old stop-and-reload (no band) | pre-existing, same as prod |
+| XMP (MOD/XM/IT/S3M): the loop band appears only after the first wrap | by design, see the [changelog](https://mdm.dj/dev/chip-player-js/subtunes-as-first-class/#xmp-learned-band) |
 | SID `seek()` to a non-zero position is unfinished in the fork (some tunes resume, some stay silent) | pre-existing, same as prod |
 | N64 `.miniusf` seeking can glitch the audio | known, see the changelog |
 | The VGM loop band assumes the libvgm tree's `Tick2Second` semantics | see below |

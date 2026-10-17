@@ -4,6 +4,7 @@ import { endLayersFor, songEndMs } from './endRule';
 const { EVENT_MIDI, EVENT_MIDI_CONTROLLER, EVENT_MIDI_NOTE_ON, EVENT_MIDI_NOTE_OFF } = MIDIEvents;
 
 const CC_64_SUSTAIN = 64;
+const CC_66_SOSTENUTO = 66;
 // Loop-point controllers. N64 marks a CC102 (start) / CC103 (end) pair on
 // every track (CC104/105 counts are ignored -- Repeat One loops forever and
 // repeat-off plays the two expanded passes, the two-pass libvgm compromise);
@@ -665,6 +666,19 @@ function sustainOff(track, channel, playTime) {
   };
 }
 
+function sostenutoOff(track, channel, playTime) {
+  return {
+    channel: channel,
+    track: track,
+    playTime: playTime,
+    type: EVENT_MIDI,
+    subtype: EVENT_MIDI_CONTROLLER,
+    param1: CC_66_SOSTENUTO,
+    param2: 0,
+    delta: 0,
+  };
+}
+
 // Release every channel a track has sounded at that track's own END_OF_TRACK, so
 // a note the writer never released cannot outlast its track. The set is per track
 // and cleared at each of its end-of-track events, so a track that has several
@@ -685,6 +699,7 @@ function insertTrackEndReleases(events) {
         for (const ch of trackChannels[track]) {
           events.splice(i++, 0, allNotesOff(track, ch, event.playTime));
           events.splice(i++, 0, sustainOff(track, ch, event.playTime));
+          events.splice(i++, 0, sostenutoOff(track, ch, event.playTime));
         }
         trackChannels[track].clear();
       }
@@ -708,6 +723,7 @@ function finishEventList(events, layers, channelsByTrack) {
     for (const ch of channels) {
       events.push(allNotesOff(Number(track), ch, tailMs));
       events.push(sustainOff(Number(track), ch, tailMs));
+      events.push(sostenutoOff(Number(track), ch, tailMs));
     }
   }
   return events;

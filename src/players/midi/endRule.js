@@ -8,7 +8,9 @@ const {
 } = MIDIEvents;
 
 const CC_SUSTAIN = 64;
+const CC_SOSTENUTO = 66;
 const CC_ALL_SOUNDS_OFF = 120;
+const CC_RESET_ALL_CONTROLLERS = 121;
 const CC_ALL_NOTES_OFF = 123;
 
 /**
@@ -23,7 +25,9 @@ const CC_ALL_NOTES_OFF = 123;
  *
  *   state layers      change WHAT IS SOUNDING (a state walk over the list)
  *     note            a note-on starts sound, a note-off ends it
- *     sustain         CC64 holds a released note (its hold ends at CC64 < 64)
+ *     sustain         the pedal family: CC64 holds a released note, CC66 holds the
+ *                     notes that were down when it landed (each hold ends when its
+ *                     own switch goes off, or on CC121's reset)
  *     panic           CC120/CC123 (all sounds/notes off) ends it immediately
  *
  *   trailing layers   cannot hold a note at all; enabling one only extends the
@@ -76,11 +80,16 @@ export function songEndMs(events, layers = END_LAYERS) {
   }
 
   // Sounding state, for the state layers. `pedalHeld` is a note whose note-off
-  // already ran while the pedal was down: it sounds until the pedal lifts.
+  // already ran while the damper was down; `sostoHeld` is a note the sostenuto
+  // pedal took when it landed -- the spec's "notes that were On", a snapshot, so a
+  // note struck afterwards is not in it. Either sounds until its own pedal comes up,
+  // and each hands the note to the other when that one is still down.
   const sounding = new Set();
   const pedalHeld = new Set();
+  const sostoHeld = new Set();
   const pedal = new Map();
-  const held = () => layers.note && (sounding.size + pedalHeld.size) > 0;
+  const sostenuto = new Map();
+  const held = () => layers.note && (sounding.size + pedalHeld.size + sostoHeld.size) > 0;
   const channelOf = (key) => Number(key.split('-')[0]);
 
   for (const e of events) {
@@ -109,6 +118,9 @@ export function songEndMs(events, layers = END_LAYERS) {
         if (e.param2 > 0) {
           sounding.add(key);
           pedalHeld.delete(key);
+          // A restruck note is a new note: sostenuto holds the notes that were down
+          // when it landed, not every later note on that pitch.
+          sostoHeld.delete(key);
         } else {
           endNote(e, key);
         }
@@ -120,12 +132,29 @@ export function songEndMs(events, layers = END_LAYERS) {
         if (e.param1 === CC_SUSTAIN && layers.sustain) {
           if (e.param2 < 64) clearHeld(e.channel);
           pedal.set(e.channel, e.param2);
+        } else if (e.param1 === CC_SOSTENUTO && layers.sustain) {
+          // Down: take the notes that are sounding on that channel right now.
+          // Up: release them, handing each to the damper if it is still down.
+          if (e.param2 >= 64) {
+            for (const k of sounding) if (channelOf(k) === e.channel) sostoHeld.add(k);
+          } else {
+            clearSosto(e.channel);
+          }
+          sostenuto.set(e.channel, e.param2);
+        } else if (e.param1 === CC_RESET_ALL_CONTROLLERS && layers.panic) {
+          // RP-015 turns the whole pedal family off, so the holds it was carrying
+          // are released -- but it is not an all-notes-off: a note still held down
+          // keeps sounding.
+          clearHeld(e.channel);
+          clearSosto(e.channel);
+          pedal.set(e.channel, 0);
+          sostenuto.set(e.channel, 0);
         } else if ((e.param1 === CC_ALL_SOUNDS_OFF || e.param1 === CC_ALL_NOTES_OFF) && layers.panic) {
           // The two panic messages are not the same thing. All Sounds Off silences
           // the channel outright, pedal-held notes included; All Notes Off leaves
-          // whatever the pedal is holding, which is what the spec says it does --
-          // so those notes move to the pedal set, exactly where a note-off would
-          // have put them. Neither changes the pedal's OWN state (only CC64 does),
+          // whatever the pedals are holding, which is what the spec says it does --
+          // so those notes move to the damper set, exactly where a note-off would
+          // have put them. Neither changes a pedal's OWN state (only CC64/CC66 do),
           // and resetting it here would make a later note-off under a still-down
           // pedal not count as held, cutting that ending instead.
           const pedalDown = (pedal.get(e.channel) || 0) >= 64;
@@ -134,7 +163,10 @@ export function songEndMs(events, layers = END_LAYERS) {
             sounding.delete(k);
             if (e.param1 === CC_ALL_NOTES_OFF && layers.sustain && pedalDown) pedalHeld.add(k);
           }
-          if (e.param1 === CC_ALL_SOUNDS_OFF) clearHeld(e.channel);
+          if (e.param1 === CC_ALL_SOUNDS_OFF) {
+            clearHeld(e.channel);
+            clearSosto(e.channel);
+          }
         } else if (layers.controller) {
           endMs = Math.max(endMs, e.playTime);
         }
@@ -171,6 +203,15 @@ export function songEndMs(events, layers = END_LAYERS) {
   }
   function clearHeld(channel) {
     for (const k of [...pedalHeld]) if (channelOf(k) === channel) pedalHeld.delete(k);
+  }
+  // Sostenuto's release hands each note it was holding to the damper if that is
+  // still down -- the same move `endNote` makes, in the other direction.
+  function clearSosto(channel) {
+    for (const k of [...sostoHeld]) {
+      if (channelOf(k) !== channel) continue;
+      sostoHeld.delete(k);
+      if (layers.sustain && (pedal.get(channel) || 0) >= 64) pedalHeld.add(k);
+    }
   }
 
   return endMs;

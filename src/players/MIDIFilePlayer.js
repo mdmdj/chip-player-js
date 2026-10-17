@@ -23,6 +23,7 @@ const CC_ALL_SOUND_OFF = 120;
 const CC_RESET_ALL_CONTROLLERS = 121;
 const CC_BANK_SELECT_MSB = 0;
 const CC_BANK_SELECT_LSB = 32;
+const CC_SOSTENUTO = 66;
 const SYSEX_GM_RESET = [0x7E, 0x7F, 0x09, 0x01, 0xF7];
 const SEQUENCED_CONTROLLERS = [6, 38, 96, 97, 98, 99, 100, 101];
 const META_LABELS = {
@@ -627,11 +628,15 @@ MIDIPlayer.prototype.loopJump = function () {
       this.send([(MIDIEvents.EVENT_MIDI_NOTE_OFF << 4) + (key >> 7), key & 0x7f, 0],
         boundary);
     }
-    // Release pedal-held notes before restoring the next pass's controller
-    // state: a note whose NOTE_OFF already ran is no longer in `ringing`, but
-    // keeps sounding while sustain is on, and the restore would leave it on.
+    // Release the pedal family before restoring the next pass's controller state:
+    // a note whose NOTE_OFF already ran is no longer in `ringing`, but keeps
+    // sounding while the damper *or* the sostenuto pedal holds it, and the restore
+    // would leave it on. An all-notes-off would not do it -- that message leaves
+    // what a pedal is holding.
     for (let ch = 0; ch < 16; ch++) {
       this.send([(MIDIEvents.EVENT_MIDI_CONTROLLER << 4) + ch, CC_SUSTAIN_PEDAL, 0],
+        boundary);
+      this.send([(MIDIEvents.EVENT_MIDI_CONTROLLER << 4) + ch, CC_SOSTENUTO, 0],
         boundary);
     }
     // Centre, the value a channel has before any bend: the collected list only
@@ -658,6 +663,7 @@ MIDIPlayer.prototype.loopJump = function () {
       // Same release on the synth, then restore the wrap target's state.
       for (let ch = 0; ch < 16; ch++) {
         this.synth.controlChange(ch, CC_SUSTAIN_PEDAL, 0);
+        this.synth.controlChange(ch, CC_SOSTENUTO, 0);
         this.synth.pitchBend(ch, 8192);
       }
       this.setPositionSynth(eventList);

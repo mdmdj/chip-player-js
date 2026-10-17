@@ -228,10 +228,11 @@ const UserProvider = ({ children }) => {
           // A newer toggle may have removed this exact entry already; if so,
           // leave it out instead of re-adding a stale one.
           if (!prev.some(f => f.path === path && (f.subtune || 0) === subtune)) return prev;
-          return [
-            ...prev.filter(f => !(f.path === path && (f.subtune || 0) === subtune)),
-            addResult.favorite,
-          ];
+          // Replace in place. Appending instead moves the row to the end, so a second
+          // add that lands while this one is still pending swaps them: the list (and the
+          // order a directory plays in) reorders as responses arrive.
+          return prev.map(f =>
+            f.path === path && (f.subtune || 0) === subtune ? addResult.favorite : f);
         });
       }
       // Hydrate the list if it is still cold. This toggle invalidated the initial

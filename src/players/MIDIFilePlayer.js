@@ -26,6 +26,32 @@ const CC_BANK_SELECT_LSB = 32;
 const CC_SOSTENUTO = 66;
 const SYSEX_GM_RESET = [0x7E, 0x7F, 0x09, 0x01, 0xF7];
 const SEQUENCED_CONTROLLERS = [6, 38, 96, 97, 98, 99, 100, 101];
+// GM's default for every controller that has one (RP-015), used at a loop wrap: a
+// controller the region writes but the loop start does not has no authored value to
+// restore, so the finished pass's last value would be the next pass's opening one.
+// Volume, pan, expression and the modulation/depth family are the audible ones. The
+// pedals are released separately, because a note whose NOTE_OFF already ran keeps
+// sounding under them; the sequenced RPN/NRPN family is meaningless without the pair it
+// addresses, so it is left to the file.
+const GM_CC_DEFAULTS = {
+  1: 0,     // modulation
+  5: 0,     // portamento time
+  7: 100,   // volume
+  8: 64,    // balance
+  10: 64,   // pan
+  11: 127,  // expression
+  64: 0,    // damper
+  65: 0,    // portamento on/off
+  66: 0,    // sostenuto
+  67: 0,    // soft
+  71: 64, 72: 64, 73: 64, 74: 64, 75: 64, 76: 64, 77: 64, 78: 64,   // sound controllers
+  84: 0,    // portamento control
+  91: 40,   // reverb send
+  92: 0,    // tremolo
+  93: 0,    // chorus send
+  94: 0,    // celeste
+  95: 0,    // phaser
+};
 const META_LABELS = {
   [MIDIEvents.EVENT_META_TEXT]: 'Text',
   [MIDIEvents.EVENT_META_COPYRIGHT_NOTICE]: 'Copyright',
@@ -106,7 +132,21 @@ MIDIPlayer.prototype.load = function (midiFile, useTrackLoops = false) {
     const endMs = jumpMs + lengthMs;
     let endIndex = events.findIndex(e => e.playTime >= endMs);
     if (endIndex < 0) endIndex = events.length;
-    this.loop = { startMs, lengthMs, jumpMs, jumpIndex, endMs, endIndex };
+    // The resumed pass opens in the state the loop's own events were authored in, so a
+    // controller the region writes but the loop start does not has no authored value to
+    // restore: the finished pass's last value would open the next one (a fade, pan or
+    // pedal written inside the region). Name those here, once, rather than at every wrap.
+    const regionCcs = new Map();
+    const beforeCcs = new Set();
+    for (const e of events) {
+      if (e.subtype !== MIDIEvents.EVENT_MIDI_CONTROLLER) continue;
+      if (e.playTime < startMs) beforeCcs.add(e.channel + ':' + e.param1);
+      else if (e.playTime < startMs + lengthMs) {
+        regionCcs.set(e.channel + ':' + e.param1, [e.channel, e.param1]);
+      }
+    }
+    const wrapDefaults = [...regionCcs].filter(([k]) => !beforeCcs.has(k)).map(([, v]) => v);
+    this.loop = { startMs, lengthMs, jumpMs, jumpIndex, endMs, endIndex, wrapDefaults };
   }
   this.summarizeMidiEvents();
 };
@@ -647,13 +687,17 @@ MIDIPlayer.prototype.loopJump = function () {
   if (!loop) return;
   const ringing = [...this.activeNotes.keys()];
   this.activeNotes.clear();
-  // The state the wrap target starts with: intro plus one full loop pass when
-  // expanded (the second pass), the loop start otherwise. Nothing in it can stand
-  // for a value the file never authored before that point, so the two things the
-  // finished pass leaves behind that the list cannot restore -- notes still
-  // ringing, and a pitch bend -- are ended explicitly at the boundary instead: a
-  // loop that bends late would otherwise reopen bent.
-  const { eventList } = this.collectStateEvents(0, loop.jumpMs);
+  // The state the resumed pass should open in is the state the loop's own events were
+  // authored in: the loop start, not the wrap target. Expanded they differ -- the wrap
+  // target is one region later, and the events queued from it are the region's own first
+  // events -- so taking the state there hands the next pass the state the region ENDED
+  // in, and a fade, pan or bend written inside the region reopens at its old end value.
+  // (Not expanded they are the same point. A seek is deliberately incremental instead:
+  // there the live state IS the state at the target.) Nothing in the list can stand for
+  // a value the file never authored before the loop start, so the two things the
+  // finished pass leaves behind that it cannot restore -- notes still ringing, and a
+  // value no controller covers -- are ended explicitly at the boundary below.
+  const { eventList } = this.collectStateEvents(0, loop.startMs);
   if (this.useWebMIDI) {
     // These messages belong at the band end, not at the last event the
     // scheduler sent: the last in-band event can sit a whole rest before the
@@ -684,6 +728,11 @@ MIDIPlayer.prototype.loopJump = function () {
     for (let ch = 0; ch < 16; ch++) {
       this.send([(MIDIEvents.EVENT_MIDI_PITCH_BEND << 4) + ch, 0, 64], boundary);
     }
+    for (const [channel, param1] of loop.wrapDefaults) {
+      const value = GM_CC_DEFAULTS[param1];
+      if (value === undefined) continue;
+      this.send([(MIDIEvents.EVENT_MIDI_CONTROLLER << 4) + channel, param1, value], boundary);
+    }
     for (const event of eventList) {
       let message = null;
       if (event.subtype === MIDIEvents.EVENT_MIDI_PROGRAM_CHANGE) {
@@ -700,11 +749,16 @@ MIDIPlayer.prototype.loopJump = function () {
       if (this.synth) this.synth.noteOff(key >> 7, key & 0x7f);
     }
     if (this.synth) {
-      // Same release on the synth, then restore the wrap target's state.
+      // Same release on the synth, then restore the loop start's state.
       for (let ch = 0; ch < 16; ch++) {
         this.synth.controlChange(ch, CC_SUSTAIN_PEDAL, 0);
         this.synth.controlChange(ch, CC_SOSTENUTO, 0);
         this.synth.pitchBend(ch, 8192);
+      }
+      for (const [channel, param1] of loop.wrapDefaults) {
+        const value = GM_CC_DEFAULTS[param1];
+        if (value === undefined) continue;
+        this.synth.controlChange(channel, param1, value);
       }
       this.setPositionSynth(eventList);
     }

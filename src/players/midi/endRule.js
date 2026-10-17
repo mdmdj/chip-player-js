@@ -159,8 +159,14 @@ export function songEndMs(events, layers = END_LAYERS) {
         } else if (e.param1 === CC_SOSTENUTO && layers.sustain) {
           // Down: take the notes that are sounding on that channel right now.
           // Up: release them, handing each to the damper if it is still down.
+          // Only the up-to-down transition captures. A repeated down while the pedal is
+          // already down is a no-op in the spec, and re-snapshotting there would take
+          // notes that started *after* the pedal went down -- which the note-on above
+          // deliberately clears from the hold -- and hold them past their own note-off.
           if (e.param2 >= 64) {
-            for (const k of sounding) if (channelOf(k) === e.channel) sostoHeld.add(k);
+            if ((sostenuto.get(e.channel) || 0) < 64) {
+              for (const k of sounding) if (channelOf(k) === e.channel) sostoHeld.add(k);
+            }
           } else {
             clearSosto(e.channel);
           }

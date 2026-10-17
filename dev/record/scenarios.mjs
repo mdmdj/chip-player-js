@@ -409,7 +409,11 @@ export const scenarios = [
       // playing song there is nothing to compare the page against, and the comparison
       // already read `loc !== "/browse/null"` on a transient mount tick, which is a
       // frame that makes no claim rather than a wrong folder.
-      { name: 'never-highlights-a-song-that-is-not-playing', test: '(() => { if (!(tr.samples.length >= 200)) return false; return !tr.samples.some((x) => x.path && x.hl && x.hlInView && x.loc !== "/browse/" + x.path); })()' },
+      // The playing song is highlighted in whatever listing is on screen: its own file
+      // page, or the directory that contains it (which is the state the take opens in,
+      // and the reason the walk later opens the file it lives in). Either is correct --
+      // the assertion is that no OTHER song's row is lit.
+      { name: 'never-highlights-a-song-that-is-not-playing', test: '(() => { if (!(tr.samples.length >= 200)) return false; const at = (x) => "/browse/" + x.path; const dir = (x) => at(x).slice(0, at(x).lastIndexOf("/")); return !tr.samples.some((x) => x.path && x.hl && x.hlInView && x.loc !== at(x) && x.loc !== dir(x)); })()' },
       // The Next clicks landed. Only a real advance changes (path, subtune), so a
       // take whose Next buttons matched nothing still shows one song and fails the
       // count above; this names the mechanism instead of only its consequence. Four

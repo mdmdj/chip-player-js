@@ -48,6 +48,9 @@ echo
 echo "== song refs (client) =="
 node "$DIR/test-songrefs.js" 2>/dev/null
 echo
+echo "== local file sub-tune cache (client) =="
+node "$DIR/test-local-subtunes.js" 2>/dev/null
+echo
 echo "== devtools stall watch =="
 node "$DIR/test-devtools.js" 2>/dev/null
 echo

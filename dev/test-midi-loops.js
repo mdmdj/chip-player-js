@@ -1273,4 +1273,31 @@ check('end layers: all-sounds-off ends a pedal-held note early', () => {
   assert.strictEqual(songEndMs(list, { ...END_LAYERS, panic: false }), 900, 'panic off: the pedal lift is');
 });
 
+check('end layers: a note still sounding at the track end rings to it', () => {
+  // A file that never releases its final note carries no end for it, so the track
+  // end bounds it: crediting the note's own start would silence it, which is what
+  // greptile's "final held notes get cut" (endRule.js:93) describes.
+  const eot = (playTime) => ({ playTime, type: MIDIEvents.EVENT_META, subtype: MIDIEvents.EVENT_META_END_OF_TRACK });
+  assert.strictEqual(songEndMs([evOn(10000, 72), eot(15000)], { ...END_LAYERS }), 15000,
+    'the dangling note rings to the track end');
+  // With nothing sounding, that same trailing meta is dead air and must not extend.
+  assert.strictEqual(songEndMs([evOn(0), evOff(500), eot(15000)], { ...END_LAYERS }), 500,
+    'a trailing meta after silence is not an end');
+});
+
+check('a dangling final note keeps the track end in the merged loop list', () => {
+  // The same shape end to end: the tail trim must not delete the track end that
+  // the dangling note is audible *through*. 2400 ticks = 10 s, 3600 = 15 s.
+  const bytes = buildMidi([
+    tempo(), cc(110),
+    noteOnAt(0, 0, 60), noteOffAt(TPQ, 0, 60),
+    cc(111),                                            // loop end at 500 ms
+    noteOnAt(2280, 0, 72),                              // dangling, 10 s
+    { delta: 1200, bytes: [0xff, 0x01, 0x00] },         // trailing meta, 15 s (EOT follows)
+  ]);
+  const { events } = parseBytes(bytes).getPlaybackEvents(false);
+  assert.strictEqual(Math.round(events[events.length - 1].playTime), 15000,
+    'the merged list ends at the track end, not at the note-on');
+});
+
 console.log(`\n${passed} checks passed${process.exitCode ? ' (WITH FAILURES)' : ''}.`);

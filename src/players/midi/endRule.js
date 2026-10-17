@@ -121,9 +121,20 @@ export function songEndMs(events, layers = END_LAYERS) {
           if (e.param2 < 64) clearHeld(e.channel);
           pedal.set(e.channel, e.param2);
         } else if ((e.param1 === CC_ALL_SOUNDS_OFF || e.param1 === CC_ALL_NOTES_OFF) && layers.panic) {
-          clearHeld(e.channel);
-          for (const k of [...sounding]) if (channelOf(k) === e.channel) sounding.delete(k);
-          pedal.set(e.channel, 0);
+          // The two panic messages are not the same thing. All Sounds Off silences
+          // the channel outright, pedal-held notes included; All Notes Off leaves
+          // whatever the pedal is holding, which is what the spec says it does --
+          // so those notes move to the pedal set, exactly where a note-off would
+          // have put them. Neither changes the pedal's OWN state (only CC64 does),
+          // and resetting it here would make a later note-off under a still-down
+          // pedal not count as held, cutting that ending instead.
+          const pedalDown = (pedal.get(e.channel) || 0) >= 64;
+          for (const k of [...sounding]) {
+            if (channelOf(k) !== e.channel) continue;
+            sounding.delete(k);
+            if (e.param1 === CC_ALL_NOTES_OFF && layers.sustain && pedalDown) pedalHeld.add(k);
+          }
+          if (e.param1 === CC_ALL_SOUNDS_OFF) clearHeld(e.channel);
         } else if (layers.controller) {
           endMs = Math.max(endMs, e.playTime);
         }

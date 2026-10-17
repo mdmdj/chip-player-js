@@ -71,7 +71,7 @@ function stubSynth(silent = true) {
     log: [],
     noteOn(c, p, v) { this.log.push(['on', c, p]); },
     noteOff(c, p) { this.log.push(['off', c, p]); },
-    pitchBend(c, v) { this.log.push(['bend', c, v]); }, controlChange(c, cc, v) { this.log.push(['cc', c, cc, v]); }, programChange() {}, panic() {}, panicChannel() {},
+    pitchBend(c, v) { this.log.push(['bend', c, v]); }, controlChange(c, cc, v) { this.log.push(['cc', c, cc, v]); }, programChange(c, p) { this.log.push(['prog', c, p]); }, panic() {}, panicChannel() {},
     render() {},
     reset() {},
     getValue() { return silent ? 0 : 1; },
@@ -590,6 +590,38 @@ check('a Web MIDI seek into the ending does not rewind either', () => {
   w.processPlay();
   assert.ok(Math.abs(w.elapsedTime - wAt) < 5,
     `the first callback must not rewind (${Math.round(wAt)} -> ${Math.round(w.elapsedTime)})`);
+});
+
+check('a wrap replays bank select before the program that uses it', () => {
+  // Bank select applies to the *next* program change, and the collected list is in
+  // first-seen order -- so a channel that picks a program before it ever picks a
+  // bank replayed the program first, onto the bank the finished pass left. The
+  // fixture: program at 0, bank 1 at 1 TPQ, loop start at 3, bank 2 *inside* the
+  // loop, loop end at 6.
+  const bytes = buildMidi([[
+    tempo(), programChangeAt(0, 0, 2), ccAt(TPQ, 0, 1), ccAt(0, 32, 0), noteOnAt(0, 0, 60),
+    ccAt(TPQ * 3, 110), noteOnAt(0, 0, 64), ccAt(TPQ * 2, 0, 2), noteOffAt(0, 0, 64), ccAt(TPQ * 4, 111),
+  ]]);
+  const name = (e) => e.subtype === MIDIEvents.EVENT_MIDI_PROGRAM_CHANGE ? `P${e.channel}:${e.param1}`
+    : (e.param1 === 0 || e.param1 === 32) ? `B${e.channel}:${e.param1}=${e.param2}` : null;
+  const synth = stubSynth(true);
+  const p = makePlayer(synth);
+  p.load(parseBytes(bytes), false);
+  assert.ok(p.loop, 'expected a loop region');
+  const collected = p.collectStateEvents(0, p.loop.jumpMs).eventList.map(name).filter(Boolean);
+  assert.deepStrictEqual(collected, ['B0:0=1', 'B0:32=0', 'P0:2'],
+    'the collector presents the bank before the program');
+  p.play(() => {});
+  p.setLooping(true);
+  p.setPosition(p.loop.endMs - 20);
+  synth.log.length = 0;
+  p.processPlaySynth(0, 2048);
+  // And the wrap actually plays them in that order: the program lands on bank 1.
+  const progAt = synth.log.findIndex(([k]) => k === 'prog');
+  const bankAt = synth.log.findIndex(([k, , cc]) => k === 'cc' && (cc === 0 || cc === 32));
+  assert.ok(progAt !== -1, `expected a program at the wrap: ${JSON.stringify(synth.log.slice(0, 8))}`);
+  assert.ok(bankAt !== -1 && bankAt < progAt,
+    `the bank must be sent before the program (bank at ${bankAt}, program at ${progAt})`);
 });
 
 check('the slider follows the audio out of the band once the region is left', () => {

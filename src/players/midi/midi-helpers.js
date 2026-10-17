@@ -370,6 +370,11 @@ export function usesTrackLoops(filepath) {
 MIDIFile.prototype.getPlaybackEvents = function (useTrackLoops = false) {
   const tracks = this.tracks.map((_, i) => this.getTrackEvents(i));
   const range = this.findLoopRange(tracks);
+  // The gate the end rule's policy may key off (see endRule.endLayersFor). It is
+  // remembered so the no-range path -- this.getEvents(), whose patch applies the
+  // same rule -- sees the same condition.
+  this._useTrackLoops = !!useTrackLoops;
+  const layers = endLayersFor({ useTrackLoops });
   // The loop region is *always* detected; the expansion is the opt-in. Without
   // it the list is the file's own timeline -- one pass -- and the player wraps
   // it itself (see MIDIFilePlayer.load); with it, intro + two passes, so the
@@ -377,7 +382,7 @@ MIDIFile.prototype.getPlaybackEvents = function (useTrackLoops = false) {
   if (!range) {
     return { events: this.getEvents(), loopStartMs: null, loopEndMs: null };
   }
-  return this.getLoopedEvents(tracks, useTrackLoops ? 2 : 1, range);
+  return this.getLoopedEvents(tracks, useTrackLoops ? 2 : 1, range, layers);
 };
 
 // Monkey patch MIDIFile class.

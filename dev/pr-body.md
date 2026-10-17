@@ -4,7 +4,7 @@ A file that holds several songs (NSF/NSFE, SID, GBS, AY) becomes a **song folder
 
 **Sub-tunes** are each their own song (`{path, sub-tune}`), with its own favorites, share link, chart rank, shuffle slot, search hit, and SEO page; local files get the same treatment, read from their own header.
 
-**Repeat One** is improved: native region looping where the engine exposes one (VGM/VGZ, MDX, MOD/XM/IT/S3M), file-region looping for MIDI (the file's own CC 102/103 or CC 110/111 markers — a synth engine has no loop of its own, so the wrap is JS; the SoundFont sets additionally expand the intro + two passes so the piano roll draws across the seam), an ending detector where it doesn't (NSFE, SID, N64), a drawn loop band, and no jumps when toggling.
+**Repeat One** is improved: native region looping where the engine exposes one (VGM/VGZ, MDX, MOD/XM/IT/S3M), file-region looping for MIDI (its own CC 102/103 or CC 110/111 markers; no engine loop, so the wrap is JS), an ending detector where it doesn't (NSFE, SID, N64), a drawn loop band, and no jumps when toggling.
 
 **Full write-up with video for every behaviour: https://mdm.dj/dev/chip-player-js/subtunes-as-first-class/**
 
@@ -16,23 +16,6 @@ A file that holds several songs (NSF/NSFE, SID, GBS, AY) becomes a **song folder
 4. **Repeat One, per engine:** `src/players/` (and `Player.js` hooks)
 5. **Engine surface:** `src/bindings/*.cpp`, `mdxmini/`, `scripts/build-chip-core.js`
 6. **Share links & SEO:** `App.js`, `AppFooter.js`, `scripts/build-sitemap.js`
-
-## Behaviour Changes vs `master`
-
-- **MIDI loop regions are honoured for any file that marks one** (CC 102/103,
-  CC 110/111, or a lone CC 111), not only the SoundFont MIDI sets: the slider
-  draws the band and Repeat One wraps the file's own timeline back to the loop
-  start. The SoundFont sets additionally expand the list to intro + two passes —
-  so the piano roll draws across the seam — and wrap to the second pass instead.
-  The expansion **moves no event**: a post-loop event keeps its authored offset
-  from the loop end (so a Type-1 conductor's ending tempo changes keep their
-  timing), and the song's end is the last **note** event, so a converter's padded
-  `END_OF_TRACK` cannot inflate the duration.
-- Consequence for existing catalog files: a marker-bearing MIDI outside the
-  SoundFont sets (`Descent`) now reports a loop region and, under Repeat One,
-  loops. Its reported duration becomes its last note rather than its padded end
-  (`203790 → 200144 ms`); the audio is unchanged. The N64 SoundFont sets are
-  unaffected.
 
 ## ⚠ Before Deploying
 

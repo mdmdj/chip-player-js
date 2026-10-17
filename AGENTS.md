@@ -538,7 +538,12 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
     `vidgeom`/`vidcap`/`vidsharp` (what `recordVideo` and a window size actually
     produce — see `dev/record/FINDINGS.md`).
   - `dev/record/check-faves-hydration.mjs`, `dev/record/check-faves-cache.mjs`,
-    `dev/record/check-faves-account-switch.mjs` — the favorites-list checks behind
+    `dev/record/check-faves-account-switch.mjs`, `dev/record/check-faves-order.mjs`
+    (the last reproduces greptile's PR #16 ordering race -- the first POST held
+    past a second, then released -- and asserts the rendered Favorites order;
+    fail-before `A=2 B=1`; it also pins two hazards: the server appends duplicate
+    favorites, and a remove with the API's *decorated* path answers 200 while
+    matching nothing, so its cleanup diffs `server/users.db`) — the favorites-list checks behind
     the UserProvider fixes (PR #10). The first two are the hydration fix
     (macroscope `UserProvider.js:208` / greptile P1): the first reproduces the
     race deliberately — the first GET and POST are held, the second POST is
@@ -1053,6 +1058,11 @@ shared `.usflib`), `mods/` (`.S3M`), `midi/`, a `.vgz`, and `gsf/` (GBA sets,
 `node scripts/build-music.js -n` after changing it. Note `.usflib`/`.gsflib`
 companions are intentionally not indexed but must stay next to their song file;
 a gzipped VGM must use the `.vgz` extension (`.gz` is not recognized).
+
+**`catalog/midi/black/` holds three black MIDIs (150, 103 and 15 MB).** They are
+fine to play and useless to scan: any per-event walk over them takes minutes and
+reads as a hang (it happened while auditing the wrap state). Filter by size
+(>1 MB) or by the directory before scanning `catalog/**/*.mid`.
 
 **`psf/` in the catalog is inert (PS1 playback is not wired yet).** The PSF
 *container/tag parser* is already committed upstream (`src/psf.js` ->
@@ -2458,7 +2468,12 @@ only armed when `silenceDuration >= 0`, and both arms must end the song):
   when a held note stops; the collected state replays the bank each program was
   *authored* with, the program, then any selection still pending -- seeded from the
   file's start for a forward seek, which collects mid-stream (see the 2026-10-17
-  entries there); the *end* of a MIDI
+  entries there), and taken at the **loop start** for a wrap (not the wrap target,
+  which is one region later when expanded) with `GM_CC_DEFAULTS` sent for every
+  controller the region authors that the loop start does not -- 58 values move
+  across 5 catalog files, every event list unchanged (greptile, PR #16); the
+  sostenuto capture is the pedal's up-to-down transition only, a repeated down
+  being a spec no-op (6 CC66 messages in 2 catalog files, 0 captures); the *end* of a MIDI
   comes from the layered rule in `endRule.js` (notes, the pedal family -- the damper
   and sostenuto, released by Reset All Controllers -- and the panics), so converter
   padding cannot inflate a duration, a note the writer never released rings to its

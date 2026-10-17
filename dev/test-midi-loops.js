@@ -1406,6 +1406,159 @@ check('end layers: a note-off for a note that never played does not hold the end
     { ...END_LAYERS }), 900, 'a real pedal-held release still runs to the lift');
 });
 
+// The rule as it stood *before* the panic fix (the previous round's pedal gate is
+// in it), kept only as the differential's reference: the property this change has
+// to have is that it can never end a song earlier than the old rule did.
+function songEndMsPreFix(events, layers = END_LAYERS) {
+  let endMs = 0;
+  const sounding = new Set(); const pedalHeld = new Set(); const pedal = new Map();
+  const held = () => layers.note && (sounding.size + pedalHeld.size) > 0;
+  const channelOf = (key) => Number(key.split('-')[0]);
+  const endNote = (e, key) => {
+    const wasSounding = sounding.delete(key);
+    if (wasSounding && layers.sustain && (pedal.get(e.channel) || 0) >= 64) pedalHeld.add(key);
+  };
+  const clearHeld = (channel) => {
+    for (const k of [...pedalHeld]) if (channelOf(k) === channel) pedalHeld.delete(k);
+  };
+  for (const e of events) {
+    if (e.type !== MIDIEvents.EVENT_MIDI) {
+      if (layers.sysex && (e.type === MIDIEvents.EVENT_SYSEX || e.type === MIDIEvents.EVENT_DIVSYSEX)) {
+        endMs = Math.max(endMs, e.playTime);
+      } else if (layers.meta && e.type !== MIDIEvents.EVENT_SYSEX && e.type !== MIDIEvents.EVENT_DIVSYSEX) {
+        endMs = Math.max(endMs, e.playTime);
+      }
+      if (held()) endMs = Math.max(endMs, e.playTime);
+      continue;
+    }
+    const key = `${e.channel}-${e.param1}`;
+    const wasHeld = held();
+    switch (e.subtype) {
+      case MIDIEvents.EVENT_MIDI_NOTE_ON:
+        if (e.param2 > 0) { sounding.add(key); pedalHeld.delete(key); } else endNote(e, key);
+        break;
+      case MIDIEvents.EVENT_MIDI_NOTE_OFF: endNote(e, key); break;
+      case MIDIEvents.EVENT_MIDI_CONTROLLER:
+        if (e.param1 === 64 && layers.sustain) {
+          if (e.param2 < 64) clearHeld(e.channel);
+          pedal.set(e.channel, e.param2);
+        } else if ((e.param1 === 120 || e.param1 === 123) && layers.panic) {
+          clearHeld(e.channel);
+          for (const k of [...sounding]) if (channelOf(k) === e.channel) sounding.delete(k);
+          pedal.set(e.channel, 0);
+        } else if (layers.controller) {
+          endMs = Math.max(endMs, e.playTime);
+        }
+        break;
+      default:
+    }
+    if (wasHeld || held()) endMs = Math.max(endMs, e.playTime);
+  }
+  return endMs;
+}
+
+// All Sounds Off silences a channel outright; All Notes Off leaves what the pedal
+// is holding, which is what the spec says it does. Neither changes the pedal's own
+// state (only CC64 does). Nine shapes rather than the reported one, so the shapes
+// that must NOT move are pinned next to the one that was cut.
+check('end layers: the two panics differ, and neither moves the pedal', () => {
+  const eot = (playTime) => ({ playTime, type: MIDIEvents.EVENT_META, subtype: MIDIEvents.EVENT_META_END_OF_TRACK });
+  const rows = [
+    ['CC123 under the pedal keeps the ending (the reported shape)',
+      [evOn(0), evCc(100, 64, 127), evCc(500, 123, 0), evCc(1500, 64, 0), eot(4000)], null, 1500],
+    ['CC120 under the pedal silences it',
+      [evOn(0), evCc(100, 64, 127), evCc(500, 120, 0), evCc(1500, 64, 0), eot(4000)], null, 500],
+    ['CC123 with no pedal drops the note',
+      [evOn(0), evCc(500, 123, 0), eot(4000)], null, 500],
+    ['CC123 on another channel leaves this one alone',
+      [evOn(0, 60, 0), evCc(500, 123, 0, 1), evOff(1500, 60, 0), eot(4000)], null, 1500],
+    ['CC120, then a note under the still-down pedal',
+      [evOn(0), evCc(100, 64, 127), evOff(200), evCc(300, 120, 0), evOn(400, 62), evOff(600, 62),
+        evCc(1500, 64, 0), eot(4000)], null, 1500],
+    ['CC123 under the pedal, then a new note under it',
+      [evOn(0), evCc(100, 64, 127), evCc(500, 123, 0), evOn(700, 62), evOff(900, 62),
+        evCc(1500, 64, 0), eot(4000)], null, 1500],
+    ['CC123 under a pedal that never lifts rings to the track end',
+      [evOn(0), evCc(100, 64, 127), evCc(500, 123, 0), eot(4000)], null, 4000],
+    ['panic layer off: CC123 is inert, so an unreleased note rings on',
+      [evOn(0), evCc(100, 64, 127), evCc(500, 123, 0), evCc(1500, 64, 0), eot(4000)], { panic: false }, 4000],
+    ['sustain layer off: CC123 drops the note, as the old rule did',
+      [evOn(0), evCc(100, 64, 127), evCc(500, 123, 0), evCc(1500, 64, 0), eot(4000)], { sustain: false }, 500],
+  ];
+  for (const [name, events, over, want] of rows) {
+    const layers = over ? { ...END_LAYERS, ...over } : { ...END_LAYERS };
+    assert.strictEqual(songEndMs(events, layers), want, name);
+  }
+});
+
+// Every sequence of up to five moves from this alphabet, each with an
+// END_OF_TRACK after it: 9331 combinations of note/pedal/panic ordering. The fix
+// may only ever move an end later -- an end that moves *earlier* is a new cut,
+// which is the whole defect -- and it must move at least one, or nothing changed.
+check('end layers: the panic fix never cuts an end, and does extend some (exhaustive)', () => {
+  const eot = (playTime) => ({ playTime, type: MIDIEvents.EVENT_META, subtype: MIDIEvents.EVENT_META_END_OF_TRACK });
+  const MOVES = [() => evOn(0), () => evOff(0), () => evCc(0, 64, 127), () => evCc(0, 64, 0),
+    () => evCc(0, 123, 0), () => evCc(0, 120, 0)];
+  let compared = 0, longer = 0, shorter = 0, firstShort = null;
+  for (let len = 0; len <= 5; len++) {
+    const idx = new Array(len).fill(0);
+    for (;;) {
+      const list = [];
+      for (let i = 0; i < len; i++) {
+        const e = MOVES[idx[i]]();
+        e.playTime = (i + 1) * 100;
+        list.push(e);
+      }
+      list.push(eot(10000));
+      const before = songEndMsPreFix(list, { ...END_LAYERS });
+      const after = songEndMs(list, { ...END_LAYERS });
+      compared++;
+      if (after > before + 0.5) longer++;
+      if (after < before - 0.5) {
+        shorter++;
+        if (!firstShort) firstShort = `${list.map((e) => `${e.subtype === undefined ? 'EOT' : 'e' + e.subtype}@${e.playTime}`).join(' ')} pre=${before} now=${after}`;
+      }
+      let k = len - 1;
+      while (k >= 0) { idx[k]++; if (idx[k] < MOVES.length) break; idx[k] = 0; k--; }
+      if (k < 0) break;
+    }
+  }
+  assert.strictEqual(shorter, 0, `${shorter} sequences now end earlier than before (first: ${firstShort})`);
+  assert.ok(longer > 0, 'the fix must extend at least one shape');
+  console.log(`      (${compared} sequences; ${longer} end later, none earlier)`);
+});
+
+// And the shapes reach the merged list the same way down both merges: what a file
+// with loop markers gets (getLoopedEvents) and what one without gets (getEvents)
+// must end at the authored pedal lift, not at the CC123.
+check('the panic shapes survive both merges, with and without a loop region', () => {
+  const shape = (withMarkers) => buildMidi([withMarkers ? [
+    tempo(), programChangeAt(0, 0, 5),
+    cc(110),                                  // loop start, tick 0 (0ms)
+    noteOnAt(0, 0, 60),
+    ccAt(TPQ, 64, 127),                       // pedal down, 500ms
+    ccAt(TPQ, 123, 0),                        // All Notes Off, 1000ms
+    ccAt(TPQ, 64, 0),                         // the authored lift, 1500ms
+    cc(111),                                  // loop end, 1500ms
+  ] : [
+    tempo(), programChangeAt(0, 0, 5),
+    noteOnAt(0, 0, 60),
+    ccAt(TPQ, 64, 127),
+    ccAt(TPQ, 123, 0),
+    ccAt(TPQ, 64, 0),
+  ]]);
+  const endOf = (bytes) => {
+    const events = parseBytes(bytes).getPlaybackEvents(false).events;
+    return { last: Math.round(events[events.length - 1].playTime), region: parseBytes(bytes).getPlaybackEvents(false).loopEndMs };
+  };
+  const withMarkers = endOf(shape(true));
+  const plain = endOf(shape(false));
+  assert.strictEqual(withMarkers.last, 1500, 'the marker file ends at the authored lift');
+  assert.strictEqual(plain.last, 1500, 'and so does the plain one');
+  assert.strictEqual(Math.round(withMarkers.region), 1500, 'with its region intact');
+  assert.strictEqual(plain.region, null, 'and no region on the plain one');
+});
+
 check('a marker file cuts a held note at its own track end, like the plain path', () => {
   // One file, both paths. The per-track release pass lives in one place now, and
   // this is exactly where the two drifted: a marker file lost the cut when it

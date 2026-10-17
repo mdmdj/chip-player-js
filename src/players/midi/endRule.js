@@ -149,8 +149,14 @@ export function songEndMs(events, layers = END_LAYERS) {
   // ends it. Leaving it in `sounding` too would keep it "sounding" after the
   // lift, so the note must move, not be copied.
   function endNote(e, key) {
-    sounding.delete(key);
-    if (layers.sustain && (pedal.get(e.channel) || 0) >= 64) pedalHeld.add(key);
+    // Only a note that was playing is handed to the pedal. A converter's trailing
+    // note-off for a note that never sounded would otherwise sit in `pedalHeld`,
+    // keep `held()` true, and stretch the end to the pedal release (or the track
+    // end) with nothing playing. The same test makes a second note-off for a note
+    // the pedal already holds a no-op, which is what it is: the hold was taken
+    // when the note stopped sounding.
+    const wasSounding = sounding.delete(key);
+    if (wasSounding && layers.sustain && (pedal.get(e.channel) || 0) >= 64) pedalHeld.add(key);
   }
   function clearHeld(channel) {
     for (const k of [...pedalHeld]) if (channelOf(k) === channel) pedalHeld.delete(k);

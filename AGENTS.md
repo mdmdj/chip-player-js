@@ -1445,6 +1445,13 @@ checks no longer work. Compare a live context to a stored one with
   too when the two halves of an API are coupled — `server/database.js` promotes,
   but carrying it by hand alongside keeps the pair coherent (see "one field, one
   predicate").
+  **P4 (2026-10-17): the browse listing's song-folder `idx`** — again
+  `server/index.js`. A directory's play context now expands a song folder into
+  its sub-tunes (`listingToContext` in `src/util.js`, which promotes), and for a
+  click to land right the server must hand that row the *first* sub-tune's
+  context index and advance its counter past the rest. Its client half promotes;
+  without the server half, every row below a song folder plays the wrong song.
+  Same shape as P1: carry both by hand, together.
 - **Shuffle play and "is this a song folder?" (2026-10-06).** Three commits on
   `dev/overlay` — `af4e8aeb7` (shuffle play on a song-folder page returned
   nothing: `/shuffle` prefix-matched `path/`, which a *file* path never

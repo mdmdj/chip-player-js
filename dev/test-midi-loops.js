@@ -1357,8 +1357,11 @@ check('end layers: the sustain pedal is what makes a held ending audible', () =>
 });
 
 check('end layers: trailing events extend the end only when their layer is on', () => {
-  const list = [evOn(0), evOff(400), evCc(1200, 7, 100), evCc(1300, 121, 0)];
-  assert.strictEqual(songEndMs(list, { ...END_LAYERS }), 400, 'controllers off: volume/reset are padding');
+  // The last event is an *unmodelled* controller on purpose: the family the rule
+  // knows (the pedals, the panics) has its own meaning and is deliberately not
+  // padding, so it cannot stand in for "a trailing CC" here.
+  const list = [evOn(0), evOff(400), evCc(1200, 7, 100), evCc(1300, 11, 0)];
+  assert.strictEqual(songEndMs(list, { ...END_LAYERS }), 400, 'controllers off: volume/expression are padding');
   assert.strictEqual(songEndMs(list, { ...END_LAYERS, controller: true }), 1300, 'controller on: the last CC is the end');
   assert.strictEqual(songEndMs(list, null), 0, 'no layers: leave the list alone');
 });
@@ -1406,9 +1409,48 @@ check('end layers: a note-off for a note that never played does not hold the end
     { ...END_LAYERS }), 900, 'a real pedal-held release still runs to the lift');
 });
 
-// The rule as it stood *before* the panic fix (the previous round's pedal gate is
-// in it), kept only as the differential's reference: the property this change has
-// to have is that it can never end a song earlier than the old rule did.
+// A note whose NOTE_OFF already ran is not in `activeNotes`, so the wrap's
+// ringing-note cut cannot reach it -- only a pedal-off can. Both pedals in the
+// family are released at the band end, on both output paths.
+check('the wrap releases the whole pedal family, on both paths', () => {
+  const mf = loopWithIntroGapAndEnding();
+  const synth = stubSynth(true);
+  const p = makePlayer(synth);
+  p.load(mf, false);
+  p.play(() => {});
+  p.setLooping(true);
+  p.setPosition(p.loop.endMs - 20);
+  synth.log.length = 0;
+  p.processPlaySynth(0, 2048);
+  const off = (cc) => synth.log.some(([k, , n, v]) => k === 'cc' && n === cc && v === 0);
+  assert.ok(off(64), 'the damper is released at the wrap');
+  assert.ok(off(66), 'and so is the sostenuto pedal');
+
+  const sends = [];
+  const w = new MIDIFilePlayer({
+    programChangeCb: () => {}, useWebMIDI: true,
+    output: { send: (m, t) => sends.push([m, t]) }, skipSilence: false, sampleRate: 44100,
+    synth: stubSynth(true),
+  });
+  w.load(mf, false);
+  w.play(() => {});
+  w.setLooping(true);
+  const now = performance.now();
+  w.lastProcessPlayTimestamp = now;
+  w.elapsedTime = w.loop.endMs - 20;
+  w.position = w.loop.endIndex;
+  w.lastSendTimestamp = now - 1000;
+  sends.length = 0;
+  w.processPlay();
+  const sent = (cc) => sends.some(([m]) => (m[0] & 0xf0) === 0xb0 && m[1] === cc && m[2] === 0);
+  assert.ok(sent(64), 'Web MIDI releases the damper too');
+  assert.ok(sent(66), 'and its sostenuto');
+});
+
+// The rule as it stood before the pedal-family work, kept only as the differential's
+// reference. Each round moves this marker forward, so the current rule is always
+// compared against the last one: the property every change has to have is that it
+// can never end a song earlier than the rule before it did.
 function songEndMsPreFix(events, layers = END_LAYERS) {
   let endMs = 0;
   const sounding = new Set(); const pedalHeld = new Set(); const pedal = new Map();
@@ -1443,9 +1485,13 @@ function songEndMsPreFix(events, layers = END_LAYERS) {
           if (e.param2 < 64) clearHeld(e.channel);
           pedal.set(e.channel, e.param2);
         } else if ((e.param1 === 120 || e.param1 === 123) && layers.panic) {
-          clearHeld(e.channel);
-          for (const k of [...sounding]) if (channelOf(k) === e.channel) sounding.delete(k);
-          pedal.set(e.channel, 0);
+          const pedalDown = (pedal.get(e.channel) || 0) >= 64;
+          for (const k of [...sounding]) {
+            if (channelOf(k) !== e.channel) continue;
+            sounding.delete(k);
+            if (e.param1 === 123 && layers.sustain && pedalDown) pedalHeld.add(k);
+          }
+          if (e.param1 === 120) clearHeld(e.channel);
         } else if (layers.controller) {
           endMs = Math.max(endMs, e.playTime);
         }
@@ -1492,13 +1538,78 @@ check('end layers: the two panics differ, and neither moves the pedal', () => {
 });
 
 // Every sequence of up to five moves from this alphabet, each with an
-// END_OF_TRACK after it: 9331 combinations of note/pedal/panic ordering. The fix
-// may only ever move an end later -- an end that moves *earlier* is a new cut,
-// which is the whole defect -- and it must move at least one, or nothing changed.
+// END_OF_TRACK after it: 37449 combinations of note/damper/sostenuto/panic
+// ordering. Modelling the pedal family may only ever move an end later -- an end
+// that moves *earlier* is a new cut, which is the whole defect -- and it must move
+// at least one, or nothing changed. (CC121 is deliberately not in the alphabet: it
+// releases a hold by definition, so a shorter end there is correct and is pinned in
+// the shape table instead.)
+// The pedal family: the damper (CC64) holds a released note, sostenuto (CC66) holds
+// the notes that were *down* when it landed, and Reset All Controllers (CC121)
+// releases the family without stopping a note whose key is still down (RP-015).
+// The spec's wording is why rows 4 and 6 matter: sostenuto is a snapshot, so neither
+// a damper-held note nor one struck later belongs in it.
+check('end layers: the pedal family holds, and the reset that releases it', () => {
+  const eot = (playTime) => ({ playTime, type: MIDIEvents.EVENT_META, subtype: MIDIEvents.EVENT_META_END_OF_TRACK });
+  const rows = [
+    ['sostenuto holds a released note to its own release (the reported shape)',
+      [evOn(0), evCc(100, 66, 127), evOff(500), evCc(1500, 66, 0), eot(4000)], null, 1500],
+    ['and to the track end when it never releases',
+      [evOn(0), evCc(100, 66, 127), evOff(500), eot(4000)], null, 4000],
+    ['sostenuto hands the note to the damper when it releases first',
+      [evOn(0), evCc(100, 66, 127), evOff(500), evCc(600, 64, 127), evCc(800, 66, 0),
+        evCc(1600, 64, 0), eot(4000)], null, 1600],
+    ['but a note the damper was holding is not in its snapshot',
+      [evOn(0), evCc(100, 64, 127), evOff(300), evCc(400, 66, 127), evCc(700, 64, 0),
+        evCc(1500, 66, 0), eot(4000)], null, 700],
+    ['a note struck while sostenuto is down and one before it',
+      [evOn(0), evCc(100, 66, 127), evOff(200), evOn(300, 62), evOff(500, 62),
+        evCc(1500, 66, 0), eot(4000)], null, 1500],
+    ['a note struck only after it landed is not held at all',
+      [evCc(100, 66, 127), evOn(300, 62), evOff(500, 62), evCc(1500, 66, 0), eot(4000)], null, 500],
+    ['the reset releases the hold',
+      [evOn(0), evCc(100, 66, 127), evOff(200), evCc(500, 121, 0), eot(4000)], null, 500],
+    ['but does not stop a note whose key is down',
+      [evOn(0), evCc(100, 66, 127), evCc(500, 121, 0), evOff(1200), eot(4000)], null, 1200],
+    ['All Sounds Off releases the hold too',
+      [evOn(0), evCc(100, 66, 127), evOff(200), evCc(500, 120, 0), evCc(1500, 66, 0), eot(4000)], null, 500],
+    ['sustain layer off: CC66 is inert, so the note stops at its note-off',
+      [evOn(0), evCc(100, 66, 127), evOff(500), evCc(1500, 66, 0), eot(4000)], { sustain: false }, 500],
+    ['panic layer off: the reset is inert, so the hold survives it',
+      [evOn(0), evCc(100, 66, 127), evOff(200), evCc(500, 121, 0), evCc(1500, 66, 0), eot(4000)],
+      { panic: false }, 1500],
+  ];
+  for (const [name, events, over, want] of rows) {
+    const layers = over ? { ...END_LAYERS, ...over } : { ...END_LAYERS };
+    assert.strictEqual(songEndMs(events, layers), want, name);
+  }
+});
+
+// The list has to carry a message that can actually release a sostenuto hold: All
+// Notes Off leaves what a pedal holds, and a damper-off does not touch sostenuto, so
+// a file that never releases the pedal would otherwise ring forever on an engine
+// that implements it.
+check('a sostenuto hold the file never releases still gets a sostenuto-off', () => {
+  const shape = (withMarkers) => buildMidi([withMarkers ? [
+    tempo(), cc(110), noteOnAt(0, 0, 60), ccAt(TPQ, 66, 127), cc(111),
+  ] : [
+    tempo(), noteOnAt(0, 0, 60), ccAt(TPQ, 66, 127),
+  ]]);
+  for (const withMarkers of [false, true]) {
+    const dial = withMarkers ? 'marker' : 'plain';
+    const events = parseBytes(shape(withMarkers)).getPlaybackEvents(false).events;
+    const isSost = (e) => e.subtype === MIDIEvents.EVENT_MIDI_CONTROLLER && e.param1 === 66;
+    assert.strictEqual(events.filter((e) => isSost(e) && e.param2 >= 64).length, 1,
+      `${dial}: the file's own press is the only one`);
+    assert.ok(events.filter((e) => isSost(e) && e.param2 === 0).length > 0,
+      `${dial}: expected an appended sostenuto-off, since the file has none`);
+  }
+});
+
 check('end layers: the panic fix never cuts an end, and does extend some (exhaustive)', () => {
   const eot = (playTime) => ({ playTime, type: MIDIEvents.EVENT_META, subtype: MIDIEvents.EVENT_META_END_OF_TRACK });
   const MOVES = [() => evOn(0), () => evOff(0), () => evCc(0, 64, 127), () => evCc(0, 64, 0),
-    () => evCc(0, 123, 0), () => evCc(0, 120, 0)];
+    () => evCc(0, 66, 127), () => evCc(0, 66, 0), () => evCc(0, 123, 0), () => evCc(0, 120, 0)];
   let compared = 0, longer = 0, shorter = 0, firstShort = null;
   for (let len = 0; len <= 5; len++) {
     const idx = new Array(len).fill(0);

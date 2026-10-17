@@ -379,7 +379,7 @@ only drops events *after* that end, and the appended `sustainOff` lands on it.
 Pinned by the harness check "end layers: the sustain pedal is what makes a held
 ending audible". **Disposition: a promote, not a commit.**
 
-## Recorded, not fixed: the wrap's state restore has no value for a control the target never changed (F-C, 2026-10-17)
+## Fixed 2026-10-17: the wrap centres a pitch bend the file never authored (F-C)
 
 greptile P1 on PR #15 (`MIDIFilePlayer.js:590`): "`loopJump()` leaves the finished
 pass's pitch bend in place when the file has no bend message before the loop
@@ -411,30 +411,69 @@ outside a SoundFont set had no region at all, so the path did not exist.
 region, 24 of those non-expanded): only **2** bend inside the loop — both Descent —
 and **both also bend before the loop start**, where the target-state restore
 applies and nothing leaks. The shape is absent from the arbiter (`catalog/`; there
-is no MIDI corpus in `dev/`). So it does not clear the review bar's criterion 2
-(reachable on real content), and it is recorded rather than fixed. The convention
+is no MIDI corpus in `dev/`), so it did not clear the bar's criterion 2 on its
+own; fixed anyway as a one-class consistency fix (the user's call), because it is
+the same act as cutting the ringing notes and has no catalog delta. The convention
 where it is most likely to appear in the wild is the lone-CC111 RPG-Maker one
 (loop from the marker to the song end), where a late bend is plausible and the
 catalog has only the authored `*.rpgmaker.mid` fixtures (no bends).
 
-Two resolutions, both small, and they differ in what they cost:
+Two resolutions were on the table:
 
 - **(A) Complete the target state** — before replaying the collected list, reset
   the controls whose target value the file never authored to their engine-initial
   value. Unambiguous for pitch bend (8192); the general case needs a per-control
-  notion of "initial" (synth/soundfont vs receiver defaults), which is the same
-  design question as the two entries above. **Zero catalog delta today**: both
-  Descent files bend before their loop start, so their collected value does not
-  change. ~4 lines plus a synthetic check.
+  notion of "initial" (synth/soundfont vs receiver defaults).
 - **(B) Take the carry literally** — grounds 2 and 3 of the 2026-10-15 decision
   say the wrap should match the expansion and the sequence-jump driver, so make
   the non-expanded wrap collect from the loop *end* (or restore nothing at all)
   and stop presenting the intro's value. **This is the one with an audible catalog
   effect**: the two Descent files would open pass 2 with the body's last bend
-  instead of the intro's. ~2 lines, plus updating the `collectStateEvents`
-  pitch-bend comment and the checks that pin today's agreement.
+  instead of the intro's.
 
-Not chosen yet: (A) changes nothing real, (B) changes two real files.
+**Chosen: (A), scoped to the pitch bend.** `loopJump` now centres the bend on all
+16 channels at the boundary in both paths — `send([0xE0|ch, 0, 64], boundary)` and
+`synth.pitchBend(ch, 8192)` — *before* the collected state is replayed, so an
+authored bend still wins. Same act as cutting the notes ringing at the seam: end
+what the finished pass left, then present the target's state.
+
+Pinned by two checks: "a wrap centres a bend the file never authored (no
+expansion)" (fails against the unfixed code with an empty bend list) and "and the
+expanded wrap still restores the bend the file did author" (the reset must not
+clobber the carry — passes either way). The Web MIDI path is covered by the
+existing "the wrap cleanup lands on the band end, not the last event", which now
+also asserts the centre message and its timestamp, and fails against the unfixed
+code too.
+
+### The rest of the state, audited (same scanner; 27 catalog files with a region)
+
+| class | leaking keys | audible |
+| --- | --- | --- |
+| pitch bend | 0 (centred now) | — |
+| channel aftertouch (never collected at all) | 0 | — |
+| the RP-015 CCs (modulation, expression, sustain, portamento, soft/legato) | 0 | — |
+| volume (CC7) | 10 | **0** |
+| pan (CC10) | 9 | **0** |
+| program | 13 | **0** |
+
+"Leaking" = the value at the wrap-from point differs from the target's (GM
+defaults assumed for the CCs RP-015 excludes); "audible" = a note starts on that
+channel *before* the file re-authors it, the only window where the wrong value can
+be heard, since the wrap cuts every ringing note and a pass therefore begins
+silent. So the remaining classes are exposed in principle and inaudible on every
+file we have — which is the general form of the 2026-10-16 measurement that all
+five looped files open pass 2 on the same instrument.
+
+Why the rest are not centred the same way: RP-015 names pitch bend, aftertouch,
+modulation, expression, the pedals and switches and RPN/NRPN as the state with a
+defined default, and deliberately *excludes* volume, pan, program, bank select and
+the effect depths, because those belong to the receiver or the patch rather than
+to a spec constant. Resetting them would be the engine inventing state the file
+did not ask for — the ground the earlier re-raises were declined on — and a
+receiver's preset is not ours to guess. They stay carried, now *documented* as
+carried, with the counts above as the evidence that it costs nothing audible here.
+The same comment in `loopJump` states the scope, so the next reader sees a
+contract rather than a gap.
 
 ## How to regenerate the inventory
 

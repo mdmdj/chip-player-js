@@ -2437,8 +2437,10 @@ only armed when `silenceDuration >= 0`, and both arms must end the song):
   `songPath`), so it expands exactly when the audio does. Parsed at load time in
   `midi-helpers` (`findLoopRange` + `getLoopedEvents`, the two-pass case the same
   shape as a two-pass libvgm track), so no catalog work was needed. Repeat One
-  wraps the JS event loop to the wrap target with ringing-note cutoff and
-  silent state restore (no panic); the head folds into the band, which is the
+  wraps the JS event loop to the wrap target with ringing-note cutoff, a centred
+  pitch bend (the collected state can only restore values the file authored --
+  see "F-C" in `dev/MIDI_LOOP_TEST_GAPS.md`) and silent state restore (no panic);
+  the head folds into the band, which is the
   wrap span (`MIDIPlayer.getLoopBandMs`: the region by default, the second pass
   when expanded), with no fade tail (past the band the song ends).
   Lone CC111 (RPG Maker: loop to song end) works the same way. The expansion

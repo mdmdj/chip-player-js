@@ -1095,7 +1095,7 @@ export const scenarios = [
     watch: [
       'Repeat One sets the engine’s own indefinite flag, so the track keeps rendering past the length the file reports — 1:54 here.',
       'The position climbs through 1:54 and keeps going, with no rewind: the cycle boundary is the engine’s own, not a reload.',
-      'The take starts partway through the song: where a seek lands is not repeatable between runs, so it is kept off camera.',
+      'The take starts partway through the song for brevity.',
     ],
     before: 'master faded and reloaded the track on every cycle.',
     harness: 'dev/test-end-detector.js',

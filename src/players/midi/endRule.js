@@ -144,11 +144,13 @@ export function songEndMs(events, layers = END_LAYERS) {
         } else if (e.param1 === CC_RESET_ALL_CONTROLLERS && layers.panic) {
           // RP-015 turns the whole pedal family off, so the holds it was carrying
           // are released -- but it is not an all-notes-off: a note still held down
-          // keeps sounding.
-          clearHeld(e.channel);
-          clearSosto(e.channel);
+          // keeps sounding. Zero the pedal *state* first: clearSosto hands notes
+          // back to `pedalHeld` while the damper still reads down, and they would
+          // survive the reset that way.
           pedal.set(e.channel, 0);
           sostenuto.set(e.channel, 0);
+          clearHeld(e.channel);
+          clearSosto(e.channel);
         } else if ((e.param1 === CC_ALL_SOUNDS_OFF || e.param1 === CC_ALL_NOTES_OFF) && layers.panic) {
           // The two panic messages are not the same thing. All Sounds Off silences
           // the channel outright, pedal-held notes included; All Notes Off leaves

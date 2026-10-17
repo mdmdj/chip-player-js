@@ -531,12 +531,23 @@ MIDIPlayer.prototype.collectStateEvents = function (fromIdx, toMs) {
   // controllers must replay in order; everything else is last-wins.
   const eventMap = {};
   const sequenced = [];
+  // Bank select takes effect on the *next* program change, so the bank a program
+  // was authored with is the one selected before it -- a later selection is still
+  // pending. Both are state at the target, so both are replayed, in that order.
+  const bankInForce = new Map();      // channel -> { [cc]: event }
+  const bankAtProgram = new Map();    // channel -> { [cc]: event }
+  const noteBank = (channel, event) => {
+    const b = bankInForce.get(channel) || {};
+    b[event.param1] = event;
+    bankInForce.set(channel, b);
+  };
   let pos = fromIdx;
   while (this.events[pos] && this.events[pos].playTime < toMs) {
     const event = this.events[pos];
     if (event.subtype === MIDIEvents.EVENT_MIDI_PROGRAM_CHANGE) {
       this.handleProgramChange(event.channel, event.param1);
       eventMap[`${event.subtype}-${event.channel}`] = event;
+      bankAtProgram.set(event.channel, Object.assign({}, bankInForce.get(event.channel)));
     } else if (event.subtype === MIDIEvents.EVENT_MIDI_PITCH_BEND) {
       // Last pitch-bend state, so a loop wrap does not carry a bent ending
       // into the next pass when the authored state before the wrap is centered.
@@ -549,28 +560,45 @@ MIDIPlayer.prototype.collectStateEvents = function (fromIdx, toMs) {
       } else {
         // All others, we only care about the last event
         eventMap[`${event.subtype}-${event.channel}-${event.param1}`] = event;
+        if (event.param1 === CC_BANK_SELECT_MSB || event.param1 === CC_BANK_SELECT_LSB) {
+          noteBank(event.channel, event);
+        }
       }
     }
     pos++;
   }
-  // Bank select takes effect on the *next* program change, so a replayed program
-  // must not go out ahead of the bank it was authored with. `eventMap` is in
-  // first-seen order, which puts the program first when the file picked one before
-  // it ever picked a bank -- and then the program lands on the bank the finished
-  // pass left, i.e. the wrong instrument.
-  //
-  // So the replay is ordered: banks (MSB, then LSB), the programs, the rest of the
-  // last-wins state, then the sequenced RPN/NRPN pair. A program change may itself
-  // reset controllers, so a program ahead of them (and ahead of the RPN that sets
-  // the bend range) leaves the pass sounding the way the file wrote it.
+  // The replay is ordered so the *patch* comes out the way the first pass had it:
+  // the bank each program was authored with (MSB, then LSB), the programs, then any
+  // bank selected after them (still pending for the next program change), then the
+  // rest of the last-wins state, then the sequenced RPN/NRPN pair. Replaying the
+  // latest bank first -- what last-wins alone gives -- selects the program on a bank
+  // the pass never used, which is a different instrument at the wrap.
   const collected = Object.values(eventMap);
   const isBankSelect = (e) => e.subtype === MIDIEvents.EVENT_MIDI_CONTROLLER &&
     (e.param1 === CC_BANK_SELECT_MSB || e.param1 === CC_BANK_SELECT_LSB);
   const isProgram = (e) => e.subtype === MIDIEvents.EVENT_MIDI_PROGRAM_CHANGE;
-  const banks = collected.filter(isBankSelect).sort((a, b) => a.param1 - b.param1);
+  // Bank 0 is the MIDI default, and the synth may be on any bank by the time we
+  // replay this, so a program the file gave no bank says 0/0 out loud rather than
+  // inheriting whatever the finished pass left.
+  const bankSelect = (channel, param1, param2) => ({
+    channel, param1, param2, subtype: MIDIEvents.EVENT_MIDI_CONTROLLER,
+  });
+  const banksForPrograms = [];
+  for (const [channel, b] of bankAtProgram) {
+    banksForPrograms.push(bankSelect(channel, CC_BANK_SELECT_MSB, b[CC_BANK_SELECT_MSB] ? b[CC_BANK_SELECT_MSB].param2 : 0));
+    banksForPrograms.push(bankSelect(channel, CC_BANK_SELECT_LSB, b[CC_BANK_SELECT_LSB] ? b[CC_BANK_SELECT_LSB].param2 : 0));
+  }
   const programs = collected.filter(isProgram);
+  // A collected bank select that differs from the one its program was authored with
+  // is a later, pending selection (or belongs to a channel with no program change).
+  const pendingBanks = collected.filter((e) => {
+    if (!isBankSelect(e)) return false;
+    const b = bankAtProgram.get(e.channel);
+    if (!b) return true;
+    return e.param2 !== (b[e.param1] ? b[e.param1].param2 : 0);
+  });
   const rest = collected.filter((e) => !isBankSelect(e) && !isProgram(e));
-  return { eventList: banks.concat(programs, rest, sequenced), endIdx: pos };
+  return { eventList: banksForPrograms.concat(programs, pendingBanks, rest, sequenced), endIdx: pos };
 };
 
 MIDIPlayer.prototype.setPosition = function (ms) {

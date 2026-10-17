@@ -608,6 +608,13 @@ MIDIFile.prototype.getLoopedEvents = function (tracks, loopCount = 2, range = nu
 
   finishEventList(combinedEvents, layers, channelsByTrack);
 
+  // A lone CC111 means "loop to the end of the song", and the song ends where the
+  // trimmed list ends. Taking that boundary from the untrimmed timeline leaves
+  // converter padding inside the loop, so every wrap replays it as silence.
+  if (isRpgMaker && loopEndMs != null && combinedEvents.length > 0) {
+    loopEndMs = Math.min(loopEndMs, combinedEvents[combinedEvents.length - 1].playTime);
+  }
+
   if (expandLoop && loopStartMs == null) loopStartMs = 0;
   if (!expandLoop || loopEndMs == null || loopEndMs <= loopStartMs) {
     loopStartMs = null;

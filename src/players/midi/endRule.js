@@ -90,6 +90,12 @@ export function songEndMs(events, layers = END_LAYERS) {
       } else if (layers.meta && e.type !== EVENT_SYSEX && e.type !== EVENT_DIVSYSEX) {
         endMs = Math.max(endMs, e.playTime);
       }
+      // A note still sounding when a trailing event arrives is audible *at* that
+      // event, so a file that never releases its final note rings to its track
+      // end rather than to the note's own start -- crediting only the start would
+      // silence it. The layers above stay the separate question of where a file
+      // ends when nothing is sounding.
+      if (held()) endMs = Math.max(endMs, e.playTime);
       continue;
     }
 

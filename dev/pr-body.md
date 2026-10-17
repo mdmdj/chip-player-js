@@ -1,44 +1,46 @@
 # First Class Sub-Tunes and More Powerful Looping
 
-A file that holds several songs (NSF/NSFE, SID, GBS, AY) becomes a **song folder**, and every sub-tune is an ordinary song. **Repeat One** is implemented for every engine.
+A file that holds several songs (NSF/NSFE, SID, GBS, AY) becomes a **song folder**, and every sub-tune is an ordinary song: its own favorites, share link, chart rank, shuffle slot, search hit, SEO page. Local files get the same treatment, read from their own header.
 
-**Sub-tunes** are each their own song (`{path, sub-tune}`), with its own favorites, share link, chart rank, shuffle slot, search hit, and SEO page; local files get the same treatment, read from their own header.
+**Repeat One** works for every engine, natively where the engine can loop: VGM/VGZ, MDX and MOD/XM/IT/S3M use the engine's own loop region; MIDI uses the file's markers (CC 102/103 or CC 110/111) and wraps in JS, since a synth engine has no loop of its own; NSFE, SID, N64 and GSF get an ending detector instead. The bar draws the region it actually plays, and toggling repeat never jumps the transport.
 
-**Repeat One** is improved: native region looping where the engine exposes one (VGM/VGZ, MDX, MOD/XM/IT/S3M), file-region looping for MIDI (its own CC 102/103 or CC 110/111 markers; no engine loop, so the wrap is JS), an ending detector where it doesn't (NSFE, SID, N64), a drawn loop band, and no jumps when toggling.
+**Write-up with a video for every behaviour:** https://mdm.dj/dev/chip-player-js/subtunes-as-first-class/
 
-**Full write-up with video for every behaviour: https://mdm.dj/dev/chip-player-js/subtunes-as-first-class/**
+53 files, +4,893/−651. Three pieces are structural: the catalog schema, the client's song identity, and the loop wrappers. Nothing is taken out of `master`: the shared-file changes are additive, the two wrappers only add loop getters, and the one vendored engine touched is `mdxmini`.
 
 ## Suggested Review Phases
 
-1. **Catalog:** `scripts/build-music.js`, `scripts/metadata-parsers.js`, `scripts/subtune-headers.js`
-2. **API:** `server/database.js`, `server/index.js`, `server/schemas.js`
-3. **Client identity & nav:** `src/util.js`, `src/Sequencer.js`, `src/components/`
-4. **Repeat One, per engine:** `src/players/` (and `Player.js` hooks)
-5. **Engine surface:** `src/bindings/*.cpp`, `mdxmini/`, `scripts/build-chip-core.js`
-6. **Share links & SEO:** `App.js`, `AppFooter.js`, `scripts/build-sitemap.js`
+1. **Catalog** — `scripts/build-music.js`, `scripts/metadata-parsers.js`, `scripts/subtune-headers.js`
+2. **API** — `server/database.js`, `server/index.js`, `server/schemas.js`. Search now returns a file and its sub-tunes as peers, and shuffle/random return one item per playable song instead of one per file.
+3. **Client identity and nav** — `src/util.js`, `src/Sequencer.js`, `src/components/`
+4. **Repeat One, per engine** — `src/players/`, and the hooks in `Player.js`
+5. **Engine surface** — `src/bindings/*.cpp`, `mdxmini/`, `scripts/build-chip-core.js`
+6. **Share links and SEO** — `App.js`, `AppFooter.js`, `scripts/build-sitemap.js`
 
 ## ⚠ Before Deploying
 
-- **Rebuild the catalog:** `node scripts/build-music.js` (no `--reset-db`, no `-n`). The new statements reference `subtune` / `song_fts` / `music.subtune_count`; against an old catalog the server throws `SqliteError: no such table: subtune` **at require time** and `/top`, `/search`, `/browse`, `/user/favorites` go down. ~12 s on the full catalog. `playbacks.subtune` and favorites need no migration.
-- **Rebuild the chip-core:** `npm run build-chip-core` has seven new loop exports, and the `mdxmini` patch (loop points, fade latch, microsecond position).
+- **Rebuild the catalog:** `node scripts/build-music.js` (no `--reset-db`, no `-n`). This replaces `music_fts` with `song`/`song_fts` and adds `subtune` and `music.subtune_count`; against an old catalog the server throws `SqliteError: no such table: subtune` at require time and `/top`, `/search`, `/browse`, `/user/favorites` go down. About 12 s on the full catalog. `playbacks.subtune` and favorites need no migration.
+- **Rebuild the chip-core:** the loop calls need the new entries in `scripts/build-chip-core.js`, plus the `mdxmini` patch (loop points, fade latch, microsecond position). Drop them and the core fails to link rather than working quietly.
+- **Try Song Folders:** browse almost any NSF/NSFE or SID, or `?play=<song id>` into one.
+- **Try Repeat One:** most VGM/VGZ have excellent loop bands.
+
+## How I Checked It
+
+A local build of the real core (all engines), a catalog made of sample files (including all files `test:seo` exercise) built and browsed, and every format played and looped on the real engine, with the shared paths A/B'd against `master` for identical output. The same behaviour carries 290 checks in the harness I work with locally (not part of this PR for size). Every clip in the write-up was recorded with its own assertions, so each video always shows what it claims.
 
 ## Known Limits
- [full list in the changelog](https://mdm.dj/dev/chip-player-js/subtunes-as-first-class/)
 
-| issue | status  |
+| issue | status |
 | --- | --- |
-| V2M: reported duration doesn't match the engine, so Repeat One keeps the old stop-and-reload (no band) | pre-existing, same as prod |
-| XMP (MOD/XM/IT/S3M): the loop band appears only after the first wrap | by design, see the [changelog](https://mdm.dj/dev/chip-player-js/subtunes-as-first-class/#xmp-learned-band) |
-| SID `seek()` to a non-zero position is unfinished in the fork (some tunes resume, some stay silent) | pre-existing, same as prod |
-| N64 `.miniusf` seeking can glitch the audio | known, see the changelog |
+| V2M: the reported duration doesn't match the engine, so Repeat One keeps the old stop-and-reload (no band) | pre-existing, same as chiptune.app today |
+| XMP (MOD/XM/IT/S3M): the loop band appears only after the first wrap | by design, see the [write-up](https://mdm.dj/dev/chip-player-js/subtunes-as-first-class/#xmp-learned-band) |
+| SID `seek()` to a non-zero position is unfinished in the fork (some tunes resume, some stay silent) | pre-existing, same as chiptune.app today |
 | The VGM loop band assumes the libvgm tree's `Tick2Second` semantics | see below |
-
-**Nothing here regresses `master` beyond the intended feature.** The changes to shared files are additive; the two wrappers carry only the loop getters and the SID sub-tune reload; the only vendored-engine source touched is `mdxmini`.
 
 ## Chip Core Reproducibility Is A Risk
 
-My dev wasm is built from **un-pinned sibling clones** (`../libvgm`, etc.), the way the README describes, so I can't prove functionality against the exact libvgm tree you build. Particularly, the libvgm loop math is speed-invariant by construction, but it assumes `Tick2Second` divides by the speed factor.
+My dev wasm comes from un-pinned sibling clones (`../libvgm` and friends), the way the README describes, so I can't prove any of this against the exact libvgm tree you build. The loop math is speed-invariant by construction, but it does assume `Tick2Second` divides by the playback speed.
 
-Very excited to contribute and happy to receive comments.
+Very excited to contribute, and happy to take comments.
 
 Thank you!

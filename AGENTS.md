@@ -2455,8 +2455,9 @@ only armed when `silenceDuration >= 0`, and both arms must end the song):
   ending does not rewind (see the 2026-10-17 entry there); the release that cuts a
   note at its own track's `END_OF_TRACK` is one shared pass
   (`insertTrackEndReleases`), so the plain and marker merges cannot disagree about
-  when a held note stops; the collected state replays bank select before the
-  program that uses it (see the 2026-10-17 entries there); the *end* of a MIDI
+  when a held note stops; the collected state replays the bank each program was
+  *authored* with, the program, then any selection still pending (see the 2026-10-17
+  entries there); the *end* of a MIDI
   comes from the layered rule in `endRule.js` (notes, the pedal family -- the damper
   and sostenuto, released by Reset All Controllers -- and the panics), so converter
   padding cannot inflate a duration, a note the writer never released rings to its
@@ -2466,7 +2467,8 @@ only armed when `silenceDuration >= 0`, and both arms must end the song):
   band, which is the
   wrap span (`MIDIPlayer.getLoopBandMs`: the region by default, the second pass
   when expanded), with no fade tail (past the band the song ends).
-  Lone CC111 (RPG Maker: loop to song end) works the same way. The expansion
+  Lone CC111 (RPG Maker: loop to song end) works the same way, with its end taken
+  from the trimmed timeline so converter padding is not inside the loop. The expansion
   moves nothing: a post-loop event keeps its authored offset from the loop end
   (so a Type-1 conductor's ending tempos keep their timing), and the song's end
   is the last *note* event, not trailing meta/cleanup (`getLoopedEvents`).

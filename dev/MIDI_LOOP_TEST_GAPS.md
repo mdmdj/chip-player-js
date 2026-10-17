@@ -516,6 +516,45 @@ on raw track data). The emitted-tail change is visible on every file — one eve
 end identical** across all 54 (Wario 9080 → 9096 events, Descent 15097 → 15131, both
 durations unchanged).
 
+## Fixed 2026-10-17: the wrap's bank, the lone-CC111 loop end, and the reset's order
+
+Three findings on the same day's work, two of them completing or correcting the fixes
+above.
+
+**The wrap's bank was half-restored (P1, `MIDIFilePlayer.js:573`).** Bank select is
+pending until a program change consumes it, so "the state at the target" is the bank
+each program was *authored with*, not the latest selection. The collector took the
+latest, so an ordering-only fix still selected the program on a bank the pass never
+used. Measured (bank 0 -> program 2 -> a pending bank 1, loop start at 1500 ms): the
+first pass sounds bank 0 + program 2, and the replay sent `B0:0=1, B0:32=0, P0:2` --
+program 2 on bank 1. Now `B0:0=0, B0:32=0, P0:2, B0:0=1`: its own bank, the program,
+then the selection still pending. Bank 0 is said out loud when the file gave the program
+none, because by replay time the synth's bank is whatever the finished pass left.
+
+The lesson is in the check, not the code: the earlier round asserted the *event order*
+(bank before program) and passed a fix that still produced the wrong patch. The
+replacement asserts the **patch** -- the applied bank+program *and* the pending bank
+must match the first pass.
+
+**A lone CC111 looped over its padding (P1, `midi-helpers.js:616`).** The implicit
+"loop to the end of the song" took `loopEndMs` from the untrimmed timeline while
+`finishEventList` then trimmed the padding away, so Repeat One wrapped over dead air. A
+synthetic with a 5 s tail: list 1000 ms, region `[0, 6000]` -> **5000 ms of silence per
+wrap**; now `[0, 1000]`. Real case: all five `*.rpgmaker.mid` fixtures, **83 ms each ->
+0**. Fixed by clamping the implicit end to the trimmed list's last event.
+
+**Reset All Controllers put the holds back (P2, `endRule.js:151`, ours).** The CC121
+branch zeroed the pedal state *after* clearing the sets, so `clearSosto` handed the
+released notes straight back into `pedalHeld`: with both pedals down the end stayed at
+the padded track end (10000 ms where 1000 ms was the last audible moment). The state is
+zeroed first now. The shape table had CC66-alone and CC121-alone but never both, which
+is how it slipped; that combination has its own row.
+
+Measured across all 54 catalog files: every list, duration and end is byte-identical
+before and after. None of the three shapes is reachable here -- 0 of 27 marker files
+have a bank select after their last program, and the CC111 case only shows up as the
+fixtures' 83 ms.
+
 ## Recorded, not fixed: the band can reach a few ms past the song (2026-10-16)
 
 `MIDIPlayer.getLoopBandMs` returns the wrap span as-is, where the base

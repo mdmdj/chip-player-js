@@ -1349,6 +1349,40 @@ check('end layers: a note still sounding at the track end rings to it', () => {
     'a trailing meta after silence is not an end');
 });
 
+check('a marker file cuts a held note at its own track end, like the plain path', () => {
+  // One file, both paths. The per-track release pass lives in one place now, and
+  // this is exactly where the two drifted: a marker file lost the cut when it
+  // started going through the loop merge, so a note the writer never released rang
+  // to the end of the song instead of the end of its track. Track 0 holds a note
+  // and ends at 1s (a text meta, then its END_OF_TRACK); track 1 plays to 5s and
+  // carries the loop end, so the region is real and the marker path -- not the
+  // getEvents fallback -- is the one under test.
+  const bytes = buildMidi([
+    [tempo(), cc(110), noteOnAt(0, 0, 60), { delta: TPQ * 2, bytes: [0xff, 0x01, 0x00] }],
+    [noteOnAt(0, 0, 72), noteOffAt(TPQ * 2, 0, 72), noteOnAt(0, 0, 74), noteOffAt(TPQ * 8, 0, 74), cc(111)],
+  ]);
+  const cutAt = (events, track, channel) => events
+    .filter((e) => e.subtype === MIDIEvents.EVENT_MIDI_CONTROLLER &&
+      e.param1 === 123 && (e.track || 0) === track && e.channel === channel)
+    .map((e) => Math.round(e.playTime));
+  const plain = parseBytes(bytes).getEvents();
+  const marker = parseBytes(bytes).getPlaybackEvents(false);
+  assert.ok(marker.loopStartMs !== null && marker.loopEndMs > marker.loopStartMs,
+    `expected a real region, got [${marker.loopStartMs}, ${marker.loopEndMs}]`);
+  assert.deepStrictEqual(cutAt(plain, 0, 0), [1000, 5000],
+    'the plain path releases at the track end and again at the song end');
+  assert.deepStrictEqual(cutAt(marker.events, 0, 0), [1000, 5000],
+    'and the marker path must agree, note for note');
+  // The pass runs once per list. Asking the same file twice must not accumulate
+  // releases -- that is what would break if it were ever applied in two places.
+  const one = parseBytes(bytes);
+  const first = one.getEvents();
+  const second = one.getEvents();
+  assert.deepStrictEqual(cutAt(second, 0, 0), cutAt(first, 0, 0),
+    'asking twice does not accumulate releases');
+  assert.deepStrictEqual(cutAt(second, 0, 0), [1000, 5000]);
+});
+
 check('a dangling final note keeps the track end in the merged loop list', () => {
   // The same shape end to end: the tail trim must not delete the track end that
   // the dangling note is audible *through*. 2400 ticks = 10 s, 3600 = 15 s.

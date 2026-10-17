@@ -912,6 +912,89 @@ one-pass checks green and carries `xcheck('a lone CC111 keeps one region across
 both merges')` as a stated known failure. A passing `xcheck` means the defect was
 fixed and the check should be unwrapped.
 
+## Fixed 2026-10-17: the wrap opened in the state the region ENDED in (greptile, `MIDIFilePlayer.js:709`)
+
+`loopJump()` restored only the state authored before `loop.jumpMs`, which for an
+expanded file is one region *past* the loop start -- while the events queued from
+there are the region's own first events. So pass 2 opened in the state pass 1
+*ended* in, and anything the region writes that the loop start does not (a fade,
+pan, bend, pedal) carried in. The pitch-bend line was the special case of this;
+it is now the general rule:
+
+- the collected state is taken at `loop.startMs` (the same point as before for a
+  non-expanded file, one region earlier for an expanded one), and
+- `GM_CC_DEFAULTS` are sent at the boundary for every controller the region
+  authors that the loop start does not -- an authored value to restore or a
+  defined default, nothing else. The pedals keep their own all-channel release
+  (a note whose NOTE_OFF already ran keeps sounding under them) and the sequenced
+  RPN/NRPN family is left to the file, being meaningless without its pair.
+
+Measured over the catalog (98 MIDI files; `catalog/midi/black/` excluded -- 150,
+103 and 15 MB, which hang any per-event scan): **every event list and every
+region is byte-identical** before and after, and the fix moves **58 controller
+values across 5 files**. The one instance with a note inside its wrong-value
+window is `Mario Kart 64 / 03 - 3 Raceways, Wario Stadium.mid` ch5 CC10, authored
+once at 3714 ms = 0 with the region starting at 0: pass 2 opened hard-left for
+3714 ms where pass 1 was centred, and the only note in that window starts 9 ms
+before the file's own pan change -- sub-perceptual, which is why this is recorded
+as reachable-but-mild rather than proved by the app. The severe form the report
+described (a CC11 = 0 inside the region) does not exist here: **1171 CC11
+messages, none of them zero**.
+
+Checks: `dev/test-midi-loops.js` runs the fixture on **both merges** -- the loop
+start's volume survives and an unauthored pan opens at its GM default -- plus the
+bend pair, whose "the authored bend survives the reset" fixture now authors the
+bend *before* the loop start (a bend authored only inside the region no longer
+needs a boundary restore: it belongs to the region's own events, which replay it
+at its authored position). Fail-before: no pan at the wrap at all, and the
+region-end volume restored.
+
+## Fixed 2026-10-17: a repeated sostenuto down re-captured notes (greptile, `endRule.js:167`)
+
+`songEndMs()` snapshotted the sounding notes into `sostoHeld` on every CC66 value
+>= 64. The spec makes a down while the pedal is already down a no-op, and the
+note-on case deliberately clears a restruck note from the hold -- so the second
+down put back exactly the notes that started *after* the pedal landed, and their
+note-offs stopped crediting the end. Now only the up-to-down transition captures.
+
+Reachability, measured: CC66 is present but rare -- **2 files, 6 messages, all
+127** (`Sound Canvas MIDI Collection/.../Negai2_88P.MID` and `Negai2_V3.MID`) --
+and at every repeat **no note is sounding on that channel**, so the defect
+captures nothing: **0 ms** on the catalog. (A first version of that walk processed
+tracks sequentially, which is not time order, and returned a false zero; the
+counts are from the tick-merged walk.) It is fixed as latent correctness, and the
+check is a synthetic fixture of the shape the census shows exists: pedal down with
+a note sounding, a note starting after it, a redundant down, then a note-off and
+converter padding. Fail-before: the ending holds the padding -- **3500 ms where
+the last note-off is 1500 ms**.
+
+## Fixed 2026-10-17: a favorite moved when a second add landed first (greptile, `UserProvider.js:234`)
+
+The decorated add response replaced the optimistic entry by filtering it out and
+appending: adding A and then B while A's request was pending turned `[A, B]` into
+`[B, A]`, and the Favorites list preserves that order within a directory, so the
+rows and the play order moved as responses arrived. It now replaces the entry
+**where it is** (the "a newer toggle may have removed it" guard stays).
+
+`dev/record/check-faves-order.mjs` reproduces the race the way its hydration
+sibling does -- the first POST held, the second allowed to finish, then the first
+released -- and asserts the **rendered** Favorites rows, navigating client-side so
+the app's own hydration cannot re-read the server's order and mask it. Fail-before:
+`A=2 B=1` (the older click last); pass-after: `A` before `B`, 7/7.
+
+Two hazards found while making it non-destructive, both now handled: the server
+**appends a second copy** rather than deduplicating, so the picks skip any row
+whose `songId` is already favorited (a row's link text is a song *title*, not a
+file name -- comparing names re-picked a saved song); and a remove aimed at the
+API's *decorated* path silently matches nothing while answering 200, so the
+cleanup diffs the entries actually stored in `server/users.db`.
+
+**Documented, not fixed:** the *stored* order is the arrival order, so after a
+reload the racy pair can still read reversed -- the client-side fix governs the
+session, and the server has no notion of the intended order to store. That is the
+pre-existing append-on-add behaviour for every single-click-in-flight case, not
+something this change introduced.
+
 ## How to regenerate the inventory
 
 A scanner was used to produce the table above (parse each file with the repo's

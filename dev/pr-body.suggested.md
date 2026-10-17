@@ -6,7 +6,7 @@ A file that holds several songs (NSF/NSFE, SID, GBS, AY) becomes a **song folder
 
 **Write-up with a video for every behaviour:** https://mdm.dj/dev/chip-player-js/subtunes-as-first-class/
 
-53 files, +4,893/−651. Three pieces are structural — the catalog schema, the client's song identity, and the loop wrappers — and nothing is taken out of `master`: the shared-file changes are additive, the two wrappers only add loop getters, and the one vendored engine touched is `mdxmini`.
+53 files, +4,893/−651. Three pieces are structural: the catalog schema, the client's song identity, and the loop wrappers. Nothing is taken out of `master`: the shared-file changes are additive, the two wrappers only add loop getters, and the one vendored engine touched is `mdxmini`.
 
 ## Suggested Review Phases
 
@@ -21,11 +21,12 @@ A file that holds several songs (NSF/NSFE, SID, GBS, AY) becomes a **song folder
 
 - **Rebuild the catalog:** `node scripts/build-music.js` (no `--reset-db`, no `-n`). This replaces `music_fts` with `song`/`song_fts` and adds `subtune` and `music.subtune_count`; against an old catalog the server throws `SqliteError: no such table: subtune` at require time and `/top`, `/search`, `/browse`, `/user/favorites` go down. About 12 s on the full catalog. `playbacks.subtune` and favorites need no migration.
 - **Rebuild the chip-core:** the loop calls need the new entries in `scripts/build-chip-core.js`, plus the `mdxmini` patch (loop points, fade latch, microsecond position). Drop them and the core fails to link rather than working quietly.
-- **To try it:** open a multi-song file (any NSF/NSFE or SID, or `?play=<song id>` into one), play a tune, then hit Repeat One and watch the bar.
+- **Try Song Folders:** browse almost any NSF/NSFE or SID, or `?play=<song id>` into one.
+- **Try Repeat One:** most VGM/VGZ have excellent loop bands.
 
 ## How I Checked It
 
-A local build of the real core (all engines), the catalog rebuilt and browsed, and every format played and looped on the real engine, with the shared paths A/B'd against `master` for identical output. The same behaviour carries 290 checks in the harness I work with locally — it isn't part of this PR, and I can bring it in as a tracked `node --test` suite if you want it. Every clip in the write-up was recorded with its own assertions, so a video only shows what it claims.
+A local build of the real core (all engines), a catalog made of sample files (including all files `test:seo` exercise) built and browsed, and every format played and looped on the real engine, with the shared paths A/B'd against `master` for identical output. The same behaviour carries 290 checks in the harness I work with locally (not part of this PR for size). Every clip in the write-up was recorded with its own assertions, so each video always shows what it claims.
 
 ## Known Limits
 
@@ -34,7 +35,6 @@ A local build of the real core (all engines), the catalog rebuilt and browsed, a
 | V2M: the reported duration doesn't match the engine, so Repeat One keeps the old stop-and-reload (no band) | pre-existing, same as chiptune.app today |
 | XMP (MOD/XM/IT/S3M): the loop band appears only after the first wrap | by design, see the [write-up](https://mdm.dj/dev/chip-player-js/subtunes-as-first-class/#xmp-learned-band) |
 | SID `seek()` to a non-zero position is unfinished in the fork (some tunes resume, some stay silent) | pre-existing, same as chiptune.app today |
-| N64 `.miniusf` seeking can glitch the audio | known, see the write-up |
 | The VGM loop band assumes the libvgm tree's `Tick2Second` semantics | see below |
 
 ## Chip Core Reproducibility Is A Risk

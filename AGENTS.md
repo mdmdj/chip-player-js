@@ -512,6 +512,13 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
     Skips cleanly if the server or the catalog is absent.
   - `node dev/test-songrefs.js` — the `SongRef` identity model in `src/util.js`,
     and how a sub-tune names itself (`subtuneLabel`).
+  - `node dev/test-local-subtunes.js` — the Local Files sub-tune cache
+    (`src/localFilesSubtunes.js`): a same-name, same-size replacement inside one
+    second must be re-parsed rather than answered from the old header, and an
+    unchanged file must still be answered from the cache without reading its bytes.
+    The listing reports whole seconds for display, so `readAll()` also carries the
+    full `mtimeMs` and the key prefers it; the seconds-only fallback still caches,
+    which the harness states rather than hides.
   - `node dev/test-devtools.js` — the `__cpDev` stall-watch latch.
   - `dev/record/probe.mjs` — measure a fixture in the live app
     (`node dev/record/probe.mjs "/?play=<id>&subtune=N" [seek|watch|calls|restart]`).
@@ -1503,9 +1510,13 @@ checks no longer work. Compare a live context to a stored one with
   "every local file plays sub-tune 0, no listing" behavior. The shared parser is
   one canonical, dependency-free module (`scripts/subtune-headers.js`); the
   client loads it with a dynamic `import()` (`src/localFilesSubtunes.js`, its own
-  webpack chunk) and caches results in `localStorage` by (path,size,mtime), so
-  users without local files download nothing new. `App.applyLocalFiles` builds
-  `playContexts['local']` as one `SongRef` per sub-tune. `dev/test-parsers.js`
+  webpack chunk) and caches results in `localStorage` by
+  (path, size, **full timestamp**), so users without local files download nothing
+  new. The key cannot use the listing's whole-second `mtime`: a same-name,
+  same-size replacement inside one second would keep the old count and labels
+  while playback read the new bytes, so `readAll()` reports `mtimeMs` as well
+  (`dev/test-local-subtunes.js` pins both directions). `App.applyLocalFiles`
+  builds `playContexts['local']` as one `SongRef` per sub-tune. `dev/test-parsers.js`
   proves the Uint8Array (client) path equals the Buffer (build) path against real
   `catalog/` files. The server's `BROWSE_LOCAL_FILESYSTEM=true` mode still never
   populates `music`, so its `/shuffle`/`/random` remain dead there (pre-existing).
@@ -2444,7 +2455,8 @@ only armed when `silenceDuration >= 0`, and both arms must end the song):
   ending does not rewind (see the 2026-10-17 entry there); the release that cuts a
   note at its own track's `END_OF_TRACK` is one shared pass
   (`insertTrackEndReleases`), so the plain and marker merges cannot disagree about
-  when a held note stops; the head folds into the
+  when a held note stops; the collected state replays bank select before the
+  program that uses it (see the 2026-10-17 entries there); the head folds into the
   band, which is the
   wrap span (`MIDIPlayer.getLoopBandMs`: the region by default, the second pass
   when expanded), with no fade tail (past the band the song ends).

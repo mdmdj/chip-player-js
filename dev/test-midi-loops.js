@@ -28,6 +28,7 @@ Module.prototype._compile = function (content, filename) {
 
 const MIDIFile = require('../src/players/midi/midi-helpers').default;
 const { usesTrackLoops } = require('../src/players/midi/midi-helpers');
+const { END_LAYERS, songEndMs } = require('../src/players/midi/endRule');
 const MIDIFilePlayer = require('../src/players/MIDIFilePlayer').default;
 const MIDIPlayerClass = require('../src/players/MIDIPlayer').default;
 const MIDIEvents = require('../src/players/midi/MIDIEvents').default;
@@ -1183,6 +1184,38 @@ catalogCheck('midi/loop-pedal-seam.mid', 'the pedal fixture lifts its pedal at t
     e.param1 === 64 && Math.abs(e.playTime - loopEndMs) < 1);
   assert.ok(seam.some(e => e.param2 === 0) && seam.some(e => e.param2 >= 64),
     `seam pedal pair (values there: ${seam.map(e => e.param2).join(',') || 'none'})`);
+});
+
+// --- The end rule's layers ---------------------------------------------------
+// One class of event per layer, toggled independently: the state layers (what is
+// sounding) and the trailing layers (which can only push the end later). These
+// pin each toggle, since the layers are how the rule is tuned.
+const ev = (playTime, subtype, channel, param1, param2) =>
+  ({ playTime, subtype, channel, param1, param2, type: MIDIEvents.EVENT_MIDI });
+const evOn = (t, p = 60, ch = 0) => ev(t, MIDIEvents.EVENT_MIDI_NOTE_ON, ch, p, 100);
+const evOff = (t, p = 60, ch = 0) => ev(t, MIDIEvents.EVENT_MIDI_NOTE_OFF, ch, p, 0);
+const evCc = (t, p1, p2, ch = 0) => ev(t, MIDIEvents.EVENT_MIDI_CONTROLLER, ch, p1, p2);
+
+check('end layers: the sustain pedal is what makes a held ending audible', () => {
+  const list = [evOn(0), evCc(100, 64, 127), evOff(500), evCc(900, 64, 0)];
+  assert.strictEqual(songEndMs(list, { ...END_LAYERS }), 900, 'sustain on: the pedal lift is the end');
+  assert.strictEqual(songEndMs(list, { ...END_LAYERS, sustain: false }), 500, 'sustain off: the note-off is');
+  // A note-off after everything has stopped is not an end at all.
+  assert.strictEqual(songEndMs([...list, evOff(1400, 62)], { ...END_LAYERS }), 900,
+    'an unsounding note-off does not extend the end');
+});
+
+check('end layers: trailing events extend the end only when their layer is on', () => {
+  const list = [evOn(0), evOff(400), evCc(1200, 7, 100), evCc(1300, 121, 0)];
+  assert.strictEqual(songEndMs(list, { ...END_LAYERS }), 400, 'controllers off: volume/reset are padding');
+  assert.strictEqual(songEndMs(list, { ...END_LAYERS, controller: true }), 1300, 'controller on: the last CC is the end');
+  assert.strictEqual(songEndMs(list, null), 0, 'no layers: leave the list alone');
+});
+
+check('end layers: all-sounds-off ends a pedal-held note early', () => {
+  const list = [evOn(0), evCc(100, 64, 127), evOff(500), evCc(700, 120, 0), evCc(900, 64, 0)];
+  assert.strictEqual(songEndMs(list, { ...END_LAYERS }), 700, 'panic on: the hold ends there');
+  assert.strictEqual(songEndMs(list, { ...END_LAYERS, panic: false }), 900, 'panic off: the pedal lift is');
 });
 
 console.log(`\n${passed} checks passed${process.exitCode ? ' (WITH FAILURES)' : ''}.`);

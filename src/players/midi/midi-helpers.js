@@ -615,6 +615,18 @@ MIDIFile.prototype.getLoopedEvents = function (tracks, loopCount = 2, range = nu
     loopEndMs = Math.min(loopEndMs, combinedEvents[combinedEvents.length - 1].playTime);
   }
 
+  // TODO(lone CC111, deferred): that clamp is exact on the one-pass list -- its
+  // trim has already dropped a converter's trailing pad -- but a no-op on an
+  // expanded one, where the last event belongs to a later pass, so the pad stays
+  // inside the region. What a wrap then replays is that pad: the region's end
+  // minus the file's last sounding event. Shortening the region alone is worse
+  // than the bug: this end is the wrap target, while the iterators replay a body
+  // one *padded* pass long, so a shorter region truncates the pass instead. The
+  // fix bounds that replay body (songEndTick) to the audible end of the file
+  // played once, per track, so parts of different lengths keep their shared
+  // boundary. Have not identified a file that reproduces it yet; it needs a
+  // lone-CC111 file whose last event is padding after its last sounding one.
+
   if (expandLoop && loopStartMs == null) loopStartMs = 0;
   if (!expandLoop || loopEndMs == null || loopEndMs <= loopStartMs) {
     loopStartMs = null;

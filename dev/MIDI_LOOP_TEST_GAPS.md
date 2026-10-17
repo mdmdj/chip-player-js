@@ -555,6 +555,55 @@ before and after. None of the three shapes is reachable here -- 0 of 27 marker f
 have a bank select after their last program, and the CC111 case only shows up as the
 fixtures' 83 ms.
 
+## Fixed 2026-10-17: a forward seek changed the instrument (greptile, `MIDIFilePlayer.js:589`)
+
+The bank fix above made the collector say bank 0 for a program the file gave no bank --
+right when the walk saw the file from its start, wrong for a *forward* seek, where
+`setPosition` passes `fromIdx = this.position`: the walk starts mid-stream, the bank the
+channel is already on is behind it, and the program is then replayed on bank 0.
+
+Measured (bank 1 at 0, program 2 at 500 ms, program 3 at 1500 ms, seek forward
+1000 -> 2000 ms), with the proposed fix implemented *in the probe* so the comparison is
+real rather than argued:
+
+| | |
+| --- | --- |
+| current replay | `bank 0/0 program 3` -- the instrument changes |
+| with the seed | `bank 1/0 program 3` |
+| the file's own | `bank 1/0 program 3` |
+
+Fixed by seeding the bank history with a walk over `[0, fromIdx)` that looks only at bank
+selects, before the collection walk. The wrap collects from 0, so its seed is empty, and
+the default-bank rule then means exactly what it says -- *the file never selected a bank
+before this program*. Seeding from the synth's bank instead would be worse: that is not a
+fact about the file, the synth can have drifted from an earlier seek, and the synth
+interface has no bank to ask for.
+
+**Cost, measured.** The seed is a subtype check per event behind the start.
+`collectStateEvents` over a synthetic 200k-event array, collecting a one-event range so
+the walk is constant:
+
+| fromIdx | time |
+| --- | --- |
+| 0 | 0.010 ms |
+| 50 000 | 0.436 ms |
+| 100 000 | 0.842 ms |
+| 200 000 | 1.890 ms |
+
+That is **0.01 µs per event behind the start**: about 0.09 ms for Wario (9 096 events),
+0.15 ms for Descent, 0.8 ms for the largest catalog MIDI (81 381 events), and 0.03 ms for
+a typical file. A wall-clock seek comparison was run first and is useless for this: the
+same unchanged path measured 40 ms and 18.8 ms in two runs, so a sub-3 ms delta is
+unreadable that way.
+
+**Reachability: 0 of 27.** The shape needs a program change whose channel's bank was
+selected earlier and *not* re-selected at it. Both bank-using files re-select immediately
+before every program -- Wario's only non-zero bank (channel 9, bank 1) has bank + program
+at 71 ms and again at 72134 ms.
+
+Check: `a forward seek keeps the patch the file is on` asserts the **patch** after the
+seek against the file's own, using the shared `patchAfter` helper.
+
 ## Recorded, not fixed: the band can reach a few ms past the song (2026-10-16)
 
 `MIDIPlayer.getLoopBandMs` returns the wrap span as-is, where the base

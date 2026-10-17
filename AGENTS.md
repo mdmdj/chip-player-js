@@ -2463,7 +2463,9 @@ only armed when `silenceDuration >= 0`, and both arms must end the song):
   and sostenuto, released by Reset All Controllers -- and the panics), so converter
   padding cannot inflate a duration, a note the writer never released rings to its
   own track's end, a cleanup note-off for a note that never played holds nothing
-  open, and All Notes Off keeps what a pedal holds where All Sounds Off does not; the
+  open, and All Notes Off keeps what a pedal holds where All Sounds Off does not -- and
+  its module comment lists which control messages it models and which it deliberately
+  leaves out, so a reviewer's "what about X" has a written answer; the
   head folds into the
   band, which is the
   wrap span (`MIDIPlayer.getLoopBandMs`: the region by default, the second pass

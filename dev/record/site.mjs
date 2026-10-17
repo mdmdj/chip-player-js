@@ -80,9 +80,8 @@ export const header = {
 
     <p><strong>There may be unexpected differences in your build due to the sibling libraries not being version pinned.</strong></p>
     <h4>Auth</h4>
-    <p>This feature was developed using a mock user shim,
-    best effort was made to mock the user properly,
-    but it's possible unexpected issues will appear when using the real Firebase config.</p>
+    <p>This feature was developed against a mock user shim that mirrors the real
+    one's shape; the real Firebase config may still behave differently.</p>
     `,
 };
 

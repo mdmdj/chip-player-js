@@ -1381,6 +1381,31 @@ check('end layers: a note still sounding at the track end rings to it', () => {
     'a trailing meta after silence is not an end');
 });
 
+check('end layers: a note-off for a note that never played does not hold the end', () => {
+  // A converter's trailing cleanup can release a note that was never on, with the
+  // channel's pedal down. That is not a hold: nothing is playing, so the end stays
+  // where the music stopped instead of running on to the pedal lift or the track
+  // end (greptile, endRule.js: "Silent MIDI endings linger").
+  const eot = (playTime) => ({ playTime, type: MIDIEvents.EVENT_META, subtype: MIDIEvents.EVENT_META_END_OF_TRACK });
+  const withLift = [
+    evOn(0), evOff(500),
+    evCc(1000, 64, 127),      // pedal down with nothing sounding
+    evOff(1100, 62),          // cleanup for a note that never played
+    evCc(2000, 64, 0),        // pedal lift
+    eot(6000),
+  ];
+  assert.strictEqual(songEndMs(withLift, { ...END_LAYERS }), 500,
+    'the pedal lift is not the end when the held note never sounded');
+  // The same shape with the pedal never lifted is where this meets the dangling
+  // rule: the track end must not become the end either.
+  assert.strictEqual(songEndMs([evOn(0), evOff(500), evCc(1000, 64, 127), evOff(1100, 62), eot(6000)],
+    { ...END_LAYERS }), 500, 'and neither is the track end');
+  // A note that *did* sound and is released under the pedal is still held: that is
+  // the case the pedal layer exists for.
+  assert.strictEqual(songEndMs([evOn(0), evCc(100, 64, 127), evOff(500), evCc(900, 64, 0)],
+    { ...END_LAYERS }), 900, 'a real pedal-held release still runs to the lift');
+});
+
 check('a marker file cuts a held note at its own track end, like the plain path', () => {
   // One file, both paths. The per-track release pass lives in one place now, and
   // this is exactly where the two drifted: a marker file lost the cut when it

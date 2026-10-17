@@ -523,9 +523,73 @@ check('Repeat One enabled in the outro does not rewind the transport', () => {
     if (p.elapsedTime > t) advanced = true;
   }
   assert.ok(advanced, 'the outro keeps playing after the toggle');
-  // A seek re-arms the wrap (the flag is per-pass, not per-song).
+  // A seek is a transport move, so the flag describes where it landed: into the
+  // ending, the region is still left, and the position the listener asked for
+  // stands (see the check below).
   p.setPosition(p.getDuration() - 200);
-  assert.strictEqual(p.loopRegionLeft, false, 'a seek clears it');
+  assert.strictEqual(p.loopRegionLeft, true, 'a seek into the ending leaves the region left');
+});
+
+check('a seek into the ending does not rewind, in either repeat order', () => {
+  // `setPosition()` used to clear the flag outright, so the next callback wrapped
+  // and pulled the transport back into the band -- overriding the position the
+  // listener asked for, by the whole ending on an ordinary file. It now says
+  // where the seek landed, the same contract as enabling Repeat One in the outro.
+  const mf = loopWithIntroGapAndEnding();
+  const park = (p, repeatFirst) => {
+    p.load(mf, false);
+    p.play(() => {});
+    p.setLooping(repeatFirst);
+    p.setPosition(p.getDuration() - 200);   // into the ending
+    if (!repeatFirst) p.setLooping(true);   // ...then enable, as a listener would
+    return p.elapsedTime;
+  };
+  for (const repeatFirst of [true, false]) {
+    const p = makePlayer(stubSynth(true));
+    const at = park(p, repeatFirst);
+    const how = repeatFirst ? 'repeat already on' : 'seeking first, then enabling';
+    assert.strictEqual(p.loopRegionLeft, true, `${how}: the ending is still the ending`);
+    p.processPlaySynth(0, 2048);
+    assert.ok(Math.abs(p.elapsedTime - at) < 200,
+      `${how}: the first block must not move the transport (${Math.round(at)} -> ${Math.round(p.elapsedTime)})`);
+  }
+  // Seeking back inside the band still re-arms the wrap: the pass plays on and
+  // wraps at the band end, which is what a seek is supposed to do there.
+  const p = makePlayer(stubSynth(true));
+  park(p, true);
+  p.setPosition((p.loop.jumpMs + p.loop.endMs) / 2);
+  assert.strictEqual(p.loopRegionLeft, false, 'a seek inside the band re-arms the wrap');
+  let wrapped = false;
+  for (let i = 0; i < 300 && !wrapped; i++) {
+    const t = p.elapsedTime;
+    p.processPlaySynth(0, 2048);
+    if (p.elapsedTime < t - 100) wrapped = true;   // the clock went backward: the wrap
+  }
+  assert.ok(wrapped, 'and it still wraps at the band end');
+});
+
+check('a Web MIDI seek into the ending does not rewind either', () => {
+  // Same flag, both paths: the Web MIDI wrap guard reads `loopRegionLeft` too, so
+  // it had the same hole. A Web MIDI seek pauses until its resume timer, so the
+  // callback is driven directly here.
+  const mf = loopWithIntroGapAndEnding();
+  const w = new MIDIFilePlayer({
+    programChangeCb: () => {}, useWebMIDI: true,
+    output: { send: () => {} }, skipSilence: false, sampleRate: 44100, synth: stubSynth(true),
+  });
+  w.load(mf, false);
+  w.play(() => {});
+  w.setLooping(true);
+  w.setPosition(w.getDuration() - 200);
+  assert.ok(w.elapsedTime > w.loop.endMs, 'parked past the band end');
+  assert.strictEqual(w.loopRegionLeft, true, 'the seek left the ending as the ending');
+  const wAt = w.elapsedTime;
+  w.paused = false;
+  w.lastProcessPlayTimestamp = performance.now();
+  w.lastSendTimestamp = performance.now();
+  w.processPlay();
+  assert.ok(Math.abs(w.elapsedTime - wAt) < 5,
+    `the first callback must not rewind (${Math.round(wAt)} -> ${Math.round(w.elapsedTime)})`);
 });
 
 check('the slider follows the audio out of the band once the region is left', () => {

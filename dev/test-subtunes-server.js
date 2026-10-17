@@ -125,6 +125,33 @@ async function main() {
     assert.strictEqual(row.url, null, 'a song folder is navigated into, not played');
   });
 
+  await check('a directory listing indexes every playable song, song folders included', async () => {
+    // The client expands a song folder row into its sub-tunes (listingToContext
+    // in src/util.js), and a click hands the row's idx to playContext. So the
+    // rows' idx values must count every playable song: a folder owns its `count`
+    // slots, and the row after it starts where they end. Otherwise clicking any
+    // row below a song folder plays the wrong song.
+    const rows = await get(`/api/browse?path=${enc(dirOf(multiSong.path))}`);
+    let expected = 0;
+    for (const row of rows) {
+      if (row.type === 'directory') {
+        assert.strictEqual(row.idx, null, `${row.path}: a directory is not playable`);
+        continue;
+      }
+      assert.strictEqual(row.idx, expected,
+        `${row.path}: idx ${row.idx}, expected ${expected} (${row.type}, count ${row.count})`);
+      expected += row.type === 'songfolder' ? row.count : 1;
+    }
+    // The folder is in this directory, so its slots were counted above.
+    const folder = rows.find(r => r.path === multiSong.path);
+    assert.ok(folder && folder.idx != null, 'the folder row carries an index');
+    const after = rows.slice(rows.indexOf(folder) + 1).find(r => r.type !== 'directory');
+    if (after) {
+      assert.strictEqual(after.idx, folder.idx + folder.count,
+        'the row after a song folder starts past its sub-tunes');
+    }
+  });
+
   await check('a single-song file stays a plain file row', async () => {
     if (!singleSong) throw skip('no single-song file in the catalog');
     const rows = await get(`/api/browse?path=${enc(dirOf(singleSong.path))}`);

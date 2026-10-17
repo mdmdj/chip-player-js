@@ -29,6 +29,7 @@ Module.prototype._compile = function (content, filename) {
 
 const {
   songRef, songRefKey, songRefsEqual, songRefListsEqual, getMetadataUrlForFilepath, subtuneLabel,
+  listingToContext,
 } = require('../src/util');
 
 const NSFE = 'famicompo/Castlevania III - The Dracula X Chronicles/09 Big Bat Man.nsf';
@@ -135,6 +136,50 @@ check('a sub-tune names itself by index, or by the format label when it has one'
   assert.strictEqual(subtuneLabel(null), 'Tune 1', 'a missing index is the first tune');
   assert.strictEqual(subtuneLabel(3, 'Stage 3'), 'Stage 3', 'a label wins over the index');
   assert.strictEqual(subtuneLabel(3, null), 'Tune 4');
+});
+
+check('a listing becomes one context entry per playable song (song folders expand)', () => {
+  // The rows a /browse directory returns, in order: a directory (not playable),
+  // a plain file, a song folder of three, then another file. The server gives a
+  // playable row the context index it starts at -- a folder owns its `count`
+  // slots (server/index.js) -- and that is the index a click hands to
+  // playContext. Expansion and indexing have to agree or the click lands on the
+  // wrong song.
+  const items = [
+    { type: 'directory', path: 'dir', idx: null, count: 0 },
+    { type: 'file', path: 'a.mid', idx: 0, count: 0 },
+    { type: 'songfolder', path: 'b.nsfe', idx: 1, count: 3 },
+    { type: 'file', path: 'c.sid', idx: 4, count: 0 },
+  ];
+  const context = listingToContext(items);
+  assert.deepStrictEqual(context, [
+    { path: 'a.mid', subtune: 0 },
+    { path: 'b.nsfe', subtune: 0 },
+    { path: 'b.nsfe', subtune: 1 },
+    { path: 'b.nsfe', subtune: 2 },
+    { path: 'c.sid', subtune: 0 },
+  ]);
+  for (const item of items) {
+    if (item.type === 'directory') continue;
+    assert.strictEqual(context[item.idx].path, item.path, `${item.path} starts at ${item.idx}`);
+    assert.strictEqual(context[item.idx].subtune, 0);
+  }
+});
+
+check('a sub-tune row keeps its index; a folder with no count is one song', () => {
+  // Browsing inside a song folder returns one row per sub-tune, each carrying its
+  // own index -- those must not be flattened to 0.
+  assert.deepStrictEqual(
+    listingToContext([
+      { type: 'file', path: 'x.gbs', subtune: 0 },
+      { type: 'file', path: 'x.gbs', subtune: 7 },
+    ]),
+    [{ path: 'x.gbs', subtune: 0 }, { path: 'x.gbs', subtune: 7 }],
+  );
+  // A folder row with a missing or zero count is still one playable song.
+  assert.deepStrictEqual(listingToContext([{ type: 'songfolder', path: 'y.nsfe', count: 0 }]),
+    [{ path: 'y.nsfe', subtune: 0 }]);
+  assert.deepStrictEqual(listingToContext(null), []);
 });
 
 console.log(`\n${passed} checks passed${process.exitCode ? ' (WITH FAILURES)' : ''}.`);

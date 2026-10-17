@@ -604,6 +604,35 @@ at 71 ms and again at 72134 ms.
 Check: `a forward seek keeps the patch the file is on` asserts the **patch** after the
 seek against the file's own, using the shared `patchAfter` helper.
 
+## Fixed 2026-10-17: All Sounds Off handed the holds back (greptile, `endRule.js:170`)
+
+The CC121 fix a few hours earlier zeroed the pedal state before clearing the sets, which
+defeated the hand-back `clearSosto` does. CC120 cannot take that route -- it silences the
+channel *without* changing the pedals' own values, for the notes that come after -- so it
+needed the other answer: drop the holds. With both pedals down it kept the song open to
+the padded track end:
+
+| shape | before | after |
+| --- | --- | --- |
+| CC120 with both pedals down, padded end at 10000 ms | **10000 ms** | **1000 ms** |
+| CC121 with both pedals down | 1000 ms | 1000 ms |
+| CC120 with the damper only | 1000 ms | 1000 ms |
+| CC120, then a note under the still-down damper | 1500 ms | 1500 ms |
+
+The last row is why dropping is right and a state reset is not: the damper's value has to
+survive for the notes that come later. Both panics now call `dropSosto`, and only
+sostenuto's own release keeps the hand-back, which is the entire point of it.
+
+**Three findings in this family in one day, one root:** transferring a hold and dropping
+one were the same function. They are two named functions now, and `endRule.js`'s module
+comment carries the boundary -- every control message that can change what is sounding,
+and its disposition: **modelled** (64, 66, 120, 121, 123), **not a hold** (5, 65, 67, 68,
+84, and 69, which lengthens the release rather than holding), or **out of reach with the
+reason** (mode messages, sysex resets, and a receiver-side controller reset on a program
+change). The next "what about X?" has a written answer rather than another round.
+
+Reachability 0 of 54, and the before/after probe over all 54 files is byte-identical.
+
 ## Recorded, not fixed: the band can reach a few ms past the song (2026-10-16)
 
 `MIDIPlayer.getLoopBandMs` returns the wrap span as-is, where the base

@@ -342,6 +342,40 @@ asserts the parity (both paths `[1000, 5000]`), that the region is real, and tha
 asking twice does not accumulate releases. It fails against the previous code with
 the merged path's `[5000]`.
 
+## Fixed 2026-10-17: the wrap replayed a program before the bank select it belongs to (greptile, `MIDIFilePlayer.js:596`)
+
+Bank select (CC0/CC32) takes effect on the *next* program change, so a replayed
+program must not go out ahead of the bank it was authored with. `collectStateEvents`
+returned `Object.values(eventMap)`, and those keys are not array indices, so the
+order was **first-seen**: a channel that picked a program before it ever picked a
+bank replayed the program first — onto the bank the finished pass left, i.e. the
+wrong instrument for the rest of the pass.
+
+Reproduced (program at 0, bank 1 at 1 TPQ, loop start at 3, bank 2 *inside* the
+loop). The order the wrap actually plays, captured from the synth calls:
+
+| | |
+| --- | --- |
+| before | `P0:2, B0:0=1, B0:32=0` — the program lands on bank 2 |
+| now | `B0:0=1, B0:32=0, P0:2` — on bank 1, where it was authored |
+
+Fixed in the collector, so the wrap, the seek and both output paths share it: the
+replay is ordered **banks (MSB, then LSB) → programs → the rest of the last-wins
+state → the sequenced RPN/NRPN pair**. The middle step is not decoration: a program
+change may itself reset controllers, so a program ahead of them — and ahead of the
+RPN that sets the bend range — leaves the pass sounding the way the file wrote it.
+
+**No regressions, measured** (A/B over every catalog MIDI with a region, 27 files):
+the *set* of collected events is identical for all 27 (nothing added or dropped),
+the bank-before-program invariant holds in both runs, and the replay order changed
+for exactly **4** files — Wario, `Star Fox 64/05 - Map`, Gyrocopter and Descent
+Game01 — all by the intended regrouping. The *bad* order is **0 of 27**: only Wario
+and Star Fox collect a bank select, and both already authored bank-then-program.
+
+Checks: `a wrap replays bank select before the program that uses it` asserts the
+collector's order *and* the order the synth is called in at the wrap; it fails
+against the previous code with `P0:2` first.
+
 ## Recorded, not fixed: the band can reach a few ms past the song (2026-10-16)
 
 `MIDIPlayer.getLoopBandMs` returns the wrap span as-is, where the base

@@ -8,8 +8,9 @@
 // The parser (`scripts/subtune-headers.js`) is loaded with a dynamic import, so
 // it becomes its own webpack chunk: a user who never opens Local Files never
 // downloads it, and the main bundle is untouched. Results are cached in
-// localStorage keyed by (path, size, mtime), so re-renders and return visits
-// skip the parse, and a changed file is re-parsed.
+// localStorage keyed by (path, size, full timestamp), so re-renders and return
+// visits skip the parse while a changed file is re-parsed -- including a
+// same-size replacement inside one second, which whole seconds could not see.
 
 const CACHE_KEY = 'cp.localSubtunes.v1';
 
@@ -44,9 +45,15 @@ function extensionOf(path) {
   return dot === -1 ? '' : path.slice(dot + 1).toLowerCase();
 }
 
-// file: { path, size, mtime }; read: (path) => Uint8Array.
+// file: { path, size, mtime, mtimeMs }; read: (path) => Uint8Array.
+//
+// `mtime` is whole seconds (what the listing shows), which cannot tell a
+// same-name, same-size replacement inside one second from the file it replaced --
+// the old header (tune count and labels) would outlive the bytes. `mtimeMs` is
+// the full timestamp; fall back to seconds for a caller that only has that.
 function cacheKey(file) {
-  return `${file.path}\u0000${file.size}\u0000${file.mtime}`;
+  const stamp = file.mtimeMs != null ? file.mtimeMs : file.mtime;
+  return `${file.path}\u0000${file.size}\u0000${stamp}`;
 }
 
 async function subtunesForFile(mod, read, file, cache, fresh) {

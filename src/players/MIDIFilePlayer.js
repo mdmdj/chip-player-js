@@ -21,6 +21,8 @@ const SKIP_SILENCE_THRESHOLD_MS = 50;
 const CC_SUSTAIN_PEDAL = 64;
 const CC_ALL_SOUND_OFF = 120;
 const CC_RESET_ALL_CONTROLLERS = 121;
+const CC_BANK_SELECT_MSB = 0;
+const CC_BANK_SELECT_LSB = 32;
 const SYSEX_GM_RESET = [0x7E, 0x7F, 0x09, 0x01, 0xF7];
 const SEQUENCED_CONTROLLERS = [6, 38, 96, 97, 98, 99, 100, 101];
 const META_LABELS = {
@@ -550,7 +552,24 @@ MIDIPlayer.prototype.collectStateEvents = function (fromIdx, toMs) {
     }
     pos++;
   }
-  return { eventList: Object.values(eventMap).concat(sequenced), endIdx: pos };
+  // Bank select takes effect on the *next* program change, so a replayed program
+  // must not go out ahead of the bank it was authored with. `eventMap` is in
+  // first-seen order, which puts the program first when the file picked one before
+  // it ever picked a bank -- and then the program lands on the bank the finished
+  // pass left, i.e. the wrong instrument.
+  //
+  // So the replay is ordered: banks (MSB, then LSB), the programs, the rest of the
+  // last-wins state, then the sequenced RPN/NRPN pair. A program change may itself
+  // reset controllers, so a program ahead of them (and ahead of the RPN that sets
+  // the bend range) leaves the pass sounding the way the file wrote it.
+  const collected = Object.values(eventMap);
+  const isBankSelect = (e) => e.subtype === MIDIEvents.EVENT_MIDI_CONTROLLER &&
+    (e.param1 === CC_BANK_SELECT_MSB || e.param1 === CC_BANK_SELECT_LSB);
+  const isProgram = (e) => e.subtype === MIDIEvents.EVENT_MIDI_PROGRAM_CHANGE;
+  const banks = collected.filter(isBankSelect).sort((a, b) => a.param1 - b.param1);
+  const programs = collected.filter(isProgram);
+  const rest = collected.filter((e) => !isBankSelect(e) && !isProgram(e));
+  return { eventList: banks.concat(programs, rest, sequenced), endIdx: pos };
 };
 
 MIDIPlayer.prototype.setPosition = function (ms) {

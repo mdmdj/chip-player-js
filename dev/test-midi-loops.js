@@ -71,7 +71,7 @@ function stubSynth(silent = true) {
     log: [],
     noteOn(c, p, v) { this.log.push(['on', c, p]); },
     noteOff(c, p) { this.log.push(['off', c, p]); },
-    pitchBend() {}, controlChange(c, cc, v) { this.log.push(['cc', c, cc, v]); }, programChange() {}, panic() {}, panicChannel() {},
+    pitchBend(c, v) { this.log.push(['bend', c, v]); }, controlChange(c, cc, v) { this.log.push(['cc', c, cc, v]); }, programChange() {}, panic() {}, panicChannel() {},
     render() {},
     reset() {},
     getValue() { return silent ? 0 : 1; },
@@ -326,6 +326,8 @@ const noteOnAt = (delta, channel = 0, pitch = 60, velocity = 100) =>
   ({ delta, bytes: [0x90 | channel, pitch, velocity] });
 const noteOffAt = (delta, channel = 0, pitch = 60) => ({ delta, bytes: [0x80 | channel, pitch, 0] });
 const programChangeAt = (delta, channel = 0, program = 0) => ({ delta, bytes: [0xc0 | channel, program] });
+const bendAt = (delta, channel = 0, value = 0x2000) =>
+  ({ delta, bytes: [0xe0 | channel, value & 0x7f, (value >> 7) & 0x7f] });   // 0x2000 = centre
 
 function parseBytes(bytes) {
   return new MIDIFile(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
@@ -1135,6 +1137,12 @@ check('Repeat One Web MIDI: the wrap cleanup lands on the band end, not the last
   assert.ok(program, 'the second pass restores its program');
   assert.ok(near(program[1]),
     `the restore belongs at the band end (${boundary.toFixed(0)}), got ${program[1].toFixed(0)}`);
+  // The file authored no bend, so the collect has none to restore: the centre
+  // this sends is the only thing that clears the finished pass's bend.
+  const bend = sends.find(s => (s[0][0] & 0xf0) === 0xe0);
+  assert.ok(bend, 'the wrap centres the bend');
+  assert.strictEqual(bend[0][1] | (bend[0][2] << 7), 8192, 'and it is centre');
+  assert.ok(near(bend[1]), 'and it belongs at the band end too');
 });
 
 // The expanded two-pass list is what the audio engine plays for a whole-file
@@ -1187,6 +1195,53 @@ catalogCheck('midi/loop-pedal-seam.mid', 'the pedal fixture lifts its pedal at t
 });
 
 // --- The end rule's layers ---------------------------------------------------
+// A wrap must leave every channel at the state the wrap *target* has. The
+// collected list carries only values the file authored before that point, so a
+// value first set inside the loop has none to restore and would come through from
+// the finished pass -- a loop that bends late reopened bent. Same idea as cutting
+// the notes still ringing at the boundary: end what the finished pass left, then
+// present the target's state.
+function bendFixture() {
+  return buildMidi([
+    tempo(500000), cc(110),
+    noteOnAt(0, 0, 60), noteOffAt(120, 0, 60),
+    noteOnAt(0, 0, 64), bendAt(72, 0, 0x0000), noteOffAt(48, 0, 64),
+    cc(111),
+  ]);
+}
+
+check('a wrap centres a bend the file never authored (no expansion)', () => {
+  const synth = stubSynth(true);
+  const p = makePlayer(synth);
+  p.load(parseBytes(bendFixture()), false);
+  assert.ok(p.loop && p.loop.jumpMs < p.loop.endMs, `loop=${JSON.stringify(p.loop)}`);
+  p.play(() => {});
+  p.setLooping(true);
+  p.setPosition(p.getDuration() - 30);
+  synth.log.length = 0;
+  p.processPlaySynth(0, 2048);
+  assert.ok(p.position >= p.loop.jumpIndex, 'expected a wrap');
+  const bends = synth.log.filter(([k]) => k === 'bend');
+  assert.ok(bends.some(([, , v]) => v === 8192),
+    'expected a centre bend at the wrap: ' + JSON.stringify(bends));
+});
+
+check('and the expanded wrap still restores the bend the file did author', () => {
+  const synth = stubSynth(true);
+  const p = makePlayer(synth);
+  p.load(parseBytes(bendFixture()), true);
+  p.play(() => {});
+  p.setLooping(true);
+  p.setPosition(p.getDuration() - 30);
+  synth.log.length = 0;
+  p.processPlaySynth(0, 2048);
+  const bends = synth.log.filter(([k]) => k === 'bend');
+  assert.ok(bends.length > 0, 'expected bends at the wrap: ' + JSON.stringify(bends));
+  // The reset lands first, the collected value after: the pass opens authored.
+  assert.strictEqual(bends[bends.length - 1][2], 0,
+    'the authored bend must survive the reset: ' + JSON.stringify(bends));
+});
+
 // One class of event per layer, toggled independently: the state layers (what is
 // sounding) and the trailing layers (which can only push the end later). These
 // pin each toggle, since the layers are how the rule is tuned.

@@ -596,6 +596,15 @@ MIDIFile.prototype.getLoopedEvents = function (tracks, loopCount = 2, range = nu
   // from `endRule.js`, whose layers say what audible means. Then release every
   // channel heard in each track there, so the song (and its silence tail) always
   // terminates when repeat is off.
+  //
+  // The per-track cut, where the list is the file's own timeline: one pass, no
+  // replay, exactly the shape the plain merge produces. A note the writer left
+  // held at its track's END_OF_TRACK must not outlast that track just because the
+  // file carries loop markers. The expanded list is a different animal -- the
+  // iterator replays the body and the seam owns the crossings -- so it keeps its
+  // own contract rather than this one.
+  if (loopCount === 1) insertTrackEndReleases(combinedEvents);
+
   finishEventList(combinedEvents, layers, channelsByTrack);
 
   if (expandLoop && loopStartMs == null) loopStartMs = 0;
@@ -656,6 +665,33 @@ function sustainOff(track, channel, playTime) {
   };
 }
 
+// Release every channel a track has sounded at that track's own END_OF_TRACK, so
+// a note the writer never released cannot outlast its track. The set is per track
+// and cleared at each of its end-of-track events, so a track that has several
+// releases at each, and only the channels that track actually sounded.
+//
+// Shared by the plain merge and the loop path, which is exactly where they
+// drifted: a marker file lost this cut when it started going through the loop
+// merge, and the two must agree about one file.
+function insertTrackEndReleases(events) {
+  const trackChannels = {};
+  for (let i = 0; i < events.length; i++) {
+    const event = events[i];
+    const track = event.track || 0;
+    if (event.channel !== undefined) {
+      (trackChannels[track] || (trackChannels[track] = new Set())).add(event.channel);
+    } else if (event.type === MIDIEvents.EVENT_META && event.subtype === MIDIEvents.EVENT_META_END_OF_TRACK) {
+      if (trackChannels[track]) {
+        for (const ch of trackChannels[track]) {
+          events.splice(i++, 0, allNotesOff(track, ch, event.playTime));
+          events.splice(i++, 0, sustainOff(track, ch, event.playTime));
+        }
+        trackChannels[track].clear();
+      }
+    }
+  }
+}
+
 // Trim a merged list to its audible end and release every channel there, so the
 // song (and its silence tail) always terminates when repeat is off. `layers`
 // decides what "audible" means (see endRule.js); with no layers the list keeps
@@ -681,22 +717,7 @@ function finishEventList(events, layers, channelsByTrack) {
 const originalGetEvents = MIDIFile.prototype.getEvents;
 MIDIFile.prototype.getEvents = function (...args) {
   const events = originalGetEvents.apply(this, args);
-  const trackChannels = {};
-  for (let i = 0; i < events.length; i++) {
-    const event = events[i];
-    const track = event.track || 0;
-    if (event.channel !== undefined) {
-      (trackChannels[track] || (trackChannels[track] = new Set())).add(event.channel);
-    } else if (event.type === MIDIEvents.EVENT_META && event.subtype === MIDIEvents.EVENT_META_END_OF_TRACK) {
-      if (trackChannels[track]) {
-        for (const ch of trackChannels[track]) {
-          events.splice(i++, 0, allNotesOff(track, ch, event.playTime));
-          events.splice(i++, 0, sustainOff(track, ch, event.playTime));
-        }
-        trackChannels[track].clear();
-      }
-    }
-  }
+  insertTrackEndReleases(events);
   // The audible end, when the policy asks for one: the same layered rule the
   // loop expansion uses, so a file's duration is its last audible moment. The
   // per-track releases above still run, so a dangling note is cut at its own

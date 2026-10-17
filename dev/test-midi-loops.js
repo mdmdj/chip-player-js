@@ -609,8 +609,10 @@ check('a wrap replays bank select before the program that uses it', () => {
   p.load(parseBytes(bytes), false);
   assert.ok(p.loop, 'expected a loop region');
   const collected = p.collectStateEvents(0, p.loop.jumpMs).eventList.map(name).filter(Boolean);
-  assert.deepStrictEqual(collected, ['B0:0=1', 'B0:32=0', 'P0:2'],
-    'the collector presents the bank before the program');
+  // Its own bank (bank 0, the default, said explicitly) then the program, then the
+  // pending selection the file made afterwards.
+  assert.deepStrictEqual(collected, ['B0:0=0', 'B0:32=0', 'P0:2', 'B0:0=1'],
+    'the collector presents the program bank before the program, and the pending one after');
   p.play(() => {});
   p.setLooping(true);
   p.setPosition(p.loop.endMs - 20);
@@ -1409,6 +1411,61 @@ check('end layers: a note-off for a note that never played does not hold the end
     { ...END_LAYERS }), 900, 'a real pedal-held release still runs to the lift');
 });
 
+// Bank select is pending until a program change consumes it, so "the state at the
+// target" is the bank each program was authored with -- *not* the latest bank, which
+// may be a selection made afterwards. The assertion is on the resulting patch, not on
+// the event order: an order-only check passed while the wrap still selected the
+// program on the wrong bank.
+check('a wrap restores the patch the pass was using, bank and program together', () => {
+  const bytes = buildMidi([[
+    tempo(), cc(0, 0), cc(32, 0), programChangeAt(0, 0, 2), noteOnAt(0, 0, 60), noteOffAt(TPQ, 0, 60),
+    ccAt(TPQ, 0, 1),                       // a pending bank: no program change follows it
+    ccAt(TPQ, 110), noteOnAt(0, 0, 64), noteOffAt(TPQ, 0, 64), cc(111),
+  ]]);
+  const p = makePlayer(stubSynth(true));
+  p.load(parseBytes(bytes), false);
+  assert.ok(p.loop, 'expected a loop region');
+  // What the patch is after a list plays: the bank each program was consumed with,
+  // and the bank left pending for the next program change.
+  const patchAfter = (events) => {
+    const applied = new Map(); const pending = new Map();
+    for (const e of events) {
+      if (e.subtype === MIDIEvents.EVENT_MIDI_CONTROLLER && (e.param1 === 0 || e.param1 === 32)) {
+        const b = pending.get(e.channel) || { 0: 0, 32: 0 };
+        b[e.param1] = e.param2;
+        pending.set(e.channel, b);
+      } else if (e.subtype === MIDIEvents.EVENT_MIDI_PROGRAM_CHANGE) {
+        const b = pending.get(e.channel) || { 0: 0, 32: 0 };
+        applied.set(e.channel, `bank ${b[0]}/${b[32]} program ${e.param1}`);
+      }
+    }
+    return { applied: Object.fromEntries(applied), pending: Object.fromEntries(pending) };
+  };
+  const firstPass = patchAfter(p.events.filter((e) => e.playTime < p.loop.jumpMs));
+  assert.deepStrictEqual(patchAfter(p.collectStateEvents(0, p.loop.jumpMs).eventList), firstPass,
+    'the wrap must leave the same patch, and the same pending bank, as the pass');
+});
+
+check('a lone CC111 loops to the trimmed end, not the padded one', () => {
+  // "Loop from here to the end of the song" takes its end from the song as played:
+  // padding after the last note must not become the loop, or every wrap replays it.
+  const bytes = buildMidi([[
+    tempo(), cc(111), noteOnAt(0, 0, 60), noteOffAt(TPQ * 2, 0, 60),
+    { delta: TPQ * 10, bytes: [0xff, 0x01, 0x00] },     // 5s of padded tail
+  ]]);
+  const { events, loopEndMs } = parseBytes(bytes).getPlaybackEvents(false);
+  const last = Math.round(events[events.length - 1].playTime);
+  assert.strictEqual(last, 1000, 'the list ends at the last note');
+  assert.strictEqual(Math.round(loopEndMs), last, 'and the implicit loop end is that moment');
+});
+catalogCheck('midi/tempo_stress/loop/1_basic.rpgmaker.mid',
+  'a real lone-CC111 fixture loops to its trimmed end too', () => {
+    const rel = 'midi/tempo_stress/loop/1_basic.rpgmaker.mid';
+    const { events, loopEndMs } = parseBytes(new Uint8Array(fs.readFileSync(path.join(ROOT, 'catalog', rel))))
+      .getPlaybackEvents(false);
+    assert.strictEqual(Math.round(loopEndMs), Math.round(events[events.length - 1].playTime));
+  });
+
 // A note whose NOTE_OFF already ran is not in `activeNotes`, so the wrap's
 // ringing-note cut cannot reach it -- only a pedal-off can. Both pedals in the
 // family are released at the band end, on both output paths.
@@ -1567,6 +1624,9 @@ check('end layers: the pedal family holds, and the reset that releases it', () =
         evCc(1500, 66, 0), eot(4000)], null, 1500],
     ['a note struck only after it landed is not held at all',
       [evCc(100, 66, 127), evOn(300, 62), evOff(500, 62), evCc(1500, 66, 0), eot(4000)], null, 500],
+    ['the reset releases both pedals at once',
+      [evOn(0), evCc(100, 64, 127), evCc(200, 66, 127), evOff(500), evCc(1000, 121, 0), eot(10000)],
+      null, 1000],
     ['the reset releases the hold',
       [evOn(0), evCc(100, 66, 127), evOff(200), evCc(500, 121, 0), eot(4000)], null, 500],
     ['but does not stop a note whose key is down',

@@ -292,6 +292,56 @@ the ending does not rewind either". All three fail against the previous code, an
 the same check keeps a seek into the band wrapping at the band end, so the fix
 cannot quietly disable the wrap.
 
+## Fixed 2026-10-17: a marker file cut a held note at the song end, not its track's (greptile, `midi-helpers.js:599`)
+
+"Notes outlast their tracks": the per-track release pass — release every channel a
+track has sounded at that track's own `END_OF_TRACK`, so a note the writer never
+released cannot run past its track — lived only in the `getEvents()` patch.
+`80cbba069` sent marker files outside the SoundFont set through `getLoopedEvents()`,
+which appends releases only at the *song* end, so those files lost the cut.
+
+Reproduced with the tracks kept apart (track 0 holds a note and ends at 1 s; track 1
+plays to 5 s and carries the loop end, so the region is real and the marker path —
+not the `getEvents` fallback — is the one under test):
+
+| path | track0/ch0 releases | the held note is cut at |
+| --- | --- | --- |
+| `getEvents()` | `[1000, 1000, 5000, 5000]` | 1000 ms — its own track's end |
+| `getPlaybackEvents(false)` | `[5000, 5000]` | 5000 ms — the song's end |
+
+**Fixed by moving the pass, not by copying it.** Two lists cannot drift again if
+there is one implementation: `insertTrackEndReleases(events)` now holds it, and both
+`getEvents()` and the loop path call it. A copy would not even have been faithful —
+the pass accumulates per track and clears at each of its end-of-track events, while
+the loop path's `channelsByTrack` accumulates across the whole track, so a copy keyed
+on that would release every channel at the first EOT.
+
+**Scope is the file's own timeline**: `if (loopCount === 1)`. The expanded list is
+replayed and the seam owns its crossings; applying the pass there broke two existing
+checks *while testing* — `a note released past the loop end rings into the ending at
+its authored offset` lost the authored release, and the pedal-held seam check found
+"nothing was sustained" because an inserted CC64=0 landed inside the body. Those two
+failures are why the gate exists, so it is evidence from the test run rather than a
+preference.
+
+**No regressions, measured.** A before/after probe over all 54 catalog MIDI files,
+hashing every event's type/subtype/track/channel/params/time:
+
+- `getEvents()` is byte-identical in both runs — the extraction is a verbatim move
+  (plain hash `922c1940` over 305572 events).
+- Exactly **one** merged list changed: `catalog/midi/loop-pedal-seam.mid`, 15 → 17
+  events, and its merged hash became *equal to its own plain hash*. Every other
+  file — the three expanded SoundFont files included — is byte-identical.
+- Note-level reachability is **0 of 27** marker files (a note held past its own
+  track's end while the song continues), so nothing shipped is affected; the one
+  file that changed is the dev fixture authored for the pedal-seam shape, where the
+  inserted pair is a redundant safety release.
+
+Checks: `a marker file cuts a held note at its own track end, like the plain path`
+asserts the parity (both paths `[1000, 5000]`), that the region is real, and that
+asking twice does not accumulate releases. It fails against the previous code with
+the merged path's `[5000]`.
+
 ## Recorded, not fixed: the band can reach a few ms past the song (2026-10-16)
 
 `MIDIPlayer.getLoopBandMs` returns the wrap span as-is, where the base

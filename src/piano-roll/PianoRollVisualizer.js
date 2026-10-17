@@ -101,7 +101,11 @@ export default class PianoRollVisualizer extends PureComponent {
       this.engine.getIsPlaying = this.props.getIsPlaying;
     }
 
-    if (prevProps.midiData !== this.props.midiData) {
+    // The pass count belongs to the gate, not to the buffer, so re-parse when
+    // either changes: a gate that arrives a render after its data must still
+    // expand the timeline rather than latch the single pass.
+    if (prevProps.midiData !== this.props.midiData ||
+        prevProps.useTrackLoops !== this.props.useTrackLoops) {
       this.loadMidi(this.props.midiData, this.props.useTrackLoops);
     }
 

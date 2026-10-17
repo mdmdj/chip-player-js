@@ -1,5 +1,6 @@
 import MIDIEvents from './MIDIEvents';
 import MIDIFile from './MIDIFile';
+import { endLayersFor, songEndMs } from './endRule';
 const { EVENT_MIDI, EVENT_MIDI_CONTROLLER, EVENT_MIDI_NOTE_ON, EVENT_MIDI_NOTE_OFF } = MIDIEvents;
 
 const CC_64_SUSTAIN = 64;
@@ -355,6 +356,11 @@ export function usesTrackLoops(filepath) {
 MIDIFile.prototype.getPlaybackEvents = function (useTrackLoops = false) {
   const tracks = this.tracks.map((_, i) => this.getTrackEvents(i));
   const range = this.findLoopRange(tracks);
+  // The gate the end rule's policy may key off (see endRule.endLayersFor). It is
+  // remembered so the no-range path -- this.getEvents(), whose patch applies the
+  // same rule -- sees the same condition.
+  this._useTrackLoops = !!useTrackLoops;
+  const layers = endLayersFor({ useTrackLoops });
   // The loop region is *always* detected; the expansion is the opt-in. Without
   // it the list is the file's own timeline -- one pass -- and the player wraps
   // it itself (see MIDIFilePlayer.load); with it, intro + two passes, so the
@@ -362,7 +368,7 @@ MIDIFile.prototype.getPlaybackEvents = function (useTrackLoops = false) {
   if (!range) {
     return { events: this.getEvents(), loopStartMs: null, loopEndMs: null };
   }
-  return this.getLoopedEvents(tracks, useTrackLoops ? 2 : 1, range);
+  return this.getLoopedEvents(tracks, useTrackLoops ? 2 : 1, range, layers);
 };
 
 // Monkey patch MIDIFile class.
@@ -372,7 +378,7 @@ MIDIFile.prototype.getPlaybackEvents = function (useTrackLoops = false) {
 // band and head fold all work the same way. Post-loop content (outro) plays
 // once at the end. Returns {events, loopStartMs, loopEndMs} in first-pass
 // milliseconds; both are null when range is null (plain merge, no looping).
-MIDIFile.prototype.getLoopedEvents = function (tracks, loopCount = 2, range = null) {
+MIDIFile.prototype.getLoopedEvents = function (tracks, loopCount = 2, range = null, layers = endLayersFor({})) {
   let event;
   let playTime = 0;
   const combinedEvents = [];
@@ -583,33 +589,14 @@ MIDIFile.prototype.getLoopedEvents = function (tracks, loopCount = 2, range = nu
     return { events: this.getEvents(), loopStartMs: null, loopEndMs: null };
   }
 
-  // The song ends at the last event that can sound, not at trailing cleanup:
-  // a converter's note-less tail (controller resets, END_OF_TRACK) must not
-  // push the duration out with dead air. Every event keeps its authored
-  // position (EventIterator); only the end comes from the sounding content.
-  let endMs = 0;
-  for (const e of combinedEvents) {
-    if ((e.subtype === EVENT_MIDI_NOTE_ON || e.subtype === EVENT_MIDI_NOTE_OFF) &&
-        e.playTime > endMs) {
-      endMs = e.playTime;
-    }
-  }
-  if (endMs > 0) {
-    for (let k = combinedEvents.length - 1; k >= 0; k--) {
-      if (combinedEvents[k].playTime > endMs) combinedEvents.splice(k, 1);
-    }
-  }
-  const tailMs = endMs > 0 ? endMs : playTime;
-
-  // Same stuck-note fix as the getEvents patch below: release every channel
-  // heard in each track at the song's end, so the song (and its silence tail)
-  // always terminates when repeat is off.
-  for (const [track, channels] of Object.entries(channelsByTrack)) {
-    for (const ch of channels) {
-      combinedEvents.push(allNotesOff(Number(track), ch, tailMs));
-      combinedEvents.push(sustainOff(Number(track), ch, tailMs));
-    }
-  }
+  // The song ends at its last AUDIBLE event, not at trailing cleanup: a
+  // converter's padded tail (END_OF_TRACK a whole loop out, or note-offs for
+  // notes that are not sounding) must not push the duration out with dead air.
+  // Every event keeps its authored position (EventIterator); only the end comes
+  // from `endRule.js`, whose layers say what audible means. Then release every
+  // channel heard in each track there, so the song (and its silence tail) always
+  // terminates when repeat is off.
+  finishEventList(combinedEvents, layers, channelsByTrack);
 
   if (expandLoop && loopStartMs == null) loopStartMs = 0;
   if (!expandLoop || loopEndMs == null || loopEndMs <= loopStartMs) {
@@ -669,6 +656,27 @@ function sustainOff(track, channel, playTime) {
   };
 }
 
+// Trim a merged list to its audible end and release every channel there, so the
+// song (and its silence tail) always terminates when repeat is off. `layers`
+// decides what "audible" means (see endRule.js); with no layers the list keeps
+// every event the merge produced, master's shape.
+function finishEventList(events, layers, channelsByTrack) {
+  const endMs = layers ? songEndMs(events, layers) : 0;
+  if (endMs > 0) {
+    for (let k = events.length - 1; k >= 0; k--) {
+      if (events[k].playTime > endMs) events.splice(k, 1);
+    }
+  }
+  const tailMs = endMs > 0 ? endMs : (events.length ? events[events.length - 1].playTime : 0);
+  for (const [track, channels] of Object.entries(channelsByTrack)) {
+    for (const ch of channels) {
+      events.push(allNotesOff(Number(track), ch, tailMs));
+      events.push(sustainOff(Number(track), ch, tailMs));
+    }
+  }
+  return events;
+}
+
 // Fix for MIDI files missing note-off or sustain-release events before the end track event
 const originalGetEvents = MIDIFile.prototype.getEvents;
 MIDIFile.prototype.getEvents = function (...args) {
@@ -688,6 +696,20 @@ MIDIFile.prototype.getEvents = function (...args) {
         trackChannels[track].clear();
       }
     }
+  }
+  // The audible end, when the policy asks for one: the same layered rule the
+  // loop expansion uses, so a file's duration is its last audible moment. The
+  // per-track releases above still run, so a dangling note is cut at its own
+  // track's end as before; this only trims the tail past the audible end.
+  const layers = endLayersFor({ useTrackLoops: this._useTrackLoops });
+  if (layers) {
+    const byTrack = {};
+    for (const e of events) {
+      if (e.channel !== undefined) {
+        (byTrack[e.track || 0] || (byTrack[e.track || 0] = new Set())).add(e.channel);
+      }
+    }
+    finishEventList(events, layers, byTrack);
   }
   return events;
 };

@@ -586,7 +586,11 @@ export default class MIDIPlayer extends Player {
     const band = this.getLoopBandMs();
     if (!band) return abs;
     if (abs <= band.endMs) return abs;
-    if (!this.looping) return abs;
+    // Folding past the band is only for a live wrap. Once the region has been
+    // left (Repeat One enabled in the outro, see MIDIFilePlayer.loopRegionLeft)
+    // the audio plays the ending, so the head must follow it there rather than
+    // fold into a band the transport is no longer in.
+    if (!this.looping || (this.midiFilePlayer && this.midiFilePlayer.loopRegionLeft)) return abs;
     const phase = (((abs - meta.intro_length) % meta.loop_length) + meta.loop_length) % meta.loop_length;
     return band.startMs + phase;
   }

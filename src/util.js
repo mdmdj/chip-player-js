@@ -44,6 +44,29 @@ export function songRefsEqual(a, b) {
 }
 
 /**
+ * Browse listing rows -> the play context: one SongRef per playable song.
+ *
+ * A `songfolder` row is one row but `count` songs, and the sequencer advances
+ * one SongRef at a time, so it expands here. The server gives that row the
+ * context index of its FIRST sub-tune and advances its index counter past the
+ * rest (`server/index.js`), so every row's `idx` still names its place in this
+ * list -- which is what a click hands to `playContext`. Directories are not
+ * playable and are dropped.
+ */
+export function listingToContext(items) {
+  const context = [];
+  for (const item of items || []) {
+    if (item.type === 'songfolder') {
+      const count = item.count > 0 ? item.count : 1;
+      for (let i = 0; i < count; i++) context.push(songRef(item.path, i));
+    } else if (item.type === 'file') {
+      context.push(songRef(item.path, item.subtune));
+    }
+  }
+  return context;
+}
+
+/**
  * Whether two ordered lists of songs are the same, for comparing a live play
  * context to a stored one. Sequencer copies its context, so identity won't do.
  */

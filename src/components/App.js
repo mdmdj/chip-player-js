@@ -24,6 +24,7 @@ import {
   getMetadataUrlForFilepath,
   getUrlFromFilepath,
   isSongFolder,
+  listingToContext,
   pathJoin,
   postWithOptionalAuth,
   songRef,
@@ -271,7 +272,12 @@ class App extends React.Component {
         this.fetchDirectory(dirname).then(() => {
           this.props.history.replace(`${pathJoin('/browse', dirname)}${search}`);
           const context = this.playContexts[dirname] || [];
-          const index = context.findIndex(ref => ref.path === playPath);
+          // A directory context carries every sub-tune now (listingToContext
+          // expands song folders), so match the whole SongRef; fall back to the
+          // file's first entry when the link names a sub-tune it does not have.
+          const target = subtune ?? 0;
+          let index = context.findIndex(ref => ref.path === playPath && ref.subtune === target);
+          if (index < 0) index = context.findIndex(ref => ref.path === playPath);
 
           this.playContext(context, index < 0 ? 0 : index, subtune);
 
@@ -754,12 +760,11 @@ class App extends React.Component {
   }
 
   directoryListingToContext(items) {
-    // Every non-directory item is playable: a file is a SongRef with subtune 0,
-    // a songfolder is its first sub-tune, and the sub-tunes of one file are
-    // listed as their own items when browsing inside a song folder.
-    return items
-      .filter(item => item.type === 'file' || item.type === 'songfolder')
-      .map(item => songRef(item.path, item.subtune));
+    // One SongRef per playable song: a file is its own sub-tune, a songfolder is
+    // expanded into all of them (see listingToContext), and directories are
+    // dropped. The sub-tunes of one file are also their own rows when browsing
+    // inside a song folder.
+    return listingToContext(items);
   }
 
   pathToHref(path) {
@@ -1057,10 +1062,14 @@ class App extends React.Component {
     const { settings } = this.props.userContext;
     const showPlayerSettings = settings?.showPlayerSettings;
     const showVisualizer = settings?.showVisualizer;
+    // The buffer comes from the sequencer, not from App state: it is the live
+    // song's buffer, and the piano roll's loop gate is derived from the same live
+    // source, so the two cannot disagree. App state lags a render behind, and a
+    // stale buffer paired with the new song's gate paints the wrong file.
     const midiData = (
       (this.state.songPath && /\.(mid|midi|smf)$/i.test(this.state.songPath)) ||
       this.sequencer?.getPlayer()?.fileExtensions?.includes('mid')
-    ) ? (this.state.currentSongBuffer || this.sequencer?.getCurrSongBuffer()) : null;
+    ) ? (this.sequencer?.getCurrSongBuffer() || this.state.currentSongBuffer) : null;
     const isMidi = Boolean(midiData);
     const activeTheaterMode = Boolean(isMidi && this.state.theaterMode && showVisualizer);
     // A multi-song file browses as a song folder, so the footer links into it.

@@ -586,7 +586,11 @@ MIDIPlayer.prototype.loopJump = function () {
   const ringing = [...this.activeNotes.keys()];
   this.activeNotes.clear();
   // The state the wrap target starts with: intro plus one full loop pass when
-  // expanded (the second pass), the loop start otherwise.
+  // expanded (the second pass), the loop start otherwise. Nothing in it can stand
+  // for a value the file never authored before that point, so the two things the
+  // finished pass leaves behind that the list cannot restore -- notes still
+  // ringing, and a pitch bend -- are ended explicitly at the boundary instead: a
+  // loop that bends late would otherwise reopen bent.
   const { eventList } = this.collectStateEvents(0, loop.jumpMs);
   if (this.useWebMIDI) {
     // These messages belong at the band end, not at the last event the
@@ -609,6 +613,11 @@ MIDIPlayer.prototype.loopJump = function () {
       this.send([(MIDIEvents.EVENT_MIDI_CONTROLLER << 4) + ch, CC_SUSTAIN_PEDAL, 0],
         boundary);
     }
+    // Centre, the value a channel has before any bend: the collected list only
+    // carries bends the file authored, so this is the one that has to be said.
+    for (let ch = 0; ch < 16; ch++) {
+      this.send([(MIDIEvents.EVENT_MIDI_PITCH_BEND << 4) + ch, 0, 64], boundary);
+    }
     for (const event of eventList) {
       let message = null;
       if (event.subtype === MIDIEvents.EVENT_MIDI_PROGRAM_CHANGE) {
@@ -626,7 +635,10 @@ MIDIPlayer.prototype.loopJump = function () {
     }
     if (this.synth) {
       // Same release on the synth, then restore the wrap target's state.
-      for (let ch = 0; ch < 16; ch++) this.synth.controlChange(ch, CC_SUSTAIN_PEDAL, 0);
+      for (let ch = 0; ch < 16; ch++) {
+        this.synth.controlChange(ch, CC_SUSTAIN_PEDAL, 0);
+        this.synth.pitchBend(ch, 8192);
+      }
       this.setPositionSynth(eventList);
     }
   }

@@ -198,7 +198,10 @@ export default class Visualizer extends PureComponent {
           <PianoRollVisualizer
             width={this.props.theaterMode ? '100%' : VIS_WIDTH}
             midiData={this.props.midiData}
-            useTrackLoops={usesTrackLoops(this.props.songPath)}
+            // Take the path from the sequencer, the same live source App reads
+            // the buffer from, so the gate and the data it describes arrive in
+            // the same render (App's songPath state lags one behind).
+            useTrackLoops={usesTrackLoops(this.props.sequencer?.getCurrSongPath() ?? this.props.songPath)}
             getCurrentPositionMs={this.props.getCurrentPositionMs}
             getPlaybackRate={this.props.getPlaybackRate}
             getAudioLatencyMs={this.getAudioLatencyMs}

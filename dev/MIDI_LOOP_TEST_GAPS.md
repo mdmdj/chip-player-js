@@ -412,6 +412,48 @@ Check: `end layers: a note-off for a note that never played does not hold the en
 pins both shapes and the real pedal case; it fails against the previous code at
 2000/6000.
 
+## Fixed 2026-10-17: All Notes Off was treated as All Sounds Off (greptile, `endRule.js:126`)
+
+CC123 (All Notes Off) still respects the pedal — the notes it "turns off" that the
+pedal is holding keep sounding until the lift — while CC120 (All Sounds Off) silences
+the channel outright. The `panic` branch treated them the same, so a CC123 during a
+pedal-held ending cut it there:
+
+| shape | before | after |
+| --- | --- | --- |
+| CC123 under the pedal, lift at 1500 ms | **500 ms** | **1500 ms** |
+| CC120 under the pedal | 500 ms | 500 ms |
+| CC120, then a note under the still-down pedal | **600 ms** | **1500 ms** |
+| CC123 with no pedal down | 500 ms | 500 ms |
+
+The third row is the same branch's second cut, which the report did not name:
+`pedal.set(e.channel, 0)` is wrong for *both* messages, since neither changes the
+pedal's own state (only CC64 does) — so after a CC120 a later note-off was no longer
+seen as pedal-held and its ending was cut 900 ms early. The branch now moves CC123's
+sounding notes to the pedal set (where a note-off would have put them), clears
+everything for CC120, and leaves the pedal state alone.
+
+**One property, checked exhaustively.** The fix may only ever move an end *later*; an
+end that moves earlier is a new cut, which is the defect. Over every sequence of up to
+five moves from {note-on, note-off, pedal-on, pedal-off, CC123, CC120} with an
+`END_OF_TRACK` after it — **9331 combinations** — the corrected rule ends later in
+**366** and earlier in **0**. `songEndMsPreFix` in the harness is the rule as it was,
+kept only as that differential's reference.
+
+**Reachability: the message is used, the shape is not.** 4 of the 54 catalog files
+contain an authored CC123, and **0** have either cutting shape (a CC123/CC120
+arriving while a note sounds with the pedal down). That was measured on the raw track
+data, because measuring it on `getPlaybackEvents` output is blind by construction: a
+cut removes exactly the events whose absence would prove it, and our own injected
+`allNotesOff` releases look like the shape.
+
+Checks: `end layers: the two panics differ, and neither moves the pedal` (nine shapes,
+including the two layer-off combinations), the exhaustive one above, and
+`the panic shapes survive both merges, with and without a loop region` (the marker
+file and the plain one must both end at the authored lift, with the region intact). A
+before/after probe over all 54 files — merged list and its duration, plain list and
+its duration, `songEndMs` — is byte-identical.
+
 ## Recorded, not fixed: the band can reach a few ms past the song (2026-10-16)
 
 `MIDIPlayer.getLoopBandMs` returns the wrap span as-is, where the base

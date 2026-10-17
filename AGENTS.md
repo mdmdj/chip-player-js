@@ -2459,8 +2459,9 @@ only armed when `silenceDuration >= 0`, and both arms must end the song):
   program that uses it (see the 2026-10-17 entries there); the *end* of a MIDI
   comes from the layered rule in `endRule.js` (notes, the sustain pedal,
   all-sounds-off), so converter padding cannot inflate a duration, a note the
-  writer never released rings to its own track's end, and a cleanup note-off for a
-  note that never played holds nothing open; the head folds into the
+  writer never released rings to its own track's end, a cleanup note-off for a
+  note that never played holds nothing open, and All Notes Off keeps what the
+  pedal holds where All Sounds Off does not; the head folds into the
   band, which is the
   wrap span (`MIDIPlayer.getLoopBandMs`: the region by default, the second pass
   when expanded), with no fade tail (past the band the song ends).

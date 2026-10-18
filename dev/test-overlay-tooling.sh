@@ -1,0 +1,142 @@
+#!/usr/bin/env bash
+# DEV-ONLY: prove the overlay tooling is target-portable.
+#
+# Over a throwaway repo: one overlay's overlay-only content is captured into
+# dev/kit; a second feature branch gets it by commit (no rebase of the tooling,
+# no force-push); the seam file is NOT carried; the vendored-tree deletion
+# travels; promote still lifts only the stripped feature work onto that branch
+# and leaves the other target alone; and an ambiguous retarget refuses.
+#
+# It exercises the real scripts (dev/overlaylib.sh, kit.sh, overlay-new.sh,
+# overlay.sh, promote*.sh, rebase.sh) over a tiny tree, so a regression in the
+# manifest resolution, the kit sync or the promote tail fails here.
+set -euo pipefail
+
+SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/otool-XXXXXX")"
+export TMPDIR="$WORK" # keep the kit's temp worktree inside the sandbox
+REPO="$WORK/repo"
+
+pass=0; fail=0
+ok()   { echo "ok   - $1"; pass=$((pass+1)); }
+bad()  { echo "FAIL - $1"; fail=$((fail+1)); }
+expect_eq()       { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1 (expected '$2', got '$3')"; fi; }
+expect_contains() { case "$2" in *"$3"*) ok "$1" ;; *) bad "$1 (missing: $3)" ;; esac; }
+expect_not()      { case "$2" in *"$3"*) bad "$1 (unexpected: $3)" ;; *) ok "$1" ;; esac; }
+
+cleanup() {
+  git -C "$REPO" worktree list --porcelain 2>/dev/null \
+    | awk '$1=="worktree"{print $2}' | tail -n +2 \
+    | while read -r w; do git -C "$REPO" worktree remove --force "$w" >/dev/null 2>&1 || true; done
+  rm -rf "$WORK"
+}
+trap cleanup EXIT
+
+mkdir -p "$REPO"; cd "$REPO"
+git init -q -b master
+git config user.email dev@example.com
+git config user.name dev
+
+# Base: a feature file, the seam file, and a vendored tree the overlay deletes.
+mkdir -p src server libvgm
+printf 'export const app = () => 0;\n' > src/app.js
+printf '// prod\n' > server/index.js
+printf 'int eng(void){return 0;}\n' > libvgm/eng.c
+printf 'dev/.promote-armed\ndev/.pre-rebase\ndev/.pre-rebase.mb\n' > .gitignore
+git add -A && git commit -qm base
+
+# feature/a: real feature work in the feature file and the seam.
+git branch feature/a
+git worktree add -q "$WORK/feat-a" feature/a
+(
+  cd "$WORK/feat-a"
+  printf 'export const app = () => 1; /* a feature */\n' > src/app.js
+  printf '// prod\n// a feature hunk\n' > server/index.js
+  git commit -qam "a: feature work"
+)
+
+# dev/overlay-a: the overlay -- the dev kit, the vendored deletion, a dev seam.
+git branch dev/overlay-a feature/a
+git worktree add -q "$WORK/ov-a" dev/overlay-a
+mkdir -p "$WORK/ov-a/dev"
+for f in overlaylib.sh promote.sh promote-plan.sh promote-apply.sh rebase.sh \
+         push-overlay.sh kit.sh overlay-new.sh overlay.sh; do
+  cp "$SRC/dev/$f" "$WORK/ov-a/dev/$f"
+done
+chmod +x "$WORK/ov-a/dev/"*.sh
+cat > "$WORK/ov-a/dev/promote-paths.txt" <<'EOF'
+# overlay-only areas (fixture)
+dev/**
+libvgm/**
+server/index.js
+EOF
+printf 'a  feature/a  dev/overlay-a  3000 8080\n' > "$WORK/ov-a/dev/overlay.conf"
+(
+  cd "$WORK/ov-a"
+  git rm -rq libvgm
+  printf '// prod\n// a feature hunk\n// dev seam\n' > server/index.js
+  git add -A && git commit -qm "a: dev overlay content"
+)
+
+# --- kit: capture the overlay-only content from overlay-a --------------------
+KIT_OUT="$(cd "$WORK/ov-a" && KIT_SOURCE=dev/overlay-a bash dev/kit.sh capture)"
+expect_contains "kit: capture reports the update" "$KIT_OUT" "dev/kit updated from dev/overlay-a"
+KIT_LIST="$(cd "$WORK/ov-a" && bash dev/kit.sh list)"
+expect_contains "kit: carries dev/**"        "$KIT_LIST" "dev/**"
+expect_contains "kit: carries the vendored tree" "$KIT_LIST" "libvgm/**"
+expect_not      "kit: excludes the seam"     "$KIT_LIST" "  server/index.js"
+
+# --- new target: feature/b + the kit, in its own worktrees -------------------
+NEW_OUT="$(cd "$WORK/ov-a" && bash dev/overlay-new.sh b feature/b)"
+OVB="$WORK/chip-player-js-overlay-b"
+FEB="$WORK/chip-player-js-feature-b"
+expect_contains "new: reports the overlay branch" "$NEW_OUT" "created dev/overlay-b from feature/b"
+[ -d "$OVB" ] && ok "new: overlay worktree exists" || bad "new: overlay worktree exists"
+[ -d "$FEB" ] && ok "new: feature worktree exists" || bad "new: feature worktree exists"
+[ -f "$OVB/dev/overlaylib.sh" ] && ok "new: kit dev/ content arrived" || bad "new: kit dev/ content arrived"
+[ ! -e "$OVB/libvgm" ] && ok "new: vendored-tree deletion travelled" || bad "new: vendored-tree deletion travelled"
+expect_not "new: the seam file is not carried" "$(cat "$OVB/server/index.js")" "dev seam"
+
+# Register target b in the overlay's manifest (as overlay-new tells you to).
+(
+  cd "$OVB"
+  printf 'b  feature/b  dev/overlay-b  3300 8180\n' >> dev/overlay.conf
+  git add dev/overlay.conf && git commit -qm "b: manifest row"
+)
+
+# A fresh overlay has nothing to promote: the kit content is all overlay-only.
+FRESH="$(bash "$OVB/dev/promote.sh" b)"
+expect_contains "plan: fresh overlay has nothing to promote" "$FRESH" "Nothing to promote"
+expect_contains "plan: names the resolved pair" "$FRESH" "feature/b <- dev/overlay-b (b)"
+
+# --- b's feature work is promoted, stripped, without touching a --------------
+(
+  cd "$OVB"
+  cat > src/app.js <<'EOF'
+export const app = () => 2; /* b feature change */
+
+// DEV-BEGIN (stripped for promotion; dev-only probe)
+export const appDev = () => 9;
+// DEV-END
+EOF
+  git commit -qam "b: feature + dev region"
+)
+PLAN="$(bash "$OVB/dev/promote.sh" b)"
+expect_contains "plan: b's stripped work is planned" "$PLAN" "  src/app.js"
+expect_not      "plan: nothing else is planned"     "$PLAN" "  dev/overlaylib.sh"
+
+touch "$OVB/dev/.promote-armed"
+PROM="$(cd "$OVB" && PROMOTE_SKIP_PUSH=1 bash dev/promote-apply.sh b 2>&1 || true)"
+expect_contains "promote: committed on feature/b" "$PROM" "committed on feature/b"
+expect_contains "promote: feature change reached feature/b" "$(cat "$FEB/src/app.js")" "b feature change"
+expect_not      "promote: DEV region did NOT reach feature/b" "$(cat "$FEB/src/app.js")" "DEV-BEGIN"
+[ ! -e "$OVB/dev/.promote-armed" ] && ok "promote: arm key consumed" || bad "promote: arm key consumed"
+expect_contains "promote: feature/a is untouched" "$(cat "$WORK/feat-a/src/app.js")" "a feature"
+
+# --- an ambiguous retarget refuses rather than guessing ---------------------
+REF="$(cd "$OVB" && bash dev/promote.sh feature/zzz 2>&1 || true)"
+expect_contains "refuse: ambiguous retarget is refused" "$REF" "is the overlay for feature/b"
+
+echo
+echo "overlay-tooling: $pass passed, $fail failed"
+[ "$fail" -eq 0 ]

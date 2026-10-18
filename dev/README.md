@@ -75,6 +75,35 @@ The rebase rewrites `dev/overlay`'s history, so its push is `--force-with-lease`
 See "Dev overlay & promotion" in the repo-root `AGENTS.md` for what counts as
 feature work and how the DEV-region stripping works.
 
+### More than one target
+
+The promote scripts resolve the (feature, overlay) pair from `dev/overlay.conf`,
+so one checkout can drive any number of targets:
+
+```sh
+./dev/overlay.sh list          # the targets and their ports
+./dev/overlay.sh status        # what the current branch resolves to
+./dev/overlay.sh gba plan      # name the target explicitly
+```
+
+To add a target, put `dev/kit` (the overlay-only whole-file content) in one place
+and build the pair from it:
+
+```sh
+./dev/kit.sh capture           # once: capture the overlay-only content
+./dev/overlay-new.sh gba       # feature/gba + dev/kit, its own worktrees
+```
+
+`./dev/overlay.sh <t> refresh` syncs the kit onto an overlay and then rebases it;
+promotion is unchanged and the arm key is per overlay worktree, so two targets
+cannot arm each other. The seam file `server/index.js` is deliberately not in the
+kit (its dev delta is not a whole-file copy).
+
+Two trees at once: `./dev/overlay.sh <t> dev` runs `npm run dev` with that
+target's `WDS_PORT`/`API_PORT`. The client reads the API port from
+`window.__devApiPort`, which the dev server injects, so a second tree needs no
+rebuild. The t3 preview reaches one port, so one tree is live at a time.
+
 To revert:
 
 ```sh

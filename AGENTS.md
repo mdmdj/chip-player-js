@@ -294,10 +294,30 @@ as a ref, so one checkout can plan/promote/rebase/push any target.
   from `dev/kit`, on `dev/overlay-<name>`): `overlay-new.sh` is *not* the
   command — the overlay branch is already checked out. Create `feature/<name>`
   from master plus its worktree, append the manifest row with a free port pair,
-  then install deps and `./dev/apply.sh`. The exact sequence is in
-  `dev/README.md` §"Spinning up a new target from a kit worktree". The manifest
-  row is the registry: each target gets its own `wds`/`api` pair, and each
-  worktree installs its own `node_modules`.
+  then install deps and `./dev/apply.sh` (which also applies the dev-only server
+  seams). The exact sequence is in `dev/README.md` §"Spinning up a new target
+  from a kit worktree". The manifest row is the registry: each target gets its
+  own `wds`/`api` pair, each worktree installs its own `node_modules`, and each
+  run logs to its own file.
+- **Smoke test (2026-10-18) — two real agents, one real defect.** Two T3 threads
+  were launched with the same model, each into its own worktree created from
+  `baseRef: dev/kit`, asked (only) to follow the documented bring-up for
+  `feature/themes` and `feature/visualizer` and report whether they could set up,
+  run and preview. Both reached 200 on their own port and a rendering preview
+  (`mms-1:8180`, `mms-1:8280`; client bound to the target's API, zero requests to
+  `:8080`) — **but only after each independently found and hand-fixed the same
+  defect**: the kit excludes `server/index.js`, so a kit worktree got upstream's
+  file, which (a) requires the missing Firebase service-account JSON → the API
+  never binds, (b) hardcodes `WDS_PORT = 3000` and reads only `PORT` → the
+  target's port pair is ignored and two trees collide on 8080, and (c) has no
+  `__devApiPort` injection → the client talks to the sibling's API. Fix (this
+  commit): those deltas moved into `dev/patch-server.js`, applied by
+  `dev/apply.sh` and reverted by `dev/remove.sh`, so any base becomes runnable.
+  Pinned by `dev/test-server-seams.js` (33 checks: both bases, idempotent,
+  byte-for-byte revert, and a changed anchor failing loudly). Other friction the
+  agents reported and this fixed: `nvm` absent non-interactively (README now says
+  so), `apply.sh`'s starter fixture silently no-ops outside the main checkout, and
+  a shared `/tmp/opencode/dev.log` clobbered one agent's crash output.
 
 ### Two mechanisms — how to choose
 
@@ -349,6 +369,16 @@ only makes sense against our core (SID wrapper, our core *selection*) stays
 out.
 
 ### The 1 hard-coded seam
+
+**2026-10-18:** the `DEV_AUTH_MODULE` fallback is **no longer committed** in
+`server/index.js`. `dev/apply.sh` (via `dev/patch-server.js`) applies it, with
+the per-target `API_PORT`/`WDS_PORT` reads, the dev `window.__devApiPort`
+injection and no-cache-in-dev — idempotently and reversibly, so a kit worktree can
+boot. The file **is still path-listed**: it keeps two catalog-only dev deltas (the
+HVSC `csdbid` guard and the NES-fixture chart exclusion) plus the feature work
+that is hand-carried (P1/P3/P4). Read the rest of this section as the history of
+*why* the file is listed, not as its current contents — see the smoke-test bullet
+under "More than one target".
 
 One seam genuinely cannot be an additive region, because prod must still load
 the real module while dev loads an alternative *instead of* it:

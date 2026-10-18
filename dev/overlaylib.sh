@@ -141,6 +141,27 @@ overlay_resolve() {
   return 0
 }
 
+# The dev-only deltas on tracked files (dev/patch-server.js, dev/patch-client.js)
+# leave the worktree dirty, and a rebase refuses a dirty tree -- so reverting them
+# is part of preparing one, and the caller puts them back afterwards. Run the
+# TARGET worktree's own copies: each script resolves the file it patches relative
+# to itself, so using the invoking checkout's copy would patch the wrong tree.
+overlay_revert_patches() { # worktree
+  local wt="$1" s
+  for s in "$wt/dev/patch-server.js" "$wt/dev/patch-client.js"; do
+    [ -f "$s" ] && node "$s" --revert >/dev/null 2>&1 || true
+  done
+}
+
+overlay_apply_patches() { # worktree
+  local wt="$1" s
+  for s in "$wt/dev/patch-server.js" "$wt/dev/patch-client.js"; do
+    [ -f "$s" ] || continue
+    node "$s" >/dev/null 2>&1 \
+      || echo "overlay: warning: could not re-apply $(basename "$s") in $wt" >&2
+  done
+}
+
 # The worktrees the promote pair needs, resolved and required to exist. Both
 # branches are normally open at once; if one is not, the caller stops rather than
 # guessing a path.

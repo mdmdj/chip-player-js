@@ -42,6 +42,7 @@ mkdir -p src server libvgm
 printf 'export const app = () => 0;\n' > src/app.js
 printf '// prod\n' > server/index.js
 printf 'int eng(void){return 0;}\n' > libvgm/eng.c
+printf 'BASE TEMPLATE\n' > AGENTS.md
 printf 'dev/.promote-armed\ndev/.pre-rebase\ndev/.pre-rebase.mb\n' > .gitignore
 git add -A && git commit -qm base
 
@@ -67,6 +68,7 @@ chmod +x "$WORK/ov-a/dev/"*.sh
 cat > "$WORK/ov-a/dev/promote-paths.txt" <<'EOF'
 # overlay-only areas (fixture)
 dev/**
+AGENTS.md
 libvgm/**
 server/index.js
 EOF
@@ -75,6 +77,9 @@ printf 'a  feature/a  dev/overlay-a  3000 8080\n' > "$WORK/ov-a/dev/overlay.conf
   cd "$WORK/ov-a"
   git rm -rq libvgm
   printf '// prod\n// a feature hunk\n// dev seam\n' > server/index.js
+  printf 'OVERLAY A NOTES\n' > AGENTS.md
+  mkdir -p dev/features
+  printf 'feature a notes\n' > dev/features/a.md
   git add -A && git commit -qm "a: dev overlay content"
 )
 
@@ -86,6 +91,22 @@ expect_contains "kit: carries dev/**"        "$KIT_LIST" "dev/**"
 expect_contains "kit: carries the vendored tree" "$KIT_LIST" "libvgm/**"
 expect_not      "kit: excludes the seam"     "$KIT_LIST" "  server/index.js"
 
+# --- kit semantics: the template is seeded, feature notes never travel --------
+expect_contains "kit: reports AGENTS.md as seeded" "$KIT_LIST" "AGENTS.md"
+expect_contains "kit: reports dev/features as never captured" "$KIT_LIST" "dev/features"
+KIT_AGENTS="$(git -C "$REPO" show dev/kit:AGENTS.md)"
+expect_contains "kit: keeps the base template, not the overlay's notes" "$KIT_AGENTS" "BASE TEMPLATE"
+expect_not      "kit: capture did not take the overlay's notes up"     "$KIT_AGENTS" "OVERLAY A NOTES"
+if git -C "$REPO" cat-file -e dev/kit:dev/features/a.md 2>/dev/null; then
+  bad "kit: feature notes must never be captured"
+else ok "kit: feature notes are not captured"; fi
+# An explicit path publishes a seed anyway -- that is the deliberate route.
+(cd "$WORK/ov-a" && KIT_SOURCE=dev/overlay-a bash dev/kit.sh capture AGENTS.md) >/dev/null
+expect_contains "kit: an explicit path publishes a seed" "$(git -C "$REPO" show dev/kit:AGENTS.md)" "OVERLAY A NOTES"
+# A branch mistaken for a path is refused, not silently read as one.
+REFUSED="$(cd "$WORK/ov-a" && KIT_CANONICAL=dev/overlay-a bash dev/kit.sh capture dev/overlay-a AGENTS.md 2>&1 || true)"
+expect_contains "kit: a branch passed as a path is refused" "$REFUSED" "is a branch, not a path"
+
 # --- new target: feature/b + the kit, in its own worktrees -------------------
 NEW_OUT="$(cd "$WORK/ov-a" && bash dev/overlay-new.sh b feature/b)"
 OVB="$WORK/chip-player-js-overlay-b"
@@ -96,6 +117,9 @@ expect_contains "new: reports the overlay branch" "$NEW_OUT" "created dev/overla
 [ -f "$OVB/dev/overlaylib.sh" ] && ok "new: kit dev/ content arrived" || bad "new: kit dev/ content arrived"
 [ ! -e "$OVB/libvgm" ] && ok "new: vendored-tree deletion travelled" || bad "new: vendored-tree deletion travelled"
 expect_not "new: the seam file is not carried" "$(cat "$OVB/server/index.js")" "dev seam"
+# A pull must not overwrite a worktree's own notes: feature/b came from master with
+# its own AGENTS.md, so the seed leaves it alone.
+expect_eq  "pull: a target's own AGENTS.md is not overwritten" "$(cat "$OVB/AGENTS.md")" "BASE TEMPLATE"
 
 # Register target b in the overlay's manifest (as overlay-new tells you to).
 (

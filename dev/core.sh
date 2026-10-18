@@ -145,6 +145,17 @@ cmd_use() { # [<ref>] [<worktree>]
 
 cmd_steal() { cmd_use "$1" "$2"; }
 
+# Copy a core from a named WORKTREE (a path), recording where it came from. This is
+# what bringup's fallback uses, so a copied core is never recorded as "built here".
+cmd_from() { # <src-worktree> [<dst-worktree>]
+  local src="${1:-}" dst; [ -n "$src" ] || die "usage: dev/core.sh from <src-worktree> [<dst>]"
+  [ -d "$src" ] || die "no such worktree: $src"
+  has_core "$src" || die "$src has no core to copy"
+  dst="$(resolve_target "${2:-}")"
+  [ "$src" != "$dst" ] || { echo "core: $dst is that worktree"; return 0; }
+  copy_from "$src" "$dst"
+}
+
 cmd_build() {
   local wt; wt="$(resolve_target "${1:-}")"
   echo "core: building in $wt from its own sources ($(branch_of "$wt"))"
@@ -155,6 +166,7 @@ case "${1:-}" in
   list)  cmd_list ;;
   use)   shift; cmd_use "${1:-}" "${2:-}" ;;
   steal) shift; cmd_steal "${1:-}" "${2:-}" ;;
+  from)  shift; cmd_from "${1:-}" "${2:-}" ;;
   build) shift; cmd_build "${1:-}" ;;
   "")    sed -n '2,24p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' ;;
   *)     die "unknown command '$1' (list|use|steal|build)" ;;

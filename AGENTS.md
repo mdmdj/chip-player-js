@@ -2854,8 +2854,11 @@ contract instead of a bug.
   and `server/.env.local`; `server/index.js` loads the auth module via
   `DEV_AUTH_MODULE`, and the dev webpack config prepends the devtools entry.
   `dev/remove.sh` deletes them. No `*.dev-backup`, no `--revert` for these. The
-  remaining in-place patch is `dev/patch-server.js` (skia-canvas), which is
-  reversible and preserved by `remove.sh --revert`. Before a PR, run
+  in-place patches are `dev/patch-server.js` (the server's dev seams) and
+  `dev/patch-client.js` (the fake dev user), both reversible, both applied by
+  `apply.sh` and undone by `remove.sh --revert`. The client one matters because
+  `UserProvider.js` is a *feature* file: a kit worktree would otherwise run
+  upstream's copy with no signed-in user and no favorites. Before a PR, run
   `./dev/remove.sh` and double-check `git diff` / `git status`.
 - The client uses React 16, react-router-dom v5, react-virtualized, lodash,
   auto-bind. Match those.

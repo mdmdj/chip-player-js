@@ -313,6 +313,16 @@ as a ref, so one checkout can plan/promote/rebase/push any target.
   worktrees share one parent, so one farm serves all) and `cp -al` hardlinks
   `node_modules` (~1.5s, real paths, no symlink resolution) instead of two npm
   installs. Details: `dev/README.md` §"Spinning up a new target".
+- **Publishing has two paths, and this file is a template (2026-10-18).** You
+  commit normally on the overlay; promote takes the feature files (regions
+  stripped, path-listed areas skipped) and `dev/kit.sh capture`/`pull` take the
+  dev-only whole files. `AGENTS.md` is *seeded*: `dev/kit` holds the clean
+  template, `pull` gives it only to a worktree that has none, and `capture` never
+  takes an overlay's copy up. So **keep feature detail out of this file** — put
+  the design, measurements, hand-offs and history of your feature in
+  `dev/features/<name>.md`, which is never captured into the kit and never
+  promoted. The model, the four buckets and the capture caveats are in
+  `dev/README.md` §"Where your work goes — two publication paths".
 - **Smoke test (2026-10-18) — two real agents, one real defect.** Two T3 threads
   were launched with the same model, each into its own worktree created from
   `baseRef: dev/kit`, asked (only) to follow the documented bring-up for

@@ -2,6 +2,7 @@
 
 const autoprefixer = require('autoprefixer');
 const path = require('path');
+const fs = require('fs');
 const webpack = require('webpack');
 const { merge } = require('webpack-merge');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
@@ -20,6 +21,15 @@ const publicPath = '/';
 // as %PUBLIC_URL% in `index.html` and `process.env.PUBLIC_URL` in JavaScript.
 // Omit trailing slash as %PUBLIC_PATH%/xyz looks better than %PUBLIC_PATH%xyz.
 const publicUrl = '';
+// DEV-ONLY (overlay): inject a fake user so favorites work without Firebase.
+// Read by UserProvider via the DEV-ONLY branch there; absent in prod builds.
+if (!process.env.REACT_APP_DEV_USER) {
+  process.env.REACT_APP_DEV_USER = JSON.stringify({
+    uid: 'dev-user',
+    displayName: 'Dev User',
+    email: 'dev@example.com',
+  });
+}
 const env = getClientEnvironment(publicUrl);
 const protocol = process.env.HTTPS === 'true' ? 'https' : 'http';
 const host = process.env.HOST || '0.0.0.0';
@@ -27,6 +37,20 @@ const host = process.env.HOST || '0.0.0.0';
 module.exports = merge(commonConfig, {
   mode: 'development',
   devtool: 'cheap-module-source-map',
+  // DEV-ONLY (overlay): prepend the browser test-hooks bootstrap. Staged as an
+  // untracked, gitignored file by dev/apply.sh; in a clean tree only the app
+  // entry (from the common config, concatenated by merge) remains.
+  // Two shims, each independently optional: chip-player-devtools.js is the
+  // __cpDev harness, chip-player-record.js the __cpRec clip recorder
+  // (dev/record/README.md) -- audio mirror and sync flash for the videos.
+  entry: [
+    ...(fs.existsSync(path.resolve(paths.appSrc, 'chip-player-devtools.js'))
+      ? [path.resolve(paths.appSrc, 'chip-player-devtools.js')]
+      : []),
+    ...(fs.existsSync(path.resolve(paths.appSrc, 'chip-player-record.js'))
+      ? [path.resolve(paths.appSrc, 'chip-player-record.js')]
+      : []),
+  ],
   // These are the "entry points" to our application.
   // This means they will be the "root" imports that are included in JS bundle.
   // The first two entry points enable "hot" CSS and auto-refreshes for JS.
@@ -170,6 +194,9 @@ module.exports = merge(commonConfig, {
     client: {
       logging: 'none',
       overlay: false, // The original config had this as false.
+      // Connect HMR WebSockets back to whatever host the page was served from
+      // (LAN, WSL, Tailscale, ...) instead of the bind address.
+      webSocketURL: 'auto://0.0.0.0:0/ws',
     },
     headers: {
       'Access-Control-Allow-Origin': '*',
@@ -190,25 +217,6 @@ module.exports = merge(commonConfig, {
       // This service worker file is effectively a 'no-op' that will reset any
       // previous service worker registered for the same host:port combination.
       devServer.app.use(noopServiceWorkerMiddleware('/'));
-
-      // =============================================
-      // use proper mime-type for wasm files
-      // =============================================
-      devServer.app.get('*.wasm', (req, res, next) => {
-        let options = {
-          root: paths.appPublic,
-          dotfiles: 'deny',
-          headers: {
-            'Content-Type': 'application/wasm',
-          },
-        };
-
-        res.sendFile(req.url, options, (err) => {
-          if (err) {
-            next(err);
-          }
-        });
-      });
 
       return middlewares;
     },

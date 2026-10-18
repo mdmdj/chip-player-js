@@ -1,0 +1,71 @@
+# Overlay-only paths. `dev/promote.sh` NEVER promotes anything matched here.
+#
+# Rule of thumb: list whole AREAS (directories, build files, vendored trees) and
+# the one or two "seam" files whose dev delta cannot be expressed as an additive
+# DEV-BEGIN/DEV-END region. Do NOT list individual feature files — wrap dev code
+# in regions instead. This list should stay small and stable.
+#
+# Matched as git pathspecs (see dev/promote.sh).
+
+# Dev kit and tooling.
+dev/**
+AGENTS.md
+.nvmrc
+.gitignore
+config/webpack.config.dev.js
+scripts/start.js
+
+# Audio-engine build/tooling (real, but engine plumbing, not the feature).
+# The SID wrapper is NOT listed: its SIDPLAYFP_HAVE_SEEK guards defended a build
+# we never make (upstream's own wrapper calls setTempo()/seek() unguarded, so
+# upstream is already fork-only), and paying a permanent hand-carry for them cost
+# us the sub-tune reload fix in sid_set_subtune. Guards removed 2026-10-07; the
+# wrapper now promotes with the rest.
+scripts/build-subprojects.sh
+scripts/build-chip-core.js
+scripts/build-libsidplayfp.sh
+# Which engine sources a build linked from. Personal dev tooling: it exists to
+# stop a stray ../ clone silently swapping an engine, and Matt builds his own
+# way, so the reader does not belong in the PR. config/webpack.config.common.js
+# is NOT listed: its build-info DefinePlugin now lives in a DEV region, so the
+# file promotes (with the ModuleScopePlugin + scripts/ relaxation the client's
+# lazy sub-tune header module needs). That de-listing shrank the overlay-only
+# list by one and removed a hand-carry.
+scripts/build-info.js
+src/tinyplayer.c
+game-music-emu/**
+libvgm/**
+libxmp/**
+# Vendored engine trees with no current diff, listed so future fixes here can
+# never leak into the PR by default. (mdxmini is deliberately NOT listed: its
+# 4 changed files are pure loop feature + bug fixes and promote with the PR.)
+psflib/**
+lazyusf2/**
+farbrausch-v2m/**
+fluidlite/**
+libADLMIDI/**
+
+# The one "seam" file, and it stays. server/index.js is ~all feature work
+# (the /shuffle + /random rewrite, contributor passthrough, subtuneCount, the
+# sub-tune-count lookup), but two of its dev seams substitute a MODULE at a
+# require site -- skia-canvas and DEV_AUTH_MODULE -- and a strip-only region
+# cannot express "dev loads A, prod loads B": the stripped form either loses
+# the assignment or duplicates the binding. Upstream's auth.js requires a
+# service-account JSON we do not have, so the bypass is real.
+#
+# Converting it was prototyped and measured (2026-10-07). Deleting the skia
+# seam and regioning the other two would promote the file, but the promotion
+# delta would then carry a bare `let authModule = './middleware/auth.js';`
+# plus `require(authModule)` -- dev plumbing in a sub-tunes PR, with no answer
+# to "why is this a variable?". One line of unexplained indirection is worse
+# than hand-carrying the file, so the seams stay and the file stays listed.
+# Feature work here must still be hand-carried: repeat that step every time.
+server/index.js
+
+# Engine feature-detection + remote-dev tweaks on shared files. Only
+# src/config/index.js remains: dev-only throughout (LAN hostname over
+# localhost), correctly listed. MIDIPlayer (2 ADLMIDI guards) and XMPPlayer
+# (1 seek_time_frame fallback) needed no regions -- both hunks are portable
+# compat that behaves identically against upstream cores, so they delisted
+# cleanly with their loop feature.
+src/config/index.js

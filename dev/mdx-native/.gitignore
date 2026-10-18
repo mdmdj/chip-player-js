@@ -1,0 +1,4 @@
+# built by `make -C dev/mdx-native` (see README.md)
+region
+scan-tracks
+*.o

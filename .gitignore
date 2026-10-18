@@ -8,12 +8,18 @@ cmake-build-debug/
 *.wasm
 *.wasm.map
 *.db
+*.db-shm
+*.db-wal
 lib*.js
 libxmp/libxmp-lite-stagedir/
 public/soundfonts/
 **/untracked/
 src/-catalog-tests/
 src/chip-core.js
+src/chip-core.wasm.buildinfo.json
+src/chip-player-devtools.js
+src/chip-player-record.js
+server/middleware/auth.dev.js
 server/catalog.json
 server/directories.json
 server/ecosystem.config.js
@@ -22,6 +28,31 @@ public/music
 src/config/firebaseConfig.js
 libxmp/a.out.js
 libxmp/lite/Makefile.in
+libxmp/lite/cmake/libxmp-sources.cmake
+libxmp/lite/cmake/libxmp-checks.cmake
 *.backup/
+*.dev-backup
 _ignore/
 public/sitemap*.xml
+dev/nes-audio-tests/
+dev/.promote-armed
+
+# dev/rebase.sh's scratch state: the pre-rebase tip and the merge base it is
+# checked against, both kept for the failure path (cleaned on a clean run).
+dev/.pre-rebase
+dev/.pre-rebase.mb
+
+# dev/fetch-seo-fixtures.mjs's file list, regenerated on each run.
+dev/.seo-fixtures.manifest
+
+# Clip recording for the PR communication page (dev/record/README.md): .work holds
+# the raw per-take audio/proof, site/ is the generated upload directory.
+dev/record/.work/
+site/
+
+#diff review
+review.html
+
+# MDX corpus (Eidis/NFG archives): a large, user-supplied reference set, like
+# dev/nes-audio-tests/. The catalogs and zips stay out of the repo.
+dev/mdx-corpus/

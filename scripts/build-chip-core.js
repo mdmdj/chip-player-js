@@ -67,7 +67,9 @@ const chipModules = [
       '_tp_panic_channel',
       '_tp_reset',
     ],
-    flags: [],
+    flags: [
+      '-DTP_ENABLE_ADLMIDI', // compile tinyplayer's OPL3 (libADLMIDI) path back in
+    ],
   },
   {
     name: 'gme',
@@ -88,12 +90,12 @@ const chipModules = [
       '_gme_open_data',
       '_gme_ignore_silence',
       '_gme_set_tempo',
-      '_gme_seek_scaled', // seek_scaled and tell_scaled exist in
-      '_gme_tell_scaled', // github.com/mmontag/game-music-emu fork
+      '_gme_seek_scaled', // also in upstream GME; only disable_echo below is 0.6.4+
+      '_gme_tell_scaled',
       '_gme_set_fade',
       '_gme_voice_name',
       '_gme_set_stereo_depth',
-      '_gme_disable_echo',
+      // '_gme_disable_echo', // 0.6.4+ API; not in the vendored 2018 game-music-emu
       '_gme_enable_accuracy',
     ],
     flags: [
@@ -121,7 +123,9 @@ const chipModules = [
       '_xmp_stop_module',
       '_xmp_restart_module',
       '_xmp_seek_time',
-      '_xmp_seek_time_frame', // accurate seeking introduced in libxmp 4.7.0
+      // libxmp 4.7+ (the sibling tree has it). The player feature-detects, so a
+      // core without it still falls back to the order-snapping xmp_seek_time.
+      '_xmp_seek_time_frame',
       '_xmp_channel_mute',
       '_xmp_get_player',
       '_xmp_load_module_from_memory',
@@ -146,7 +150,11 @@ const chipModules = [
       '_lvgm_stop',
       '_lvgm_render',
       '_lvgm_get_position_ms',
+      '_lvgm_get_cur_loop',
+      '_lvgm_get_fade_start_ms',
       '_lvgm_get_duration_ms',
+      '_lvgm_get_loop_start_ms',
+      '_lvgm_get_loop_end_ms',
       '_lvgm_get_metadata',
       '_lvgm_get_voice_count',
       '_lvgm_get_voice_name',
@@ -158,6 +166,7 @@ const chipModules = [
       '_lvgm_get_playback_speed',
       '_lvgm_set_yrw801_rom_path',
       '_lvgm_set_enhanced_stereo',
+      '_lvgm_set_loop_count',
       '_lvgm_set_indefinite_playback',
       '_lvgm_get_indefinite_playback',
       '_lvgm_reset',
@@ -192,24 +201,22 @@ const chipModules = [
       '_fluid_synth_get_polyphony',
       '_fluid_synth_set_polyphony',
       '_fluid_synth_bank_select',
-      '_fluid_synth_get_active_voice_count',
     ],
-    flags: [],
+    // FluidLite is a sibling clone (README), and tinyplayer.c includes its
+    // public header by name; the include dir has to come from here. The clone
+    // generates fluidlite/version.h into its build dir, so that is an include
+    // path too.
+    flags: ['-I../FluidLite/include', '-I../FluidLite/build'],
   },
   {
     name: 'libADLMIDI',
+    // Enabled with the Nuked OPL3 core. The DOSBox core aborts under this
+    // Emscripten build (~DosBoxOPL3 during adl_setBank), so the archive is
+    // built with ADLMIDI_DISABLE_DOSBOX_EMULATOR (see build-subprojects.sh).
     enabled: true,
     sourceFiles: [
-      'chips/dosbox_opl3.cpp',
-      'chips/dosbox/dbopl.cpp',
-      'wopl/wopl_file.c',
-      'inst_db.cpp',
-      'adlmidi.cpp',
-      'adlmidi_load.cpp',
-      'adlmidi_midiplay.cpp',
-      'adlmidi_opl3.cpp',
-      'adlmidi_private.cpp',
-    ].map(file => 'libADLMIDI/src/' + file),
+      '../libADLMIDI/build/libADLMIDI.a',
+    ],
     exportedFunctions: [
       '_adl_init',
       '_adl_panic',
@@ -233,10 +240,9 @@ const chipModules = [
       '-DBWMIDI_DISABLE_XMI_SUPPORT',
       '-DBWMIDI_DISABLE_MUS_SUPPORT',
       '-DADLMIDI_DISABLE_MIDI_SEQUENCER',
-      '-DADLMIDI_DISABLE_NUKED_EMULATOR',
+      '-DADLMIDI_DISABLE_DOSBOX_EMULATOR',
       '-DADLMIDI_DISABLE_JAVA_EMULATOR',
       '-DADLMIDI_DISABLE_OPAL_EMULATOR',
-      // '-DADLMIDI_DISABLE_DOSBOX_EMULATOR', // DOSBOX is recommended OPL3 core
     ],
   },
   {
@@ -299,7 +305,10 @@ const chipModules = [
   },
   {
     name: 'gsf',
-    enabled: true,
+    // Upstream's Game Boy Advance core is an external sibling checkout, so build
+    // GSF only when it is present; without it, skip the engine rather than fail
+    // the whole build.
+    enabled: fs.existsSync(path.resolve(__dirname, '../../libgsf/build/libviogsf.a')),
     sourceFiles: [
       '../libgsf/build/libviogsf.a',
       'src/bindings/gsf-wrapper.cpp',
@@ -360,6 +369,8 @@ const chipModules = [
       '_mdx_get_title',
       '_mdx_get_length',
       '_mdx_set_max_loop',
+      '_mdx_get_loop_start_ms',
+      '_mdx_get_loop_length_ms',
       '_mdx_get_tracks',
       '_mdx_get_current_notes',
       '_mdx_set_speed',
@@ -409,8 +420,23 @@ const wasmOutFile = 'src/chip-core.wasm';
 const wasmDir = paths.appPublic;
 const wasmMapOutFile = wasmOutFile + '.map';
 const wasmMapDir = path.resolve(paths.appPublic, '..');
+
+// libsidplayfp isn't vendored in this repo; skip that module unless its static
+// lib is present or CHIP_SID=1 is set. Build the rest with CHIP_NO_SID=1.
+const sidLib = '../libsidplayfp/src/.libs/libsidplayfp.a';
+const haveSidLib = (() => { try { return fs.existsSync(sidLib); } catch { return false; } })();
+const wantSid = process.env.CHIP_NO_SID !== '1' && (haveSidLib || process.env.CHIP_SID === '1');
+if (!wantSid) {
+  console.warn('Skipping libsidplayfp module (not vendored). Set CHIP_SID=1 once built.');
+  for (const m of chipModules) if (m.name === 'libsidplayfp') m.enabled = false;
+}
+// No SIDPLAYFP_HAVE_SEEK probe here: seek()/setTempo() are mmontag/libsidplayfp
+// additions, and the wrapper calls them unguarded because upstream does too. We
+// always build against that fork (scripts/build-libsidplayfp.sh), so a probe
+// could only ever disable calls that already work. Building against the official
+// core now fails at compile time instead of silently ignoring seek and tempo.
+
 const runtimeMethods = [
-  'ALLOC_NORMAL',
   'FS',
   'UTF8ToString',
   'HEAPU8',
@@ -438,11 +464,17 @@ const flags = [
   '-s', 'EXPORTED_FUNCTIONS=[' + exportedFns.join(',') + ']',
   '-s', 'EXPORTED_RUNTIME_METHODS=[' + runtimeMethods.join(',') + ']',
   '-s', 'ALLOW_MEMORY_GROWTH=1',
-  '-s', 'ASSERTIONS=0',      // assertions increase runtime size about 100K
+  '-s', `ASSERTIONS=${process.env.CHIP_ASSERTIONS || '0'}`, // assertions increase runtime size about 100K
   '-flto',                   // Add Link-Time Optimization
+  // game-music-emu and libvgm both ship a MAME-derived YM2203/YM2608 with the
+  // same global symbols. GME needs its copies (VRC7/Z80 live in the same CMake
+  // block), so let the linker keep the first definition.
+  '-Wl,--allow-multiple-definition',
   '-msimd128',
   // '-s', 'NO_DISABLE_EXCEPTION_CATCHING',
-  '-s', 'MALLOC="emmalloc"', // Use the smaller allocator
+  // emmalloc trips a free-list assertion in _tp_init (libADLMIDI/fluidlite
+  // allocation churn). dlmalloc is larger but robust; overridable for testing.
+  '-s', `MALLOC="${process.env.CHIP_MALLOC || 'dlmalloc'}"`,
   '-s', 'STACK_OVERFLOW_CHECK=0', // Disable runtime stack checks for size
   '-s', 'MODULARIZE=1',
   '-s', 'EXPORT_NAME=CHIP_CORE',
@@ -450,11 +482,13 @@ const flags = [
   '-s', 'USE_ZLIB=1',
   '-s', 'EXPORT_ES6=1',
   // '-s', 'LEGACY_VM_SUPPORT=1',
-  // '-s', 'INITIAL_MEMORY=33554432', // 32MB initial memory; can grow with ALLOW_MEMORY_GROWTH
-  '-s', 'INITIAL_MEMORY=65536000', // 64MB initial memory
+  '-s', `INITIAL_MEMORY=${process.env.CHIP_INITIAL_MEMORY || '134217728'}`, // 128MB initial; grows as needed
+  '-s', `STACK_SIZE=${process.env.CHIP_STACK_SIZE || '5242880'}`, // 5MB stack (Emscripten 6 default)
   '-s', 'WASM_BIGINT',       // support passing 64 bit integers to/from JS
   '-lidbfs.js',
   '-Oz',                     // set to O0 for fast compile during development
+  // Keep function names in the wasm name section for readable stack traces.
+  ...(process.env.CHIP_DEBUG_NAMES ? ['-g2'] : []),
   '-o', jsOutFile,
   /**
    * WASM Source Maps
@@ -476,15 +510,155 @@ const flags = [
 ];
 
 console.log('Compiling to %s...', jsOutFile);
-console.log(`Invocation:\n${compiler} ${chalk.blue(flags.join(' '))} ${chalk.gray(sourceFiles.join(' '))}\n`);
 const preJs = `/*eslint-disable*/`;
-const args = [].concat(flags, sourceFiles);
-const build_proc = spawn(compiler, args, {stdio: 'inherit'});
+
+// The external libraries used to live one level up (../libxmp, ../FluidLite,
+// ...); they are now vendored in this repo. Rewrite a "../name/..." path to
+// "name/..." when the sibling doesn't exist but the in-repo path does.
+const repoRoot = path.resolve(__dirname, '..');
+// Engines are referenced as ../<name> (a sibling checkout). When that sibling is
+// gone we fall back to the in-repo tree -- which is this branch's normal state,
+// but the in-repo trees are not always the version the shipped core was built
+// from (the in-repo libvgm is a stale 2023 tree; a sibling clone would silently
+// swap it). Swapping an engine's version changes playback with no error anywhere,
+// so record every fallback and refuse to build on one without an explicit
+// opt-in.
+const engineFallbacks = [];
+// The engine root is the first segment after '../' (../libvgm/build/... -> libvgm).
+const engineOf = (p) => (p.match(/^\.\.\/([a-zA-Z0-9_.-]+)/) || [])[1] || null;
+const normalizeInput = (p) => {
+  const rewrite = (target) => {
+    const local = target.replace(/^\.\.\//, '');
+    const sibling = path.resolve(repoRoot, target);
+    if (fs.existsSync(sibling) || !fs.existsSync(path.resolve(repoRoot, local))) return target;
+    const engine = engineOf(target);
+    if (engine && !engineFallbacks.includes(engine)) engineFallbacks.push(engine);
+    return local;
+  };
+  // Rewrite include flags too: -I../libvgm -> -Ilibvgm
+  const inc = p.match(/^-I(.*)$/);
+  if (inc) {
+    if (!inc[1].startsWith('../')) return p;
+    const local = rewrite(inc[1]);
+    return local === inc[1] ? p : `-I${local}`;
+  }
+  if (!p.startsWith('../')) return p;
+  return rewrite(p);
+};
+// The compiler is run from the repo root; output paths (src/chip-core.js) are
+// already relative to it.
+const args = []
+  .concat(flags.map(normalizeInput))
+  .concat(sourceFiles.map(normalizeInput));
+console.log(`Normalized invocation:\n${compiler} ${chalk.blue(args.join(' '))}\n`);
+
+// (A) Engine identity gate. Engines are referenced as ../<name> and fall back to
+// the in-repo tree when that sibling is gone -- which is this branch's normal
+// state, so a fallback alone is not suspicious. What matters is whether the
+// resolved engine CONTENT changed since the last build: a stray sibling clone or
+// a local edit swaps an engine's version with no error and no runtime symptom.
+// So compare tree hashes against the recorded manifest and fail only on a
+// change. Opt in with CHIP_ALLOW_ENGINE_FALLBACK=1.
+const { engineInfo: readEngine } = require('./build-info');
+const resolvedEngines = require('./build-info').ENGINES.map(readEngine);
+let previous = null;
+try {
+  previous = JSON.parse(fs.readFileSync(`${wasmOutFile}.buildinfo.json`, 'utf8'));
+} catch { /* no baseline yet: first build with this gate */ }
+if (engineFallbacks.length) {
+  console.warn(chalk.yellow(
+    `engine-fallback: resolved to the in-repo tree for ${engineFallbacks.join(', ')} ` +
+    '(expected on this branch; recorded below)'
+  ));
+}
+if (previous && previous.engines) {
+  const changed = resolvedEngines.filter(e => {
+    const before = previous.engines.find(p => p.name === e.name);
+    if (!before) return false;
+    return (before.tree || null) !== (e.tree || null)
+      || (before.revision || null) !== (e.revision || null)
+      || JSON.stringify(before.submodules || null) !== JSON.stringify(e.submodules || null);
+  });
+  if (changed.length) {
+    const detail = changed.map(e => {
+      const b = previous.engines.find(p => p.name === e.name);
+      return `  ${e.name}: ${b.tree || b.revision || '?'} -> ${e.tree || e.revision || '?'}`;
+    }).join('\n');
+    console.warn(chalk.yellow(`engine-content change since the last build:\n${detail}`));
+    if (process.env.CHIP_ALLOW_ENGINE_FALLBACK !== '1') {
+      console.error(chalk.red(
+        'Refusing to build: an engine\'s content differs from the recorded build.\n' +
+        'That silently changes playback (loop/fade behavior, chip set). Restore the\n' +
+        'previous engine state, or re-run with CHIP_ALLOW_ENGINE_FALLBACK=1 to accept it.'
+      ));
+      process.exit(1);
+    }
+  } else {
+    console.log('engine-content: unchanged since the recorded build.');
+  }
+}
+
+// (B) Provenance. The build used to record nothing, so a core could silently
+// stop matching its sources and there was no way to tell afterwards. Same reader
+// the bundle is stamped from (scripts/build-info.js), so the wasm manifest and
+// window.ChipCoreBuildInfo can never disagree.
+const buildInfo = Object.assign(
+  { emcc: (() => { try { return execSync(`${compiler} --version`, { stdio: ['ignore', 'pipe', 'ignore'] }).toString().split('\n')[0].trim(); } catch { return null; } })() },
+  require('./build-info').buildInfo(),
+);
+buildInfo.engines = require('./build-info').ENGINES.map(require('./build-info').engineInfo);
+buildInfo.engineFallbacks = engineFallbacks;
+fs.writeFileSync(`${wasmOutFile}.buildinfo.json`, JSON.stringify(buildInfo, null, 2) + '\n');
+console.log(`Wrote ${wasmOutFile}.buildinfo.json (${buildInfo.engines.length} engines).`);
+const stale = buildInfo.engines.filter(e => e.tier !== 'verified' && e.tier !== 'authoritative');
+if (stale.length) {
+  console.warn(chalk.yellow(
+    `engines not content-verified: ${stale.map(e => `${e.name} (${e.tier})`).join(', ')}`
+  ));
+}
+checkDuplicateSymbols(args.filter(a => a.endsWith('.a')));
+// Two archives defining the same strong symbol makes the linker silently pick
+// one, so the clash only surfaces at runtime. Weak symbols resolve
+// deterministically, so only `T` definitions are checked.
+function checkDuplicateSymbols(archives) {
+  let listings;
+  try {
+    listings = archives.map(a => ({
+      archive: a,
+      symbols: execSync(`emnm "${a}"`, { cwd: repoRoot }).toString().split('\n')
+        .filter(line => / [T] /.test(` ${line} `))
+        .map(line => line.trim().split(/\s+/).pop()),
+    }));
+  } catch (e) {
+    console.warn(chalk.yellow('check-duplicate-symbols: emnm unavailable, skipping'));
+    return;
+  }
+  const owners = new Map();
+  for (const { archive, symbols } of listings) {
+    for (const sym of new Set(symbols)) {
+      if (!owners.has(sym)) owners.set(sym, []);
+      owners.get(sym).push(archive);
+    }
+  }
+  const dupes = [...owners.entries()].filter(([, owners]) => owners.length > 1);
+  if (dupes.length > 0) {
+    throw new Error(
+      'Duplicate strong symbols across linked archives (refusing to ship linker luck):\n' +
+      dupes.map(([sym, owners]) => `  ${sym}: ${owners.join(', ')}`).join('\n')
+    );
+  }
+  console.log(`check-duplicate-symbols: ${archives.length} archives, no clashes.`);
+}
+const build_proc = spawn(compiler, args, {stdio: 'inherit', cwd: repoRoot});
 build_proc.on('exit', function (code) {
   if (code === 0) {
     console.log(`Built ${wasmOutFile}.`);
     // Don't use --pre-js because it can get stripped out by closure.
     console.log('Prepending %s: %s', jsOutFile, preJs.trim());
-    execSync(`cat <<EOF > ${jsOutFile}\n${preJs}\n$(cat ${jsOutFile})\nEOF`);
+    // Stamp the provenance into the glue too, so the manifest travels with the
+    // artifact even if the sidecar JSON is lost.
+    const stamp = `${preJs}\nwindow.ChipCoreBuildInfo = ${JSON.stringify(buildInfo)};`;
+    fs.writeFileSync(`${jsOutFile}.stamped`, stamp + '\n' + fs.readFileSync(jsOutFile, 'utf8'));
+    fs.renameSync(`${jsOutFile}.stamped`, jsOutFile);
   }
 });

@@ -9,21 +9,35 @@
 #include <sys/stat.h>
 #include <emscripten.h>
 
-#include "../fluidlite/include/fluidlite.h"
+// fluidlite is a sibling checkout (README); the public header comes in via
+// -I../FluidLite/include set in scripts/build-chip-core.js.
+#include <fluidlite.h>
+// libADLMIDI is built with the Nuked OPL3 core (the DOSBox core aborts under
+// Emscripten); build with -DTP_ENABLE_ADLMIDI to compile this path in.
+#if defined(TP_ENABLE_ADLMIDI)
 #include "../libADLMIDI/include/adlmidi.h"
+#endif
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+// FluidLite moved these out of its public header (fluidlite/synth.h) but still
+// defines and uses them internally, and they remain exported; tinyplayer needs
+// the declarations to silence channels.
+extern int fluid_synth_all_notes_off(fluid_synth_t* synth, int chan);
+extern int fluid_synth_all_sounds_off(fluid_synth_t* synth, int chan);
+
 //TODO: Remove debug logging (EM_ASM_)
 fluid_synth_t *g_FluidSynth; // instance of FluidSynth
+#if defined(TP_ENABLE_ADLMIDI)
 struct ADL_MIDIPlayer *g_adlSynth;
 struct ADLMIDI_AudioFormat adl_AudioFormat = {
         ADLMIDI_SampleType_F32,
         sizeof(float_t),
         2 * sizeof(float_t),
 };
+#endif
 
 double g_MidiTimeMs;         // current playback time
 double g_Speed = 1.0;
@@ -93,6 +107,7 @@ Synth fluidSynth = {fluidNoteOn, fluidNoteOff, fluidProgramChange, fluidPitchBen
                     fluidChannelPressure, fluidRender, fluidPanic, fluidPanicChannel, fluidReset};
 
 // ADL OPL3 Synth *********************************************
+#if defined(TP_ENABLE_ADLMIDI)
 
 void adlNoteOn(int channel, int key, int velocity) {
   adl_rt_noteOn(g_adlSynth, channel, key, velocity);
@@ -128,6 +143,7 @@ void adlReset() {
 };
 Synth adlSynth = {adlNoteOn, adlNoteOff, adlProgramChange, adlPitchBend, adlControlChange,
                   adlChannelPressure, adlRender, adlPanic, adlPanicChannel, adlReset};
+#endif
 
 // TODO: separate wrapper for each synth?
 // Don't want multiple synth C APIs exposed to JavaScript
@@ -176,9 +192,11 @@ extern void tp_init(int sampleRate) {
   g_FluidSynth = new_fluid_synth(settings);
     fluid_synth_set_interp_method(g_FluidSynth, -1, FLUID_INTERP_LINEAR);
 
+#if defined(TP_ENABLE_ADLMIDI)
   g_adlSynth = adl_init(sampleRate);
   adl_setSoftPanEnabled(g_adlSynth, 1);
   adl_setVolumeRangeModel(g_adlSynth, ADLMIDI_VolumeModel_AUTO);
+#endif
   /*
    * Polyphony varies based on YMF262 configuration:
    *
@@ -189,10 +207,14 @@ extern void tp_init(int sampleRate) {
    *
    * Roughly speaking, 12 to 18 voices per chip.
    */
-  adl_setNumChips(g_adlSynth, 4);
+  // NOTE: keep the default 1 chip; more chips rebuild the OPL3 chip set and
+  // were never validated with the Nuked core under Emscripten.
+  // adl_setNumChips(g_adlSynth, 4);
 
   g_Synths[0] = fluidSynth;
+#if defined(TP_ENABLE_ADLMIDI)
   g_Synths[1] = adlSynth;
+#endif
   g_synth = g_Synths[0];
 }
 
@@ -264,7 +286,11 @@ extern void tp_set_channel_mute(int chan, char isMuted) {
 }
 
 extern int tp_set_bank(int bank) {
+#if defined(TP_ENABLE_ADLMIDI)
   return adl_setBank(g_adlSynth, bank);
+#else
+  return 0;
+#endif
 }
 
 extern int tp_set_synth_engine(int synthId) {

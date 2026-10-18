@@ -171,17 +171,26 @@ same targets.
 
 #### Engines and modules without the wait
 
-- `dev/engines.sh link` symlinks the engine clones (`libvgm`, `libxmp`,
-  `FluidLite`, `game-music-emu`, `libgsf`, `libsidplayfp`) from the main
-  checkout's parent into this worktree's parent. Every t3 worktree of a repo
-  shares one parent, so one farm serves them all, and the archives already built
-  inside the clones are reused. `dev/engines.sh check` lists what is built.
-- `node_modules` is hardlinked (`cp -al`, ~1.5 s) from the main checkout rather
-  than installed — same Node, same lockfile, and real paths, so nothing has to
-  resolve through a symlink. Re-run `npm install` in the worktree if a branch
-  changes dependencies.
-- A real `chip-core` is copied from the main checkout, so audio works with no
-  build; `NO_REAL_CORE=1 dev/bringup.sh <name>` keeps the silent stub.
+**`dev/engines.sh check` is the answer to "which libraries does the build use, and
+from where".** There are exactly two sources and nothing else is used:
+
+| Source | Engines | Where it lives | How a worktree gets it |
+| --- | --- | --- | --- |
+| **sibling** | `game-music-emu` (GME), `libxmp`, `libvgm`, `FluidLite`, `libgsf`, `libsidplayfp` | clones beside the main checkout; built by `scripts/build-subprojects.sh` | `dev/engines.sh link` symlinks each clone into this worktree's **parent** — every t3 worktree of a repo shares one parent, so one farm serves them all, and the archives already built inside the clones are reused |
+| **in-repo** | `libADLMIDI`, `psflib`, `lazyusf2`, plus `mdxmini` and `farbrausch-v2m` (sources only — compiled by `build-chip-core.js`) | sources travel in git (and in `dev/kit`) | their archives are gitignored, so `link` symlinks the archive or build directory from the main checkout |
+
+Anything else is a **decoy**: the vendored trees this overlay deleted (`libvgm/`,
+`libxmp/`, `fluidlite/`, `game-music-emu/`) are not the build's source, and an
+in-tree directory carrying a sibling's name is not used either. `engines.sh check`
+flags one — a stale `FluidLite/build/libfluidlite.a` in the tree is exactly the
+sort of thing that gets mistaken for the real library.
+
+`node_modules` is hardlinked (`cp -al`, ~1.5 s) from the main checkout rather
+than installed — same Node, same lockfile, and real paths, so nothing has to
+resolve through a symlink (`link_modules` falls back to a symlink across
+filesystems). Re-run `npm install` in the worktree if a branch changes
+dependencies. A real `chip-core` is copied from the main checkout, so audio works
+with no build; `NO_REAL_CORE=1 dev/bringup.sh <name>` keeps the silent stub.
 
 Each run should log to its own file — two agents sharing one log clobber each
 other's crash output. Verify with `curl`; open the t3 preview at `mms-1:<api>`

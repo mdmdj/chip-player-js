@@ -323,6 +323,21 @@ as a ref, so one checkout can plan/promote/rebase/push any target.
   `dev/features/<name>.md`, which is never captured into the kit and never
   promoted. The model, the four buckets and the capture caveats are in
   `dev/README.md` §"Where your work goes — two publication paths".
+- **The engine inventory is `dev/engines.sh check` (2026-10-18).** Two sources and
+  nothing else: **siblings** (`game-music-emu`, `libxmp`, `libvgm`, `FluidLite`,
+  `libgsf`, `libsidplayfp`, cloned beside the checkout) and **in-repo**
+  (`libADLMIDI`, `psflib`, `lazyusf2` archives; `mdxmini`/`farbrausch-v2m` sources
+  only). Anything else is a decoy — including an in-tree directory carrying a
+  sibling's name — and `check` flags one. `link` farms the siblings into the
+  worktree's parent and symlinks the in-repo archives from the main checkout.
+  Two build fixes came out of this: `_gme_disable_echo` had been commented out
+  with a stale "not in the vendored 2018 game-music-emu" note (the sibling is
+  0.6.4 and defines it, so **NSF/SPC was dead in every overlay tree** — the
+  rebuilt core now exports it), and a stray in-tree `FluidLite/build` (unused
+  archive) was there to be mistaken for the real library. A **kit** worktree
+  cannot *link* its own core: its sources are upstream's while
+  `build-chip-core.js` carries our extra exports, so `bringup` copies the built
+  core in instead; see `dev/README.md`.
 - **Smoke test (2026-10-18) — two real agents, one real defect.** Two T3 threads
   were launched with the same model, each into its own worktree created from
   `baseRef: dev/kit`, asked (only) to follow the documented bring-up for

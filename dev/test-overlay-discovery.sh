@@ -116,6 +116,22 @@ for needle in overlay_revert_patches overlay_apply_patches; do
   *) bad "overlaylib defines $needle" ;; esac
 done
 
+# 9. The engine inventory: every library's SOURCE is stated, and an in-tree copy
+#    of a sibling's name (a decoy) is flagged rather than mistaken for the build's.
+ENG="$(./dev/engines.sh check)"
+for e in game-music-emu libxmp libvgm FluidLite libgsf libsidplayfp; do
+  case "$ENG" in *"$e"*sibling*) ok "engines: $e is a sibling" ;;
+  *) bad "engines: $e is a sibling" ;; esac
+done
+for e in libADLMIDI psflib lazyusf2 mdxmini farbrausch-v2m; do
+  case "$ENG" in *"$e"*in-repo*) ok "engines: $e is in-repo" ;;
+  *) bad "engines: $e is in-repo" ;; esac
+done
+mkdir -p FluidLite
+DECOY="$(./dev/engines.sh check || true)"
+rmdir FluidLite 2>/dev/null || true
+expect_contains "engines: an in-tree copy of a sibling is flagged as a decoy" "$DECOY" "DECOY"
+
 echo
 echo "overlay-discovery: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

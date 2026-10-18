@@ -28,12 +28,20 @@ source "$DIR/overlaylib.sh"
 
 is_cmd() {
   case "$1" in
-    list|status|plan|promote|refresh|rebase|push|dev|arm|new|bringup) return 0 ;;
+    list|status|plan|promote|refresh|rebase|push|dev|arm|new|bringup|help) return 0 ;;
     *) return 1 ;;
   esac
 }
 
-if is_cmd "${1:-}"; then cmd="$1"; target="${2:-}"; else target="${1:-}"; cmd="${2:-status}"; fi
+usage() { sed -n '2,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+
+# No arguments means "show me what this does" -- the pattern every dev/*.sh
+# entry point follows, so a new worktree can discover the tooling.
+if [ -z "${1:-}" ]; then
+  usage
+  exit 0
+fi
+if is_cmd "$1"; then cmd="$1"; target="${2:-}"; else target="$1"; cmd="${2:-status}"; fi
 
 die() { echo "overlay: $*" >&2; exit 1; }
 
@@ -70,6 +78,8 @@ case "$cmd" in
     overlay_require_worktrees
     echo "${OV_OVERLAY_WT#"$ROOT"/}/dev/.promote-armed"
     ;;
+
+  help) usage ;;
 
   refresh)
     overlay_resolve "$target"

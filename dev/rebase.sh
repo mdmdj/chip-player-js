@@ -30,13 +30,23 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$ROOT"
 
-FEATURE="${PROMOTE_TARGET:-feature/subtunes-as-first-class}"
-# Scratch state for the failure path, so the pre-rebase tip is recoverable.
-STATE="dev/.pre-rebase"
+# Which overlay this run rebases (dev/overlaylib.sh). One checkout can drive any
+# target; the target's own worktree is where the rebase happens.
+# shellcheck source=dev/overlaylib.sh
+source "$ROOT/dev/overlaylib.sh"
+overlay_resolve "${1:-}"
+FEATURE="$OV_FEATURE"
+OVERLAY_BRANCH="$OV_OVERLAY"
 
 die() { echo "rebase: $*" >&2; exit 1; }
+
+overlay_require_worktrees
+cd "$OV_OVERLAY_WT"
+
+# Scratch state for the failure path, so the pre-rebase tip is recoverable. It
+# lives in the overlay worktree, which is what scopes it to one target.
+STATE="dev/.pre-rebase"
 
 # Keep the recorded pre-rebase tip on failure: the die() messages above point at
 # it, and an aborted rebase is exactly when it is needed. Remove it only on a
@@ -50,15 +60,15 @@ trap 'cleanup $?' EXIT
 # to the tree comparison below, and a rebase that would clobber one stops on
 # its own.
 if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
-  die "dev/overlay worktree is dirty. Commit or stash first: the check below
+  die "$OVERLAY_BRANCH worktree is dirty. Commit or stash first: the check below
        compares this exact tree against the rebased one."
 fi
 if [ -d .git/rebase-merge ] || [ -d .git/rebase-apply ]; then
   die "a rebase is already in progress. Do not resume it -- run
        \`git rebase --abort\`, then re-run this script."
 fi
-[ "$(git rev-parse --abbrev-ref HEAD)" = "dev/overlay" ] \
-  || die "expected to be on dev/overlay; on $(git rev-parse --abbrev-ref HEAD)"
+[ "$(git rev-parse --abbrev-ref HEAD)" = "$OVERLAY_BRANCH" ] \
+  || die "expected to be on $OVERLAY_BRANCH; on $(git rev-parse --abbrev-ref HEAD)"
 git rev-parse --verify -q "$FEATURE" >/dev/null || die "branch $FEATURE not found"
 
 TIP="$(git rev-parse HEAD)"
@@ -66,7 +76,7 @@ MB="$(git merge-base "$TIP" "$FEATURE")"
 echo "$TIP" > "$STATE"
 echo "$MB" > "$STATE.mb"
 
-echo "rebase: dev/overlay ($(git rev-parse --short "$TIP")) onto $FEATURE ($(git rev-parse --short "$FEATURE"))"
+echo "rebase: $OVERLAY_BRANCH ($(git rev-parse --short "$TIP")) onto $FEATURE ($(git rev-parse --short "$FEATURE"))"
 if ! git rebase -X theirs "$FEATURE"; then
   die "the rebase stopped; its output above is the whole story. Abort it
        (\`git rebase --abort\`) rather than resuming: the partially applied

@@ -17,10 +17,17 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$ROOT"
 
-BRANCH=dev/overlay
+# Which overlay this publishes (dev/overlaylib.sh), in its own worktree.
+# shellcheck source=dev/overlaylib.sh
+source "$ROOT/dev/overlaylib.sh"
+overlay_resolve "${1:-}"
+BRANCH="$OV_OVERLAY"
+
 die() { echo "push-overlay: $*" >&2; exit 1; }
+
+overlay_require_worktrees
+cd "$OV_OVERLAY_WT"
 
 [ "$(git rev-parse --abbrev-ref HEAD)" = "$BRANCH" ] || die "expected to be on $BRANCH"
 if [ -n "$(git status --porcelain --untracked-files=no)" ]; then

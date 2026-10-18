@@ -62,6 +62,10 @@ git config user.email dev@example.com
 git config user.name dev
 mkdir -p dev
 cp "$PLAN_SH" dev/promote-plan.sh
+# The planner resolves its target through dev/overlaylib.sh (sourced). Copy it
+# next to the planner so the real path is exercised here too.
+[ -f "$(dirname "$PLAN_SH")/overlaylib.sh" ] \
+  && cp "$(dirname "$PLAN_SH")/overlaylib.sh" dev/overlaylib.sh || true
 : > dev/promote-paths.txt
 
 # Feature (prod) versions.

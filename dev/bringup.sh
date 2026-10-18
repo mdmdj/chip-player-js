@@ -129,11 +129,28 @@ if [ ! -f "$ov_wt/server/.env.local" ] || [ "${FORCE_APPLY:-0}" = 1 ]; then
   echo "bringup: dev/apply.sh done (log: $log)"
 fi
 
+if [ "${NO_SAMPLE:-0}" != 1 ]; then
+  # The cheap canonical sample: ~16 files across engines (dev/sample.manifest), so
+  # the tree has something to play and the harness fixtures are present. Cheapest
+  # mechanism per file (symlink, then hardlink, then copy); never the big
+  # collections. NO_SAMPLE=1 skips it; SAMPLE_FROM=<worktree> steals that one's.
+  bash "$DIR/sample.sh" seed "$ov_wt"
+fi
+
 if [ "${NO_REAL_CORE:-0}" != 1 ]; then
-  for f in src/chip-core.js src/chip-core.wasm src/chip-core.wasm.buildinfo.json; do
-    [ -f "$main_wt/$f" ] && cp -f "$main_wt/$f" "$ov_wt/$f"
-  done
-  [ -f "$ov_wt/src/chip-core.wasm" ] && echo "bringup: real chip-core copied in (audio enabled)"
+  # A core is a build of the ENGINE SOURCES, so which one matters. Default: a core
+  # built from CORE_REF (master) -- a fresh feature then behaves like upstream. A
+  # feature extending unmerged engine work asks for that branch's core instead:
+  #   CORE_REF=dev/overlay ./dev/bringup.sh <name>
+  if bash "$DIR/core.sh" use "${CORE_REF:-master}" "$ov_wt" >/dev/null 2>&1; then
+    echo "bringup: chip-core from ${CORE_REF:-master}"
+  else
+    for f in src/chip-core.js src/chip-core.wasm src/chip-core.wasm.buildinfo.json; do
+      [ -f "$main_wt/$f" ] && cp -f "$main_wt/$f" "$ov_wt/$f"
+    done
+    echo "bringup: nothing has a core from ${CORE_REF:-master}; copied the main checkout's" >&2
+    echo "         (that one is built from ITS branch's sources -- see dev/core.sh list)" >&2
+  fi
 fi
 
 echo

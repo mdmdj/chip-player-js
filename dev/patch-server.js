@@ -23,8 +23,8 @@
 // PATCH_SERVER_FILE overrides the target path (used by the test).
 'use strict';
 
-const fs = require('fs');
 const path = require('path');
+const { runPatches } = require('./patch-lib.js');
 
 const file = process.env.PATCH_SERVER_FILE || path.join(__dirname, '..', 'server', 'index.js');
 
@@ -113,38 +113,12 @@ const PATCHES = [
 ];
 
 const revert = process.argv.includes('--revert');
-let src = fs.readFileSync(file, 'utf8');
-const applied = [];
-const errors = [];
-let changed = false;
-
-// Reverse order on revert so overlapping patches unwind cleanly.
-const order = revert ? [...PATCHES].reverse() : PATCHES;
-for (const p of order) {
-  // Presence of the *replacement* decides the state, in both directions. For
-  // dev-no-cache the find text is a prefix of the replace text, so probing for
-  // it would be true on a patched file too (skipping a needed revert) and would
-  // also let a re-apply duplicate the added lines.
-  const patched = src.includes(p.replace);
-  if (revert) {
-    if (!patched) { applied.push(`${p.name} (already plain)`); continue; }
-    src = src.replace(p.replace, p.find);
-    changed = true;
-    applied.push(p.name);
-  } else {
-    if (patched) { applied.push(`${p.name} (already patched)`); continue; }
-    if (src.includes(p.find)) {
-      src = src.replace(p.find, p.replace);
-      changed = true;
-      applied.push(p.name);
-    } else if (p.required) errors.push(p.name);
-  }
-}
-
-if (changed) fs.writeFileSync(file, src);
+const { changed, applied, errors } = runPatches({ file, patches: PATCHES, revert });
 
 const verb = revert ? 'Reverted' : 'Applied';
-if (applied.length) console.log(`[dev] ${verb} server/index.js patches: ${applied.join(', ')}`);
+if (applied.length) {
+  console.log(`[dev] ${verb} server/index.js patches: ${applied.join(', ')}`);
+}
 if (errors.length) {
   console.error(
     `[dev] ERROR: could not ${revert ? 'revert' : 'apply'} required server/index.js patch(es): ` +

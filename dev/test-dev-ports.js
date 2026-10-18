@@ -43,14 +43,18 @@ check('client: API port falls back to 8080', () => {
   assert.strictEqual(apiBase(undefined), 'http://h:8080/api');
 });
 
-const serverSrc = fs.readFileSync(path.join(ROOT, 'server/index.js'), 'utf8');
-check('server: API port from API_PORT (PORT fallback)', () => {
-  assert.ok(/parseInt\(process\.env\.API_PORT \?\? process\.env\.PORT, 10\) \|\| 8080/.test(serverSrc),
-    'API_PORT/PORT read not found');
+const patcherSrc = fs.readFileSync(path.join(ROOT, 'dev/patch-server.js'), 'utf8');
+check('server: the dev patch supplies API_PORT (PORT fallback)', () => {
+  assert.ok(/parseInt\(process\.env\.API_PORT \?\? process\.env\.PORT, 10\) \|\| 8080/.test(patcherSrc),
+    'API_PORT replacement not found in dev/patch-server.js');
 });
-check('server: WDS port from WDS_PORT (default 3000)', () => {
-  assert.ok(/parseInt\(process\.env\.WDS_PORT, 10\) \|\| 3000/.test(serverSrc),
-    'WDS_PORT read not found');
+check('server: the dev patch supplies WDS_PORT (default 3000)', () => {
+  assert.ok(/parseInt\(process\.env\.WDS_PORT, 10\) \|\| 3000/.test(patcherSrc),
+    'WDS_PORT replacement not found in dev/patch-server.js');
+});
+check('dev/apply.sh applies the server patches', () => {
+  assert.ok(/patch-server\.js/.test(fs.readFileSync(path.join(ROOT, 'dev/apply.sh'), 'utf8')),
+    'apply.sh does not run patch-server.js');
 });
 
 const startSrc = fs.readFileSync(path.join(ROOT, 'scripts/start.js'), 'utf8');

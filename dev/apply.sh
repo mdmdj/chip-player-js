@@ -30,8 +30,12 @@ echo "[dev]   installed src/config/firebaseConfig.js (placeholder)"
 cp dev/shims/server-auth.js server/middleware/auth.dev.js
 echo "[dev]   staged server/middleware/auth.dev.js (bypass)"
 
-# 4. Optional skia-canvas patch for server/index.js (reversible, no backup)
+# 4. Dev-only deltas on tracked files (reversible; dev/remove.sh reverts them):
+#    server/index.js -- the auth bypass, per-target ports, the dev HTML injection;
+#    src/components/UserProvider.js -- the fake dev user, so favorites work in a
+#    worktree whose UserProvider is upstream's.
 node dev/patch-server.js
+node dev/patch-client.js
 
 # Browser test hooks (window.__cpDev). Staged as an untracked, gitignored
 # module and picked up by the dev webpack entry; no tracked file is patched.

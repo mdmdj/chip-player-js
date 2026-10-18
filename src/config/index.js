@@ -3,14 +3,17 @@ let CATALOG_PREFIX = 'https://gifx.co/music';
 let SOUNDFONT_URL_PATH = 'https://gifx.co/soundfonts';
 
 if (process.env.NODE_ENV === 'development') {
-  // The Node server always listens on port 8080, but the client may have been
-  // loaded from any host (LAN, WSL, Tailscale). Use that host instead of
-  // localhost so remote browsers reach the server rather than themselves.
+  // The client may have been loaded from any host (LAN, WSL, Tailscale), so use
+  // that host rather than localhost. The port is the server's own, injected as
+  // window.__devApiPort so a second dev tree is reachable without a rebuild;
+  // 8080 is the default (and what a bundle served without the injection gets).
   const devHostname =
     typeof window !== 'undefined' ? window.location.hostname : 'localhost';
-  API_BASE = `http://${devHostname}:8080/api`; // npm run server - Node.js server on port 8080
-  CATALOG_PREFIX = `http://${devHostname}:8080/catalog`;
-  SOUNDFONT_URL_PATH = `http://${devHostname}:8080/soundfonts`;
+  const devPort =
+    (typeof window !== 'undefined' && window.__devApiPort) || 8080;
+  API_BASE = `http://${devHostname}:${devPort}/api`; // npm run server - Node.js server
+  CATALOG_PREFIX = `http://${devHostname}:${devPort}/catalog`;
+  SOUNDFONT_URL_PATH = `http://${devHostname}:${devPort}/soundfonts`;
 }
 
 const MAX_SAMPLE_RATE = 48000; // Higher rates are problematic for some players.

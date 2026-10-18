@@ -57,6 +57,12 @@ echo
 echo "== promote strip syntax (C compile, JS parse) =="
 bash "$DIR/test-promote-syntax.sh"
 echo
+echo "== overlay tooling (multi-target, kit) =="
+bash "$DIR/test-overlay-tooling.sh"
+echo
+echo "== dev server ports (per-target) =="
+node "$DIR/test-dev-ports.js"
+echo
 echo "== no overlay-only references in what can promote =="
 node "$DIR/check-promotable-refs.js"
 echo

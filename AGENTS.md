@@ -249,6 +249,48 @@ nothing and reproduces the pre-rebase tree exactly. The damage came from the
 interrupted-then-resumed rebase, **not** from the hand-carry convention, and
 `--reapply-cherry-picks` changes nothing here.
 
+### More than one target — the tooling is portable (2026-10-18)
+
+The promote/rebase/push scripts used to hardcode `feature/subtunes-as-first-class`
+and `dev/overlay`, so a checkout could drive exactly one target. They now resolve
+the (feature, overlay) pair from **`dev/overlay.conf`** — one line per target:
+`name feature-branch overlay-branch [wds-port api-port]` — via
+`dev/overlaylib.sh`. Nothing reads `HEAD` any more; the overlay branch is named
+as a ref, so one checkout can plan/promote/rebase/push any target.
+
+- **`dev/overlay.sh`** is the front end: `list`, `status`, `plan`, `promote`,
+  `rebase`/`refresh`, `push`, `dev`, `arm`, `new`. Target first or as the arg
+  (`dev/overlay.sh gba plan`); with none, the current branch's target (or the
+  manifest's first row, so plain `./dev/promote.sh` still means sub-tunes).
+- **Precedence:** explicit arg → `PROMOTE_OVERLAY` → `PROMOTE_TARGET` →
+  current branch's row → first row → the historical default pair. Naming a
+  feature branch while standing on *another* target's overlay **refuses** rather
+  than guessing which overlay was meant.
+- **The arm key stays the gate** and stays the *plain* `dev/.promote-armed`: it
+  and `dev/.pre-rebase` live in the overlay's own worktree, and two overlays are
+  two worktrees, so they are already per-target. No suffix, no shared key.
+- **`dev/kit`** (`dev/kit.sh capture` / `pull`) is the overlay-only *whole-file*
+  content in one place — `dev/**`, the engine build, the vendored-tree deletion,
+  the two engine-config files — so it is maintained once and synced onto each
+  overlay by a commit (`dev/overlay.sh <t> refresh` = kit pull + rebase). This is
+  a sync, not a merge/rebase of the tooling, so the rebase verification above is
+  untouched. **`server/index.js` and DEV regions are deliberately not in the
+  kit** — they edit feature-owned files and cannot be a shared whole-file copy.
+  Adding a target: a manifest line, then `dev/overlay-new.sh <name>` (creates
+  `feature/<name>`, `dev/overlay-<name>` and their worktrees, then pulls the kit).
+- **Two trees at once:** `dev/overlay.sh <t> dev` runs `npm run dev` with the
+  target's `WDS_PORT`/`API_PORT`. `scripts/start.js` and `server/index.js` read
+  the pair (each still falling back to `PORT`), and the client takes the API port
+  from `window.__devApiPort`, which the **dev** server injects into the HTML — so
+  a second tree needs no rebuild. The t3 preview still reaches one port, so one
+  tree is the live one at a time.
+- **Evidence:** `dev/test-overlay-tooling.sh` (20 checks, throwaway repo: kit
+  capture→pull, a second target promoted end to end, the seam not carried, the
+  vendored deletion travelling, an ambiguous retarget refused) and
+  `dev/test-dev-ports.js` (5 checks). Both are in `dev/run-tests.sh`.
+  `dev/test-promote-syntax.sh` still passes (13) — the planner's target
+  resolution was folded in without changing its strip/compile behaviour.
+
 ### Two mechanisms — how to choose
 
 - **Whole files → physical paths.** Dev/engine areas live under paths that never

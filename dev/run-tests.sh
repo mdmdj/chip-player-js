@@ -60,6 +60,9 @@ echo
 echo "== server dev seams (apply/revert on both bases) =="
 node "$DIR/test-server-seams.js"
 echo
+echo "== client dev seams (dev user, on both bases) =="
+node "$DIR/test-client-seams.js"
+echo
 echo "== overlay tooling (multi-target, kit) =="
 bash "$DIR/test-overlay-tooling.sh"
 echo

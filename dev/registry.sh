@@ -37,7 +37,9 @@ RESERVED_API="${RESERVED_API:-8080}"
 
 common="$(git -C "$ROOT" rev-parse --git-common-dir)"
 case "$common" in /*) ;; *) common="$ROOT/$common" ;; esac
-REG="$common/dev-targets"
+# OVERLAY_REGISTRY overrides the location (the same name overlaylib.sh reads, so
+# the test and the resolver agree on one file).
+REG="${OVERLAY_REGISTRY:-${REGISTRY_FILE:-$common/dev-targets}}"
 
 die() { echo "registry: $*" >&2; exit 1; }
 rows() { [ -f "$REG" ] && grep -vE '^[[:space:]]*(#|$)' "$REG" || true; }
@@ -53,7 +55,7 @@ port_live() { ss -ltn 2>/dev/null | grep -qE "[:.]$1[[:space:]]"; }
 get_row() { rows | awk -v n="$1" '$1 == n { print; exit }'; }
 
 cmd_claim() {
-  local name="${1:-}" feature="${2:-}" overlay="${3:-}" row f o wds api
+  local name="${1:-}" feature="${2:-}" overlay="${3:-}" row wds="" api=""
   [ -n "$name" ] || die "usage: registry.sh claim <name> [<feature> [<overlay>]]"
   row="$(get_row "$name")"
   if [ -n "$row" ]; then printf '%s\n' "$row"; return 0; fi

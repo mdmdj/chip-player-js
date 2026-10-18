@@ -234,8 +234,11 @@ UI, and assert on the **artefact** the user would see, not the state you set.
 - Verify with `curl` against the running server; a 200 on `/api` is not proof that
   the HTML route works.
 - Dev shims stage **untracked** modules rather than patching tracked files, so
-  `git status` stays clean. The one in-place patch is `dev/patch-server.js`
-  (reversible, and reverted by `remove.sh`).
+  `git status` stays clean. The in-place patches are `dev/patch-server.js` (the
+  server's dev seams: the auth bypass, per-target ports, the dev HTML injection)
+  and `dev/patch-client.js` (the fake dev user, because `UserProvider.js` is a
+  feature file the kit cannot carry) — both reversible, both undone by
+  `remove.sh`.
 
 ## The bar a review finding has to clear
 

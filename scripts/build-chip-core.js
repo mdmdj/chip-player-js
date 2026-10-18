@@ -450,6 +450,48 @@ const exportedFns = [
   '_malloc',
   '_free',
 ].concat(...chipModules.filter(m => m.enabled).map(m => m.exportedFunctions));
+
+/**
+ * Exports this build adds on top of upstream's engine surface, which only exist
+ * when the SOURCES in this tree define them.
+ *
+ * A worktree's engine sources come from its own branch -- a fresh feature is based
+ * on master, whose mdxmini and libvgm wrapper predate the loop-region API -- and
+ * exporting a symbol that nothing defines fails the link with a wall of wasm-ld
+ * text. So each of these is dropped unless its defining file exists here and
+ * mentions it: the build logic and the engine sources then match by construction,
+ * whatever branch the sources came from. The list is explicit rather than probed
+ * so that a symbol defined in a SIBLING archive (most of them) can never be
+ * dropped by mistake.
+ */
+const OPTIONAL_EXPORTS = [
+  ['_lvgm_get_cur_loop', 'src/bindings/libvgm-wrapper.cpp'],
+  ['_lvgm_get_loop_start_ms', 'src/bindings/libvgm-wrapper.cpp'],
+  ['_lvgm_get_loop_end_ms', 'src/bindings/libvgm-wrapper.cpp'],
+  ['_lvgm_get_fade_start_ms', 'src/bindings/libvgm-wrapper.cpp'],
+  ['_lvgm_set_loop_count', 'src/bindings/libvgm-wrapper.cpp'],
+  ['_mdx_get_loop_start_ms', 'mdxmini/src/mdxmini.c'],
+  ['_mdx_get_loop_length_ms', 'mdxmini/src/mdxmini.c'],
+];
+const omittedExports = [];
+for (const [sym, file] of OPTIONAL_EXPORTS) {
+  const i = exportedFns.indexOf(sym);
+  if (i === -1) continue; // this build does not list it anyway
+  let defined = false;
+  try {
+    defined = fs.readFileSync(path.join(__dirname, '..', file), 'utf8').includes(sym.slice(1));
+  } catch (e) { /* file absent: not defined here */ }
+  if (!defined) {
+    exportedFns.splice(i, 1);
+    omittedExports.push(sym);
+  }
+}
+if (omittedExports.length) {
+  console.log(
+    `Note: not exporting ${omittedExports.join(', ')} -- this tree's sources do ` +
+      `not define them (the branch it was based on predates them).`
+  );
+}
 const sourceFiles = [].concat(...chipModules.filter(m => m.enabled).map(m => m.sourceFiles));
 const moduleFlags = [].concat(...chipModules.filter(m => m.enabled).map(m => m.flags));
 

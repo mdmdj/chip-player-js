@@ -27,8 +27,11 @@
 #     fresh worktree gets the clean template. Improve the template by editing it
 #     on dev/kit, or publish one file explicitly:
 #         ./dev/kit.sh capture <src> AGENTS.md
-#   * KIT_NEVER (dev/features) -- per-feature notes. Never captured, so one
-#     feature's notes cannot ride along into every other feature's worktree.
+#   * KIT_NEVER -- paths the kit must not carry: per-feature notes
+#     (dev/features), and files whose content must match the branch's own sources
+#     (scripts/build-chip-core.js, whose export list is coupled to the engine
+#     sources). Upstream's script is sibling-path based, so the layout the kit
+#     supplies (dev/engines.sh) is all a master-based worktree needs.
 #
 # Usage:
 #   ./dev/kit.sh capture [<path>...]   # build/update dev/kit; paths publish just those
@@ -52,12 +55,21 @@ source "$DIR/overlaylib.sh"
 
 KIT_BRANCH="${KIT_BRANCH:-dev/kit}"
 KIT_BASE="${KIT_BASE:-master}"
-# Paths that are NEVER a shared whole-file copy.
-#   KIT_EXCLUDE -- the seam file (its dev delta cannot be a whole-file copy).
-#   KIT_NEVER   -- per-feature notes: they must not become kit baggage carried
-#                  into every other feature's worktree.
+# Paths the kit must NEVER carry, even though they are overlay-only (never
+# promoted). Two different reasons, one list:
+#   * dev/features     -- per-feature notes; they must not become kit baggage.
+#   * scripts/build-chip-core.js -- the build script's SOURCE LIST and export list
+#     are coupled to the engine sources. A worktree's sources come from its own
+#     branch (or its base), so its script must too: carrying ours into a
+#     master-based worktree exported seven loop-getter symbols that upstream's
+#     mdxmini/wrapper do not define, and the link failed. Upstream's script is
+#     already sibling-path based (`../libvgm/build/bin/...`), so the layout the kit
+#     provides (dev/engines.sh) is all it needs -- and then script and sources
+#     match by construction, on every branch.
+KIT_NEVER="${KIT_NEVER:-dev/features scripts/build-chip-core.js}"
+# The seam file: its dev delta is not a whole-file copy, so it is not in the kit
+# either (dev/apply.sh patches it in place instead).
 KIT_EXCLUDE="${KIT_EXCLUDE:-server/index.js}"
-KIT_NEVER="${KIT_NEVER:-dev/features}"
 # Paths the kit OWNS as a template: they live on dev/kit and are delivered to a
 # target only when the target does not already have one, and are never captured
 # back up. AGENTS.md is the shared playbook -- without this, capturing an overlay
@@ -80,17 +92,24 @@ kit_source() {
   echo "$KIT_CANONICAL"
 }
 
-# Overlay-only pathspecs, read from a ref, minus the exclusions.
+# Overlay-only pathspecs, read from a ref, minus the exclusions (KIT_EXCLUDE and
+# KIT_NEVER are never carried), optionally filtered to/away from the seeds.
 kit_paths() { # ref [--seed|--no-seed]
-  local ref="$1" mode="${2:-all}"
-  git show "$ref:dev/promote-paths.txt" 2>/dev/null \
-    | sed -e 's/#.*//' -e '/^[[:space:]]*$/d' -e 's/[[:space:]]*$//' \
-    | grep -vx -- "$KIT_EXCLUDE" \
-    | case "$mode" in
-        --no-seed) grep -vxF -- "$KIT_SEED" || true ;;
-        --seed)    grep -xF  -- "$KIT_SEED" || true ;;
-        *)         cat ;;
-      esac
+  local ref="$1" mode="${2:-all}" p raw
+  raw="$(git show "$ref:dev/promote-paths.txt" 2>/dev/null \
+    | sed -e 's/#.*//' -e '/^[[:space:]]*$/d' -e 's/[[:space:]]*$//')"
+  local -a kept=()
+  while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    case " $KIT_EXCLUDE $KIT_NEVER " in *" $p "*) continue ;; esac
+    kept+=("$p")
+  done <<< "$raw"
+  [ ${#kept[@]} -gt 0 ] || return 0
+  printf '%s\n' "${kept[@]}" | case "$mode" in
+    --no-seed) grep -vxF -- "$KIT_SEED" || true ;;
+    --seed)    grep -xF  -- "$KIT_SEED" || true ;;
+    *)         cat ;;
+  esac
 }
 
 # The bare path for a pathspec (`libvgm/**` -> libvgm).
@@ -145,12 +164,15 @@ cmd_capture() { # [<path>...] -- naming paths publishes just those (from the sou
   [ ${#paths[@]} -gt 0 ] || die "no paths to capture"
 
   populate_from "$src" "$wt" "${paths[@]}" >/dev/null
-  # Per-feature notes are not template material: drop them from the kit whatever
-  # the source had, so they cannot ride along into every other feature. `-f`
+  # Files the kit must never carry: drop them whatever the source had, so they
+  # cannot ride along -- and so a path that used to be carried gets pruned. `-f`
   # because populate_from staged them (git rm refuses a staged file otherwise).
-  if [ -e "$wt/$(kit_bare "$KIT_NEVER")" ]; then
-    git -C "$wt" rm -r -q -f --ignore-unmatch -- "$(kit_bare "$KIT_NEVER")"
-  fi
+  local nev
+  for nev in $KIT_NEVER; do
+    if [ -e "$wt/$nev" ]; then
+      git -C "$wt" rm -r -q -f --ignore-unmatch -- "$nev"
+    fi
+  done
   git -C "$wt" add -A -- .
   if git -C "$wt" diff --cached --quiet; then
     echo "kit: $KIT_BRANCH already current with $src"
@@ -211,8 +233,8 @@ cmd_list() {
   kit_paths "$(kit_exists && echo "$KIT_BRANCH" || echo "$src")" --no-seed | sed 's/^/  /'
   echo "seeded (delivered only to a target that has none, never captured up):"
   kit_paths "$(kit_exists && echo "$KIT_BRANCH" || echo "$src")" --seed | sed 's/^/  /'
-  echo "never captured (per-feature notes live on their own overlay):"
-  echo "  $KIT_NEVER/**"
+  echo "never captured (not template material):"
+  local nev; for nev in $KIT_NEVER; do echo "  $nev"; done
 }
 
 case "${1:-}" in

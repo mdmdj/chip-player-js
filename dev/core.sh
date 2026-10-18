@@ -10,14 +10,20 @@
 #   * a fresh feature is better served by a core built from master, so it behaves
 #     like upstream rather than picking up unmerged engine behaviour.
 #
-#   dev/core.sh list                      # which worktrees have a core, and from what
-#   dev/core.sh use [<ref>] [<worktree>]  # copy in the core built from <ref> (default master)
+#   dev/core.sh list                      # which worktrees have a core, and what it was built from
+#   dev/core.sh use [<ref>] [<worktree>]  # copy in that core (default: this tree's HEAD; a ref or a commit)
 #   dev/core.sh steal <from> [<worktree>] # same, naming a worktree/target instead of a ref
 #   dev/core.sh build [<worktree>]        # build one FROM THAT worktree's sources
 #
 # `use`/`steal` only copy `src/chip-core.{js,wasm,buildinfo.json}` -- they never
-# build. If no worktree has a core from <ref>, it fails and lists what does exist,
-# so the caller can fall back knowingly instead of silently getting the wrong core.
+# build -- and they record the source in the copied build-info, so a later reader
+# (or agent) can see which sources the core in front of them came from. If no
+# worktree has a core from <ref>, it fails and lists what does exist, so the caller
+# can fall back knowingly instead of silently getting the wrong core.
+#
+# `bringup` sets its own policy: CORE_REF (default master), so a fresh feature
+# behaves like upstream while a feature extending unmerged engine work names that
+# branch.
 set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -26,7 +32,8 @@ ROOT="$(cd "$DIR/.." && pwd)"
 source "$DIR/overlaylib.sh"
 
 ARTIFACTS='src/chip-core.js src/chip-core.wasm src/chip-core.wasm.buildinfo.json'
-DEFAULT_REF="${CORE_REF:-master}"
+# `use` with no argument means "the core for the sources this tree has".
+DEFAULT_REF="${CORE_REF:-HEAD}"
 die() { echo "core: $*" >&2; exit 1; }
 
 worktrees() { git -C "$ROOT" worktree list --porcelain | awk '$1 == "worktree" { print $2 }'; }
@@ -53,34 +60,80 @@ resolve_target() { # [<arg>] -> worktree
 }
 
 cmd_list() {
-  printf '%-58s %-34s %s\n' WORKTREE BRANCH CORE
+  printf '%-58s %-30s %-18s %s\n' WORKTREE BRANCH CORE 'BUILT FROM'
   local wt
   while IFS= read -r wt; do
-    printf '%-58s %-34s %s\n' "$wt" "$(branch_of "$wt")" \
-      "$(has_core "$wt" && echo 'src/chip-core.wasm' || echo -)"
+    printf '%-58s %-30s %-18s %s\n' "$wt" "$(branch_of "$wt")" \
+      "$(has_core "$wt" && echo 'src/chip-core.wasm' || echo -)" \
+      "$(has_core "$wt" && core_origin "$wt" || echo -)"
   done < <(worktrees)
   echo
-  echo "a core is a build of the ENGINE SOURCES: pick the one whose sources match the branch."
+  echo "a core is a build of the ENGINE SOURCES. 'BUILT FROM' is what the core records"
+  echo "about where it came from; pick the one whose sources match your branch."
 }
 
-copy_from() { # src-wt dst-wt -> prints what it copied
+copy_from() { # src-wt dst-wt -> copies the artifacts and RECORDS where they came from
   local src="$1" dst="$2" f
   for f in $ARTIFACTS; do
     [ -f "$src/$f" ] || continue
     mkdir -p "$dst/$(dirname "$f")"
     cp -f "$src/$f" "$dst/$f"
   done
-  echo "core: $dst now uses the core from $src ($(branch_of "$src"))"
+  # Record the source in the core's own build-info, so the state is discoverable
+  # later: "which core is this, and what was it built from" is the question an agent
+  # (or you, next week) asks, and a branch name alone would not answer it for a core
+  # built from another branch's sources.
+  local ref commit
+  ref="$(branch_of "$src")"
+  commit="$(git -C "$src" rev-parse --short HEAD 2>/dev/null || echo '?')"
+  if [ -f "$dst/src/chip-core.wasm.buildinfo.json" ]; then
+    node -e '
+      const fs = require("fs");
+      const [file, from, ref, commit] = process.argv.slice(1);
+      let j = {};
+      try { j = JSON.parse(fs.readFileSync(file, "utf8")); } catch (e) {}
+      j.coreSource = { copiedFrom: from, ref, commit, copiedAt: new Date().toISOString() };
+      fs.writeFileSync(file, JSON.stringify(j, null, 2));
+    ' "$dst/src/chip-core.wasm.buildinfo.json" "$src" "$ref" "$commit" 2>/dev/null || true
+  fi
+  echo "core: $dst now uses the core from $src (branch $ref $commit)"
+}
+
+# What a worktree's core says it was built from (recorded by copy_from) or that it
+# was built in place.
+core_origin() { # wt
+  local f="$1/src/chip-core.wasm.buildinfo.json"
+  [ -f "$f" ] || { echo '-'; return; }
+  node -e '
+    const fs = require("fs");
+    try {
+      const j = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+      process.stdout.write(j.coreSource ? `${j.coreSource.ref}@${j.coreSource.commit}` : "built here");
+    } catch (e) { process.stdout.write("built here"); }
+  ' "$f" 2>/dev/null || echo built here
 }
 
 cmd_use() { # [<ref>] [<worktree>]
-  local ref="${1:-$DEFAULT_REF}" dst; dst="$(resolve_target "${2:-}")"
+  local ref="${1:-}" dst; dst="$(resolve_target "${2:-}")"
+  # Default: the ref this tree's sources are at -- a branch name, or a commit sha
+  # (the same either way: wt_matches resolves the ref to a commit).
+  if [ -z "$ref" ]; then
+    ref="$(git -C "$dst" rev-parse -q --verify HEAD 2>/dev/null || true)"
+    [ -n "$ref" ] || ref="$DEFAULT_REF"
+  fi
+
   local wt found=""
   while IFS= read -r wt; do
     [ "$wt" = "$dst" ] && continue
     if has_core "$wt" && wt_matches "$wt" "$ref"; then found="$wt"; break; fi
   done < <(worktrees)
+
   if [ -z "$found" ]; then
+    # It may already have what it needs: say so instead of failing.
+    if has_core "$dst"; then
+      echo "core: $dst already has a core (built from $(core_origin "$dst")); nothing to copy"
+      return 0
+    fi
     local have=""
     while IFS= read -r wt; do has_core "$wt" && have="$have $(branch_of "$wt")"; done < <(worktrees)
     die "no worktree has a core built from '$ref'.

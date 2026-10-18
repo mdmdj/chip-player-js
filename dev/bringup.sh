@@ -85,13 +85,31 @@ echo "bringup: registered $name -> $feature / $overlay on WDS $wds / API $api"
 
 # 5. Engines and modules.
 bash "$DIR/engines.sh" link "$ov_wt"
-for m in node_modules server/node_modules; do
-  [ -e "$ov_wt/$m" ] && continue
-  [ -d "$main_wt/$m" ] || { echo "bringup: $main_wt/$m missing; will need a real install" >&2; continue; }
-  mkdir -p "$ov_wt/$(dirname "$m")"
-  cp -al "$main_wt/$m" "$ov_wt/$m" 2>/dev/null || ln -s "$main_wt/$m" "$ov_wt/$m"
-  echo "bringup: $m <- hardlinked from the main checkout"
-done
+
+# node_modules: hardlink-clone from the main checkout (~1.5s) instead of two npm
+# installs. Cross-device (e.g. a worktree on tmpfs) cannot hardlink, so fall back
+# to a symlink -- and never leave a partial copy behind: `cp -al` creates the
+# destination directories before it fails on the first cross-device file, and a
+# half-copied node_modules resolves some modules and not others.
+link_modules() { # relpath
+  local src="$main_wt/$1" dst="$ov_wt/$1"
+  [ -e "$dst" ] && { echo "bringup: $1 already present"; return 0; }
+  if [ -d "$src" ]; then
+    mkdir -p "$(dirname "$dst")"
+    if cp -al "$src" "$dst" 2>/dev/null; then
+      echo "bringup: $1 <- hardlinked from the main checkout"
+      return 0
+    fi
+    rm -rf "$dst"
+    if ln -s "$src" "$dst" 2>/dev/null; then
+      echo "bringup: $1 <- symlinked to the main checkout (cross-device: no hardlinks)"
+      return 0
+    fi
+  fi
+  echo "bringup: $1 not linked; run 'npm install' in $ov_wt (or in $ov_wt/server)" >&2
+}
+link_modules node_modules
+link_modules server/node_modules
 
 # 6. Shims, DBs, catalog (log kept out of the worktree so git stays clean).
 log="$(dirname "$ov_wt")/.bringup-$name.log"

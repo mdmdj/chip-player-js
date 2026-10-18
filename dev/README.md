@@ -22,6 +22,21 @@ directly (it is ABI-matched to `better-sqlite3`):
 
 ## Usage
 
+**Starting a new target** — a new feature branch, or a worktree created from
+`dev/kit` — is one command. It creates the branches and worktrees, claims a port
+pair from the shared registry, links the engine clones, hardlinks `node_modules`,
+runs `dev/apply.sh` and copies in a real chip-core (~20s):
+
+```sh
+./dev/overlay.sh <name> bringup
+./dev/overlay.sh <name> dev        # run it, on the registry's ports
+```
+
+`dev/overlay.sh` with no arguments lists every command. See "Spinning up a new
+target" below for what bring-up does and the port policy.
+
+For the long-lived `dev/overlay` itself the original two steps still apply:
+
 ```sh
 ./dev/apply.sh   # install shims, seed databases, build a tiny catalog
 npm run dev      # webpack dev server (:3000) + API server (:8080)
@@ -251,14 +266,17 @@ Dev-only harnesses (plain Node + `assert`, no framework and no new deps). They
 are removed with the rest of `dev/` before the PR.
 
 ```sh
-node dev/test-parsers.js    # parser edge cases + real files under catalog/
-node dev/test-build.js      # build-music round-trip (synthetic subdir, cleans up)
-node dev/test-sequencer.js  # sequencer sub-tune navigation with a fake player
-node dev/test-midi-loops.js # MIDI loop regions (N64/HMI), Repeat-One wrap, roll parity
-node dev/test-xmp-loops.js  # XMP loop lever + learned band on scripted frame streams
-node dev/test-devtools.js   # __cpDev stall-watch state machine (frozen/paused/song-change)
-./dev/run-tests.sh          # all six
+./dev/run-tests.sh    # every harness (parser/build checks need catalog/)
 ```
+
+Plain Node + `assert`, plus a few bash harnesses — no framework, no new deps, and
+removed with the rest of `dev/` before the PR. The overlay work has its own:
+`test-overlay-tooling.sh` (kit capture/pull, a second target promoted end to
+end), `test-overlay-registry.sh` (port claiming and discovery),
+`test-server-seams.js` (the `server/index.js` dev patches, on both bases),
+`test-dev-ports.js` (per-target port wiring), `test-promote-syntax.sh` (the
+strip/compile validation), and `test-overlay-discovery.sh` (the entry points and
+the docs a new worktree needs).
 
 `test-build.js` writes a temp subdir under `catalog/`, runs the builder filtered
 to it (twice, to exercise reprocessing), asserts the `music`/`subtune` rows, and

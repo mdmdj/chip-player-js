@@ -12,6 +12,13 @@ wrong version fails with `NODE_MODULE_VERSION` mismatches. Also check whether an
 `npm run dev` is already up before assuming the environment is correct — a
 long-running server may have been started under a different Node than the shell.
 
+**In a worktree created from `dev/kit`** the first command is
+`./dev/overlay.sh <name> bringup` — one command that makes the tree runnable
+(branches, worktrees, port claim, engine links, `node_modules`, `dev/apply.sh`,
+a real chip-core) in ~20s; see `dev/README.md` §"Spinning up a new target". Do
+not `npm install` by hand and do not pick ports by hand: `dev/registry.sh` owns
+the shared registry and the port policy.
+
 ### Shell and search hygiene — check this first, it keeps costing us time
 
 The shell here is **zsh**, not bash. Confirm before reaching for an idiom:

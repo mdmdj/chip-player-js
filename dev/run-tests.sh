@@ -66,6 +66,9 @@ echo
 echo "== target registry (ports, discovery) =="
 bash "$DIR/test-overlay-registry.sh"
 echo
+echo "== overlay discovery (entry points, docs, kit currency) =="
+bash "$DIR/test-overlay-discovery.sh"
+echo
 echo "== dev server ports (per-target) =="
 node "$DIR/test-dev-ports.js"
 echo

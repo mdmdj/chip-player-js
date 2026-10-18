@@ -113,7 +113,14 @@ overlay_resolve() {
   # No manifest match: the historical single-target shape -- the target is the
   # feature branch, the overlay is the branch you are on.
   if [ -n "$want" ]; then OV_FEATURE="$want"
-  else OV_FEATURE="${PROMOTE_TARGET:-feature/subtunes-as-first-class}"; fi
+  elif [ -n "${PROMOTE_TARGET:-}" ]; then OV_FEATURE="$PROMOTE_TARGET"
+  else
+    # No manifest row, no target named. Say so rather than guessing a feature
+    # branch: a silent default would point a new feature at somebody else's.
+    echo "overlay: cannot tell which target you mean." >&2
+    echo "         name one (dev/overlay.sh list), or set PROMOTE_TARGET." >&2
+    return 1
+  fi
   OV_OVERLAY="${PROMOTE_OVERLAY:-${cur:-dev/overlay}}"
   OV_NAME="$(basename "$OV_FEATURE")"
 

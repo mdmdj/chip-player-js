@@ -53,18 +53,46 @@ for f in AGENTS.md dev/README.md dev/overlay.sh dev/overlaylib.sh dev/bringup.sh
   else bad "kit carries $f (run ./dev/kit.sh capture)"; fi
 done
 
-# 5. ...and carries them CURRENT: a worktree checks out dev/kit, so a doc or tool
-#    changed on dev/overlay but not captured is invisible where it is needed --
-#    the exact way the first smoke test's worktree lacked the new bring-up script.
-mapfile -t KPATHS < <(./dev/kit.sh list | awk '/^carries/{f=1;next} f && /^  /{sub(/^ +/,"");print}')
+# 5. ...and carries them CURRENT for the paths it SYNCS. Seed paths are excluded:
+#    the kit's AGENTS.md is a template and is *meant* to differ from an overlay's.
+KLIST="$(./dev/kit.sh list)"
+mapfile -t KPATHS < <(printf '%s\n' "$KLIST" | awk '/^carries/{f=1;next} f && !/^  /{exit} f{sub(/^ +/,"");print}')
 if [ ${#KPATHS[@]} -gt 0 ]; then ok "kit path list is readable (${#KPATHS[@]} paths)"
 else bad "kit path list is readable"; fi
 DRIFT="$(git diff --name-only dev/kit dev/overlay -- "${KPATHS[@]}" 2>/dev/null || true)"
 if [ -z "$DRIFT" ]; then
-  ok "the kit matches dev/overlay for everything it carries"
+  ok "the kit matches dev/overlay for everything it syncs"
 else
   bad "the kit is stale for: $(tr '\n' ' ' <<< "$DRIFT") -- run ./dev/kit.sh capture"
 fi
+
+# 6. AGENTS.md is a SEED: the template a new worktree gets, never captured up, and
+#    never overwriting an overlay's own notes.
+SEEDED="$(printf '%s\n' "$KLIST" | awk '/^seeded/{f=1;next} f && !/^  /{exit} f{print}')"
+expect_contains "the kit reports AGENTS.md as seeded" "$SEEDED" "AGENTS.md"
+expect_contains "the kit reports dev/features as never captured" "$KLIST" "dev/features"
+TEMPLATE="$(git show dev/kit:AGENTS.md)"
+if [ "$TEMPLATE" != "$(git show dev/overlay:AGENTS.md)" ]; then
+  ok "the template differs from dev/overlay's notes (seeded, not synced)"
+else
+  bad "the template differs from dev/overlay's notes (a sync would clobber history)"
+fi
+if [ "$(wc -l <<< "$TEMPLATE")" -ge 80 ]; then ok "the template is a real playbook"
+else bad "the template is a real playbook ($(wc -l <<< "$TEMPLATE") lines)"; fi
+
+# 7. The template must be ready for a NEW feature: none of the last one's
+#    feature-specific material (its concepts, branch, PR plan, hand-offs). Format
+#    names and in-repo engine names are repo context, not baggage.
+for baggage in subtune SongRef 'Repeat One' feature/subtunes pr-body UPSTREAM_PR_PLAN '## Current state' 'Handoff (2026'; do
+  case "$TEMPLATE" in
+    *"$baggage"*) bad "the template still carries '$baggage' baggage" ;;
+    *) ok "the template has no '$baggage' baggage" ;;
+  esac
+done
+expect_contains "the template says where a feature's notes go" "$TEMPLATE" "dev/features/"
+if git cat-file -e dev/kit:dev/features 2>/dev/null; then
+  bad "the kit must not carry dev/features (per-feature notes)"
+else ok "the kit carries no dev/features"; fi
 
 echo
 echo "overlay-discovery: $pass passed, $fail failed"

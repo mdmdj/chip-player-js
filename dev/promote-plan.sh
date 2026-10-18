@@ -7,9 +7,14 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$ROOT"
-
-FEATURE="${PROMOTE_TARGET:-feature/subtunes-as-first-class}"
+# Which feature branch / overlay pair this run is for. The pair comes from
+# dev/overlay.conf (or PROMOTE_TARGET/PROMOTE_OVERLAY), never from HEAD, so one
+# checkout can drive any target. An optional first argument names it.
+# shellcheck source=dev/overlaylib.sh
+source "$ROOT/dev/overlaylib.sh"
+overlay_resolve "${1:-}"
+FEATURE="$OV_FEATURE"
+OVERLAY_BRANCH="$OV_OVERLAY"
 PATHS_FILE="dev/promote-paths.txt"
 
 # Sentinel pair marking dev-only additive regions. Stripped on promotion.
@@ -18,24 +23,24 @@ END='DEV-END'
 
 die() { echo "promote: $*" >&2; exit 1; }
 
-# 1. Clean worktree? (so the plan matches exactly what you reviewed)
+# 1. Clean worktree? (so the plan matches exactly what you reviewed). Both the
+# overlay and the feature branch are usually checked out in their own worktree
+# (both open at once), so operate on the overlay's rather than failing on a busy
+# branch.
+overlay_require_worktrees
+cd "$OV_OVERLAY_WT"
 if [ -n "$(git status --porcelain)" ]; then
-  die "dev/overlay worktree is dirty. Commit or stash, then re-run so the plan matches what you reviewed."
+  die "$OVERLAY_BRANCH worktree is dirty. Commit or stash, then re-run so the plan matches what you reviewed."
 fi
 
 git rev-parse --verify -q "$FEATURE" >/dev/null || die "branch $FEATURE not found"
-
-# The feature branch is usually checked out in a sibling worktree (both open at
-# once). Operate there rather than failing on a busy branch.
-FEATURE_WT="$(git worktree list --porcelain | awk -v b="refs/heads/$FEATURE" '
-  $1=="worktree" { wt=$2 } $1=="branch" && $2==b { print wt }')"
-[ -n "$FEATURE_WT" ] || die "$FEATURE is not checked out in any worktree."
+FEATURE_WT="$OV_FEATURE_WT"
 
 # 2. Candidate files: differ from feature, minus the overlay-only areas.
 mapfile -t OVERLAY < <(sed -e 's/#.*//' -e '/^[[:space:]]*$/d' "$PATHS_FILE")
 pathspec_exclusions=()
 for p in "${OVERLAY[@]}"; do pathspec_exclusions+=(":(exclude)$p"); done
-mapfile -t CANDIDATES < <(git diff --name-only "$FEATURE"...HEAD -- . "${pathspec_exclusions[@]}" 2>/dev/null | sort -u)
+mapfile -t CANDIDATES < <(git diff --name-only "$FEATURE...$OVERLAY_BRANCH" -- . "${pathspec_exclusions[@]}" 2>/dev/null | sort -u)
 
 # A sentinel only counts when it is the first WORD on the line, behind nothing
 # but whitespace and comment punctuation. Matching the bare substring meant a
@@ -161,19 +166,19 @@ for f in "${CANDIDATES[@]}"; do
   [ -e "$f" ] || continue
   # Balanced sentinel check, using the same anchoring as the strip itself --
   # counting raw substring hits here flagged prose as an unbalanced region.
-  nb="$(git show "HEAD:$f" | awk -v re="$SENTINEL_RE" -v s="$BEGIN" \
+  nb="$(git show "$OVERLAY_BRANCH:$f" | awk -v re="$SENTINEL_RE" -v s="$BEGIN" \
         '$0 ~ re && $0 ~ s { c++ } END { print c+0 }')"
-  ne="$(git show "HEAD:$f" | awk -v re="$SENTINEL_RE" -v s="$END" \
+  ne="$(git show "$OVERLAY_BRANCH:$f" | awk -v re="$SENTINEL_RE" -v s="$END" \
         '$0 ~ re && $0 ~ s { c++ } END { print c+0 }')"
   if [ "$nb" != "$ne" ]; then
     unbalanced+=("$f")
     continue
   fi
   # Promote if stripping regions leaves a difference from the feature branch.
-  if git show "HEAD:$f" | strip_regions | diff -q - <(git show "$FEATURE:$f" 2>/dev/null) >/dev/null 2>&1; then
+  if git show "$OVERLAY_BRANCH:$f" | strip_regions | diff -q - <(git show "$FEATURE:$f" 2>/dev/null) >/dev/null 2>&1; then
     continue  # nothing but dev regions differ
   fi
-  git show "HEAD:$f" | strip_regions > "$TMPDIR_P/$(basename "$f")"
+  git show "$OVERLAY_BRANCH:$f" | strip_regions > "$TMPDIR_P/$(basename "$f")"
   if ! check_syntax "$f" "$TMPDIR_P/$(basename "$f")"; then
     unsound+=("$f")
     continue
@@ -181,7 +186,7 @@ for f in "${CANDIDATES[@]}"; do
   plan+=("$f")
 done
 
-echo "promote: target $FEATURE"
+echo "promote: $FEATURE <- $OVERLAY_BRANCH ($OV_NAME)"
 echo
 if [ ${#plan[@]} -eq 0 ]; then
   echo "Nothing to promote (feature branch is up to date)."

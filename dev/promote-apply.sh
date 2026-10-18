@@ -23,7 +23,14 @@ set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$DIR/.." && pwd)"
-ARMED="$ROOT/dev/.promote-armed"
+
+# Which target this run is for (dev/overlaylib.sh). The arm key lives in the
+# overlay's own worktree, so two overlays cannot arm each other.
+# shellcheck source=dev/overlaylib.sh
+source "$DIR/overlaylib.sh"
+overlay_resolve "${1:-}"
+overlay_require_worktrees
+ARMED="$OV_OVERLAY_WT/dev/.promote-armed"
 
 die() { echo "promote-apply: $*" >&2; exit 1; }
 
@@ -31,7 +38,7 @@ if [ ! -e "$ARMED" ]; then
   die "not armed. Promotion writes commits to the reviewable PR branch, so it
        has to be asked for:
 
-         touch dev/.promote-armed
+         touch ${ARMED#"$ROOT"/}
          ./dev/promote-apply.sh
 
        To look at the plan first: ./dev/promote.sh"
@@ -51,7 +58,7 @@ if [ -n "$(git -C "$FEATURE_WT" status --porcelain)" ]; then
 fi
 for f in "${plan[@]}"; do
   mkdir -p "$FEATURE_WT/$(dirname "$f")"
-  git show "HEAD:$f" | strip_regions > "$FEATURE_WT/$f"
+  git show "$OVERLAY_BRANCH:$f" | strip_regions > "$FEATURE_WT/$f"
 done
 if git -C "$FEATURE_WT" diff --quiet; then
   rm -f "$ARMED"
@@ -59,14 +66,14 @@ if git -C "$FEATURE_WT" diff --quiet; then
   exit 0
 fi
 git -C "$FEATURE_WT" add -A
-git -C "$FEATURE_WT" commit -q -m "Promote feature work from dev/overlay"
+git -C "$FEATURE_WT" commit -q -m "Promote feature work from $OVERLAY_BRANCH"
 echo "promote-apply: committed on $FEATURE: $(git -C "$FEATURE_WT" rev-parse --short HEAD)"
 rm -f "$ARMED"
 
-# Mechanical tail: put dev/overlay back on top (rebase.sh verifies the tree), then
-# publish. A failing rebase stops here before the push (set -e above).
+# Mechanical tail: put the overlay back on top (rebase.sh verifies the tree),
+# then publish. A failing rebase stops here before the push (set -e above).
 echo
-"$DIR/rebase.sh"
+"$DIR/rebase.sh" ${1:+"$1"}
 
 if [ "${PROMOTE_SKIP_PUSH:-0}" = "1" ]; then
   echo
@@ -79,4 +86,4 @@ echo
 echo "promote-apply: publishing $FEATURE to origin..."
 git -C "$FEATURE_WT" push origin "$FEATURE"
 echo
-"$DIR/push-overlay.sh"
+"$DIR/push-overlay.sh" ${1:+"$1"}

@@ -144,12 +144,11 @@ if [ "${NO_REAL_CORE:-0}" != 1 ]; then
   #   CORE_REF=dev/overlay ./dev/bringup.sh <name>
   if bash "$DIR/core.sh" use "${CORE_REF:-master}" "$ov_wt" >/dev/null 2>&1; then
     echo "bringup: chip-core from ${CORE_REF:-master}"
-  else
-    for f in src/chip-core.js src/chip-core.wasm src/chip-core.wasm.buildinfo.json; do
-      [ -f "$main_wt/$f" ] && cp -f "$main_wt/$f" "$ov_wt/$f"
-    done
+  elif bash "$DIR/core.sh" from "$main_wt" "$ov_wt" >/dev/null 2>&1; then
     echo "bringup: nothing has a core from ${CORE_REF:-master}; copied the main checkout's" >&2
-    echo "         (that one is built from ITS branch's sources -- see dev/core.sh list)" >&2
+    echo "         (built from ITS branch's sources -- see dev/core.sh list for what each core is)" >&2
+  else
+    echo "bringup: no core available; this tree will run on the silent stub" >&2
   fi
 fi
 

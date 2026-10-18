@@ -25,7 +25,7 @@ const HAND_CARRIED = ['server/index.js', 'scripts/build-chip-core.js'];
 const FORBIDDEN = [
   [/\bAGENTS\.md\b/, 'the overlay-only notes'],
   [/promote-paths/, 'the promotion tooling'],
-  [/dev\/(record|shims|mdx-native|mdx-corpus|apply\.sh|remove\.sh|rebase\.sh|promote|push-overlay|run-tests|test-[a-z-]+\.js)/,
+  [/dev\/(record|shims|mdx-native|mdx-corpus|apply\.sh|remove\.sh|rebase\.sh|promote|push-overlay|run-tests|overlay|kit|test-[a-z-]+\.js)/,
     'a dev tool'],
   [/catalog\/nes-audio-tests/, 'a dev fixture'],
   [/\b(EXES04|FACE04|popm2[15]|DAR2_4|G2MST6|MTS2_32|DTWNB18|SIDE11C|CTTY|SPD35|KNA14_EX|utabi46b|SEIYA_N|WBALL0_EX)\b/,

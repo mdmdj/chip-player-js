@@ -28,7 +28,14 @@ source "$DIR/promote-plan.sh"
 
 [ ${#plan[@]} -eq 0 ] && exit 0
 
-echo
-echo "To promote, arm the writer and run it (you have to want this):"
-echo "  touch dev/.promote-armed"
-echo "  ./dev/promote-apply.sh"
+if [ "$OV_OVERLAY_WT" = "$ROOT" ]; then
+  echo
+  echo "To promote, arm the writer and run it (you have to want this):"
+  echo "  touch dev/.promote-armed"
+  echo "  ./dev/promote-apply.sh${1:+ $1}"
+else
+  echo
+  echo "To promote, arm the writer and run it (in $OV_OVERLAY_WT):"
+  echo "  touch dev/.promote-armed"
+  echo "  ./dev/promote-apply.sh"
+fi

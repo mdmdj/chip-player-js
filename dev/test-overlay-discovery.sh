@@ -93,13 +93,14 @@ expect_contains "the template says where a feature's notes go" "$TEMPLATE" "dev/
 if git cat-file -e dev/kit:dev/features 2>/dev/null; then
   bad "the kit must not carry dev/features (per-feature notes)"
 else ok "the kit carries no dev/features"; fi
-# The build script's source/export list is coupled to the engine sources, so the
-# kit must NOT carry it: a worktree uses the one from its own branch (upstream's
-# uses sibling paths, which the kit's engine farm provides), and script and
-# sources then match by construction.
-if git cat-file -e dev/kit:scripts/build-chip-core.js 2>/dev/null; then
-  bad "the kit must not carry scripts/build-chip-core.js (it belongs to the sources)"
-else ok "the kit does not carry scripts/build-chip-core.js"; fi
+# The build script's export list is coupled to the engine sources a tree actually
+# has, and the kit carries one script for every base -- so the script must adapt
+# (drop an export the sources do not define) rather than be swapped per branch.
+if git show dev/kit:scripts/build-chip-core.js 2>/dev/null | grep -q 'OPTIONAL_EXPORTS'; then
+  ok "the kit's build script adapts its exports to the tree's sources"
+else
+  bad "the kit's build script adapts its exports to the tree's sources"
+fi
 AGENTS_KIT="$(git show dev/kit:AGENTS.md)"
 case "$AGENTS_KIT" in
   *"sibling"*' '*"in-repo"*) ok "the template explains the two engine sources" ;;

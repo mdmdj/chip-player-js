@@ -31,12 +31,17 @@
 #     feature's notes cannot ride along into every other feature's worktree.
 #
 # Usage:
-#   ./dev/kit.sh capture [<src>] [<path>...]   # build/update dev/kit (paths: publish just those)
-#   ./dev/kit.sh pull <target>                 # write dev/kit onto the target's overlay
-#   ./dev/kit.sh list                          # what the kit carries, seeds, never carries
+#   ./dev/kit.sh capture [<path>...]   # build/update dev/kit; paths publish just those
+#   ./dev/kit.sh pull <target>         # write dev/kit onto the target's overlay
+#   ./dev/kit.sh list                  # what the kit carries, seeds, never carries
 #
-# <src> defaults to the resolved target's overlay; KIT_BASE is the branch capture
-# bases a fresh dev/kit on (default master). Nothing is pushed.
+# capture publishes from KIT_SOURCE, or from the canonical overlay (KIT_CANONICAL,
+# default dev/overlay) -- NOT from whatever branch you are on, so standing in a
+# feature overlay cannot publish that feature's kit-path edits as the template.
+# Naming paths (AGENTS.md) overrides the seed rule and publishes those alone.
+# pull writes onto a target's overlay worktree and commits only what it changed.
+# KIT_BASE is the branch a fresh dev/kit is based on (default master). Nothing is
+# pushed.
 set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -63,11 +68,16 @@ KIT_SEED="${KIT_SEED:-AGENTS.md}"
 die() { echo "kit: $*" >&2; exit 1; }
 kit_exists() { git -C "$ROOT" show-ref --verify --quiet "refs/heads/$KIT_BRANCH"; }
 
-# The overlay to capture from.
+# The overlay to capture from. Defaults to the CANONICAL overlay, not whatever
+# branch you happen to be on: capture publishes a template, and a feature overlay's
+# kit-path edits (a rebuild script, a build flag) are that feature's, not
+# everyone's -- publishing them by standing in the wrong directory is exactly how
+# one feature's baggage becomes the next feature's starting point. Publish from
+# another overlay on purpose with KIT_SOURCE=<overlay>.
+KIT_CANONICAL="${KIT_CANONICAL:-dev/overlay}"
 kit_source() {
   if [ -n "${KIT_SOURCE:-}" ]; then echo "$KIT_SOURCE"; return; fi
-  overlay_resolve ""
-  echo "$OV_OVERLAY"
+  echo "$KIT_CANONICAL"
 }
 
 # Overlay-only pathspecs, read from a ref, minus the exclusions.
@@ -105,19 +115,30 @@ populate_from() { # src dest path...
   done
 }
 
-cmd_capture() { # [<src>] [<path>...] -- naming paths publishes just those
+cmd_capture() { # [<path>...] -- naming paths publishes just those (from the source)
   local src wt; src="$(kit_source)"
   git -C "$ROOT" rev-parse --verify -q "$src" >/dev/null || die "source overlay $src not found"
   kit_exists || git -C "$ROOT" branch "$KIT_BRANCH" "$KIT_BASE"
   wt="$(mktemp -d)"; rmdir "$wt"
   git -C "$ROOT" worktree add -q "$wt" "$KIT_BRANCH"
+  # EXIT, not RETURN: `set -e` makes any failure below exit the script outright, and
+  # a RETURN trap would not fire -- leaving the temp worktree registered and
+  # `$KIT_BRANCH` "already used by worktree", which blocks every later kit command.
   # shellcheck disable=SC2064
-  trap "git -C '$ROOT' worktree remove --force '$wt' >/dev/null 2>&1 || true" RETURN
+  trap "git -C '$ROOT' worktree remove --force '$wt' >/dev/null 2>&1 || true" EXIT
 
-  # Explicit paths are an override: publish exactly those, seeds included.
+  # Explicit paths are an override: publish exactly those, seeds included. A path
+  # that is actually a branch name is a mistake worth stopping for -- silently
+  # treating it as a path is how `capture <overlay> <file>` published the wrong
+  # source.
   local -a paths=()
   if [ "$#" -gt 0 ]; then
-    while IFS= read -r p; do [ -n "$p" ] && paths+=("$p"); done < <(printf '%s\n' "$@")
+    local p
+    for p in "$@"; do
+      git -C "$ROOT" rev-parse --verify -q "$p" >/dev/null 2>&1 \
+        && die "'$p' is a branch, not a path. The source is $KIT_CANONICAL; use KIT_SOURCE=$p $0 capture <path>"
+      paths+=("$p")
+    done
   else
     while IFS= read -r p; do [ -n "$p" ] && paths+=("$p"); done < <(kit_paths "$src" --no-seed)
   fi
@@ -125,9 +146,10 @@ cmd_capture() { # [<src>] [<path>...] -- naming paths publishes just those
 
   populate_from "$src" "$wt" "${paths[@]}" >/dev/null
   # Per-feature notes are not template material: drop them from the kit whatever
-  # the source had, so they cannot ride along into every other feature.
+  # the source had, so they cannot ride along into every other feature. `-f`
+  # because populate_from staged them (git rm refuses a staged file otherwise).
   if [ -e "$wt/$(kit_bare "$KIT_NEVER")" ]; then
-    git -C "$wt" rm -r -q --ignore-unmatch -- "$(kit_bare "$KIT_NEVER")"
+    git -C "$wt" rm -r -q -f --ignore-unmatch -- "$(kit_bare "$KIT_NEVER")"
   fi
   git -C "$wt" add -A -- .
   if git -C "$wt" diff --cached --quiet; then

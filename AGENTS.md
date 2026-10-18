@@ -187,11 +187,20 @@ first promotes. When a promote removes such a symbol, edit both in the same cycl
 
 ### Building the real chip-core
 
-Engines are **siblings of the checkout** (`../libvgm`, `../libxmp`, `../FluidLite`,
-`../game-music-emu`, `../libgsf`, `../libsidplayfp`); a worktree created by t3 has
-none, so `dev/engines.sh link` symlinks them into the worktree's parent (one farm
-serves every t3 worktree of the repo) and reuses the archives already built inside
-the clones.
+**`dev/engines.sh check` is the answer to "which libraries does the build use, and
+from where."** Two sources and nothing else:
+
+- **siblings** (`game-music-emu`, `libxmp`, `libvgm`, `FluidLite`, `libgsf`,
+  `libsidplayfp`): clones beside the checkout. A worktree created by t3 has none,
+  so `dev/engines.sh link` symlinks them into this worktree's **parent** — every
+  t3 worktree of a repo shares one parent, so one farm serves them all, and the
+  archives already built inside the clones are reused.
+- **in-repo** (`libADLMIDI`, `psflib`, `lazyusf2`; `mdxmini` and `farbrausch-v2m`
+  compile from source with no archive): their sources travel in git, their
+  archives are gitignored, so `link` symlinks the archive from the main checkout.
+
+Anything else is a **decoy**: an in-tree directory carrying a sibling's name is
+not the build's source, and `check` flags one.
 
 ```sh
 ./scripts/build-subprojects.sh      # sibling clones + the in-repo engines

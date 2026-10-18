@@ -69,12 +69,13 @@ if ! grep -q '^DEV_AUTH_MODULE=' server/.env.local; then
   echo "[dev]   added DEV_AUTH_MODULE to server/.env.local"
 fi
 
-# 8. Sample catalog (gitignored) + catalog db
+# 8. Sample catalog (gitignored) + catalog db. The canonical sample is
+# dev/sample.manifest -- one file per engine family plus the harness fixtures --
+# and dev/sample.sh places each by symlink/hardlink/copy and indexes it. A worktree
+# gets that, never some other branch's collection.
 mkdir -p catalog
-# game-music-emu is a sibling clone (README), not vendored in-repo.
-if [ -f ../game-music-emu/test.nsf ] && [ ! -f catalog/test.nsf ]; then
-  cp ../game-music-emu/test.nsf catalog/test.nsf
-  echo "[dev]   copied ../game-music-emu/test.nsf into catalog/"
+if ! bash dev/sample.sh seed; then
+  echo "[dev]   WARNING: sample seeding failed; catalog/ may be incomplete."
 fi
 if [ ! -f server/catalog.db ]; then
   echo "[dev]   building server/catalog.db..."

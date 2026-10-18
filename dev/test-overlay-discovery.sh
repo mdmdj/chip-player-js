@@ -93,6 +93,18 @@ expect_contains "the template says where a feature's notes go" "$TEMPLATE" "dev/
 if git cat-file -e dev/kit:dev/features 2>/dev/null; then
   bad "the kit must not carry dev/features (per-feature notes)"
 else ok "the kit carries no dev/features"; fi
+# The build script's source/export list is coupled to the engine sources, so the
+# kit must NOT carry it: a worktree uses the one from its own branch (upstream's
+# uses sibling paths, which the kit's engine farm provides), and script and
+# sources then match by construction.
+if git cat-file -e dev/kit:scripts/build-chip-core.js 2>/dev/null; then
+  bad "the kit must not carry scripts/build-chip-core.js (it belongs to the sources)"
+else ok "the kit does not carry scripts/build-chip-core.js"; fi
+AGENTS_KIT="$(git show dev/kit:AGENTS.md)"
+case "$AGENTS_KIT" in
+  *"sibling"*' '*"in-repo"*) ok "the template explains the two engine sources" ;;
+  *) bad "the template explains the two engine sources" ;;
+esac
 
 # 8. Two dev-environment invariants that cost real debugging (2026-10-18):
 #    * a worktree on another filesystem gets a SYMLINKED node_modules, and

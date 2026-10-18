@@ -55,18 +55,11 @@ source "$DIR/overlaylib.sh"
 
 KIT_BRANCH="${KIT_BRANCH:-dev/kit}"
 KIT_BASE="${KIT_BASE:-master}"
-# Paths the kit must NEVER carry, even though they are overlay-only (never
-# promoted). Two different reasons, one list:
-#   * dev/features     -- per-feature notes; they must not become kit baggage.
-#   * scripts/build-chip-core.js -- the build script's SOURCE LIST and export list
-#     are coupled to the engine sources. A worktree's sources come from its own
-#     branch (or its base), so its script must too: carrying ours into a
-#     master-based worktree exported seven loop-getter symbols that upstream's
-#     mdxmini/wrapper do not define, and the link failed. Upstream's script is
-#     already sibling-path based (`../libvgm/build/bin/...`), so the layout the kit
-#     provides (dev/engines.sh) is all it needs -- and then script and sources
-#     match by construction, on every branch.
-KIT_NEVER="${KIT_NEVER:-dev/features scripts/build-chip-core.js}"
+# Paths the kit must NEVER carry: per-feature notes, which must not become kit
+# baggage carried into every other feature's worktree. (The build script's
+# source-coupled parts are handled in the script itself: its export list drops a
+# symbol the tree's engine sources do not define, so one script serves any base.)
+KIT_NEVER="${KIT_NEVER:-dev/features}"
 # The seam file: its dev delta is not a whole-file copy, so it is not in the kit
 # either (dev/apply.sh patches it in place instead).
 KIT_EXCLUDE="${KIT_EXCLUDE:-server/index.js}"

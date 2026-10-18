@@ -72,10 +72,13 @@ const {
   NODE_ENV,
 } = process.env;
 const hostname = '0.0.0.0';
-const port = process.env.PORT || 8080;
+// API_PORT is this server; WDS_PORT is the webpack dev server it proxies to.
+// PORT is read as a fallback for each so existing invocations are unchanged.
+// The dev tooling sets the pair per target so two dev trees can run at once.
+const port = parseInt(process.env.API_PORT ?? process.env.PORT, 10) || 8080;
 const browseLocalFilesystem = BROWSE_LOCAL_FILESYSTEM === 'true';
 const isDev = NODE_ENV === 'development';
-const WDS_PORT = 3000; // Port where Webpack Dev Server runs
+const WDS_PORT = parseInt(process.env.WDS_PORT, 10) || 3000; // Port where Webpack Dev Server runs
 const indexFilename = 'index.template.html';
 const chipPlayerPng = 'chip-player-1200x640.png';
 const logoPng = 'chip-player-logo.png';
@@ -937,7 +940,7 @@ app.get(clientRoutes, cache1Hour, async (req, res) => {
   const previewImage = songId ? `https://chiptune.app/preview?s=${encodeURIComponent(songId)}` : image;
   const defaultNoscript = 'You need to enable JavaScript to run this app.';
 
-  const finalHtml = html
+  let finalHtml = html
     .replace(/__TITLE__/g, title)
     .replace(/__DESCRIPTION__/g, description)
     .replace(/__URL__/g, url)
@@ -945,6 +948,16 @@ app.get(clientRoutes, cache1Hour, async (req, res) => {
     .replace(/<chip-config><\/chip-config>/g, scriptTag)
     .replace(/__SCHEMA_JSON_LD__/g, schemaJsonLd || '')
     .replace(/__NOSCRIPT_CONTENT__/g, noscriptContent || defaultNoscript);
+
+  // Dev only: tell the client which port this server is on, so a second dev
+  // tree is reachable without rebuilding the bundle. Production never takes
+  // this branch, so the line is inert there.
+  if (isDev) {
+    finalHtml = finalHtml.replace(
+      '</head>',
+      `<script>window.__devApiPort=${port};</script></head>`
+    );
+  }
 
   res.send(finalHtml);
 });

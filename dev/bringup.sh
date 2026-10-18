@@ -14,7 +14,7 @@
 # feature rather than on setup:
 #   1. feature branch (FEATURE_BASE, default master) + its worktree;
 #   2. overlay branch dev/overlay-<name> + its worktree, carrying dev/kit;
-#   3. a port pair claimed from the shared registry (dev/ports.sh);
+#   3. a port pair claimed from the shared registry (dev/registry.sh);
 #   4. the manifest row, committed on the overlay;
 #   5. engine siblings linked (dev/engines.sh) and node_modules hardlinked from
 #      the main checkout -- ~1.5s instead of two npm installs;

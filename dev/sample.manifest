@@ -1,11 +1,11 @@
 # The cheap canonical sample: one or two files per engine family, ~16 files. This
-# is what `dev/sample.sh seed` (and therefore `bringup`) puts in a worktree's
-# catalog/ -- symlink first, then hardlink, then "unavailable" -- so a new tree has
-# something real to browse, play and *test* with, with no network and no copying of
-# a large collection.
+# is what `dev/sample.sh seed` (and therefore `bringup` and `dev/apply.sh`) puts in
+# a worktree's catalog/ -- symlink first, then hardlink, then "unavailable" -- so a
+# new tree has something real to browse, play and *test* with, with no network and
+# no copying of a large collection.
 #
 # It deliberately includes the fixtures the dev harnesses reference (TECHTRIS.MOD
-# for XMP, 16 Hurry Up!.vgz for VGM loops, G2MST6.MDX for MDX, apollo for V2M,
+# for XMP, Green Hill Zone for VGM loops, G2MST6.MDX for MDX, apollo for V2M,
 # tempo_stress for MIDI), so a seeded worktree is also a testable one.
 #
 # NOT here, on purpose: the big hand-curated collections under catalog/ (1.5 GB on
@@ -15,13 +15,13 @@
 # Paths are relative to the repo root. A PSF-family entry needs its companion
 # (`.usflib` / `.gsflib`) listed too -- they are not indexed, but must sit beside
 # the song file or it cannot load.
-catalog/test.nsf
+catalog/nsfe/Akumajou Densetsu (VRC6).nsfe
 catalog/nsfe/Navy Blue.nsfe
 catalog/spc/01 NFL Theme.spc
 catalog/sid/Delta.sid
 catalog/gbs/DMG-TRA-0.gbs
 catalog/ay/Arkanoid.AY
-catalog/arcade-capcom/Ghosts'N_Goblins_(Arcade)/16 Hurry Up!.vgz
+catalog/vgz-genesis/Sega Genesis_Sonic the Hedgehog_02 - Green Hill Zone.vgz
 catalog/mods/TECHTRIS.MOD
 catalog/midi/tempo_stress/1_basic.mid
 catalog/midi/tempo_stress/2_markers.mid

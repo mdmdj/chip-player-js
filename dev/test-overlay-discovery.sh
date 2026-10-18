@@ -155,7 +155,7 @@ esac
 mapfile -t SAMPLE_PATHS < <(grep -vE '^[[:space:]]*(#|$)' dev/sample.manifest)
 if [ ${#SAMPLE_PATHS[@]} -ge 12 ]; then ok "the sample spans engines (${#SAMPLE_PATHS[@]} entries)"
 else bad "the sample spans engines (${#SAMPLE_PATHS[@]} entries, want >= 12)"; fi
-for fx in TECHTRIS.MOD '16 Hurry Up!.vgz' G2MST6.MDX; do
+for fx in TECHTRIS.MOD 'Green Hill Zone' G2MST6.MDX; do
   case "$SAMPLE_LIST" in *"$fx"*) ok "the sample includes the $fx harness fixture" ;;
   *) bad "the sample includes the $fx harness fixture" ;; esac
 done

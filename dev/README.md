@@ -188,6 +188,43 @@ other's crash output. Verify with `curl`; open the t3 preview at `mms-1:<api>`
 (not `localhost` — the preview browser cannot reach the loopback name) when it is
 your turn, since the preview reaches one port at a time.
 
+### Where your work goes — two publication paths
+
+You commit normally on the overlay; the split between "feature" and "dev kit"
+happens when work is **published**, not when it is committed. Two paths each take
+their own subset of an overlay that deliberately mixes both:
+
+| Your change | Path | Command |
+| --- | --- | --- |
+| Feature code in a feature file | **promote** onto the feature branch | `dev/overlay.sh <t> plan` → arm → `promote` |
+| A whole dev-only file (`dev/**`, the build scripts, `src/config/index.js`) | **capture** to `dev/kit`, then **pull** into the other overlays | `dev/kit.sh capture` / `dev/kit.sh pull <t>` |
+| Dev-only code *inside* a feature file | wrapped in `DEV-BEGIN`/`DEV-END`; promote strips it, so it never ships | — |
+| `server/index.js`'s dev deltas | neither: `dev/apply.sh` patches them in place, `dev/remove.sh` reverts | — |
+
+Four buckets, two commands — and nothing is ever "on the wrong branch" while you
+work. The filters are the path list (`dev/promote-paths.txt`) and the regions, not
+your commit discipline.
+
+`capture` is a **snapshot, not a merge**: it copies the named paths from the
+source overlay onto `dev/kit`, so two agents capturing at once are
+last-write-wins, and capturing from a stale overlay reverts newer kit changes.
+Capture from the tree you just edited, and read `git diff dev/kit` before relying
+on it. Naming paths publishes just those, seeds included:
+`dev/kit.sh capture <src> AGENTS.md`.
+
+`AGENTS.md` is **seeded, not synced**: `dev/kit` holds the shared playbook as a
+template, `pull` delivers it only to a worktree that has none, and `capture` never
+takes an overlay's copy up. A new feature therefore starts from a clean playbook
+while the overlay that earned the detail keeps it.
+
+#### Keep a feature's detail out of AGENTS.md
+
+Put a feature's design decisions, measurements, hand-offs and history in its own
+note — `dev/features/<name>.md` — and keep `AGENTS.md` to what is true for *every*
+feature. `dev/features/**` is never captured into the kit, so one feature's
+notes cannot follow the next feature around, and it sits inside `dev/**`, so it
+never reaches the PR either.
+
 To revert:
 
 ```sh

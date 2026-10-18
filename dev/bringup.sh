@@ -74,29 +74,10 @@ fe_wt="$(ensure_worktree "$feature")"
 
 if [ "$cur" = "$overlay" ]; then
   ov_wt="$ROOT"
-  # This tree came from dev/kit, so its engine sources are the kit base's.
-  sources_base="${FEATURE_BASE}"
   echo "bringup: $overlay is this worktree"
 else
   ensure_branch "$overlay" "$feature"
   ov_wt="$(ensure_worktree "$overlay")"
-  # Built on top of the feature branch, so its sources are that branch's.
-  sources_base="$feature"
-fi
-
-# The build script is source-coupled -- its source list and export list must match
-# the engine sources -- and the kit deliberately does not carry it (`KIT_NEVER`).
-# Take it from the ref this tree's sources come from, so the two match by
-# construction: master's script for upstream's sources, the feature branch's for
-# ours. Committed on the overlay, which is where dev content lives.
-if git -C "$ov_wt" cat-file -e "$sources_base:scripts/build-chip-core.js" 2>/dev/null; then
-  git -C "$ov_wt" checkout "$sources_base" -- scripts/build-chip-core.js
-  if [ -n "$(git -C "$ov_wt" status --porcelain -- scripts/build-chip-core.js)" ]; then
-    git -C "$ov_wt" commit -q -m "overlay: build-chip-core.js from $sources_base (its sources' script)" -- scripts/build-chip-core.js
-    echo "bringup: scripts/build-chip-core.js from $sources_base"
-  fi
-else
-  echo "bringup: no scripts/build-chip-core.js on $sources_base; set CORE_BASE or build from a ref that has one" >&2
 fi
 
 # The overlay-only content (minus the seam file; dev/apply.sh supplies that).

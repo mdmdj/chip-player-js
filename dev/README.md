@@ -104,6 +104,37 @@ target's `WDS_PORT`/`API_PORT`. The client reads the API port from
 `window.__devApiPort`, which the dev server injects, so a second tree needs no
 rebuild. The t3 preview reaches one port, so one tree is live at a time.
 
+### Spinning up a new target from a kit worktree
+
+A worktree created from `dev/kit` already carries the dev tooling, on an overlay
+branch named `dev/overlay-<name>`; the feature branch does not exist yet, and
+`dev/overlay-new.sh` is *not* the command to reach for (the overlay branch is
+already checked out). This is the standard sequence; a second target does the
+same with its own name and port pair:
+
+```sh
+name=themes                        # your target
+git branch "feature/$name" master
+git worktree add "../chip-player-js-feature-$name" "feature/$name"
+printf '%s  feature/%s  dev/overlay-%s  3300 8180\n' "$name" "$name" "$name" >> dev/overlay.conf
+git commit -qam "overlay: register $name"
+./dev/overlay.sh "$name" status    # must resolve BOTH worktrees
+
+nvm use
+npm install --ignore-scripts && npm rebuild better-sqlite3   # root, Node 24.21.0
+( cd server && npm install )
+./dev/apply.sh                     # stub core, seeded DBs, tiny catalog
+./dev/overlay.sh "$name" dev       # background it, log to a file
+curl -s -o /dev/null -w '%{http_code}\n' localhost:<api-port>/   # the HTML route
+```
+
+The manifest row **is** the registry: one line per target with its own `wds`/`api`
+pair (3000/8080 belongs to the long-lived `dev/overlay`; take the next free pair).
+Two targets must never share a pair, and each worktree installs its own
+`node_modules`. Verify with `curl`; open the t3 preview at `mms-1:<api-port>`
+(not `localhost` — the preview browser cannot reach the loopback name) when it is
+your turn, since the preview reaches one port at a time.
+
 To revert:
 
 ```sh

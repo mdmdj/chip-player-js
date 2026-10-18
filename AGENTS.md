@@ -290,15 +290,22 @@ as a ref, so one checkout can plan/promote/rebase/push any target.
   `dev/test-dev-ports.js` (5 checks). Both are in `dev/run-tests.sh`.
   `dev/test-promote-syntax.sh` still passes (13) — the planner's target
   resolution was folded in without changing its strip/compile behaviour.
-- **Spinning up a target from a kit worktree** (an agent in a worktree created
-  from `dev/kit`, on `dev/overlay-<name>`): `overlay-new.sh` is *not* the
-  command — the overlay branch is already checked out. Create `feature/<name>`
-  from master plus its worktree, append the manifest row with a free port pair,
-  then install deps and `./dev/apply.sh` (which also applies the dev-only server
-  seams). The exact sequence is in `dev/README.md` §"Spinning up a new target
-  from a kit worktree". The manifest row is the registry: each target gets its
-  own `wds`/`api` pair, each worktree installs its own `node_modules`, and each
-  run logs to its own file.
+- **Spinning up a target — one command (2026-10-18).** `./dev/overlay.sh <name>
+  bringup` does the whole sequence (branches, worktrees, registry row, engine
+  links, hardlinked `node_modules`, `dev/apply.sh`, a real chip-core) in ~20s,
+  idempotently, from either the main checkout or a worktree created from
+  `dev/kit`. **The registry is `.git/dev-targets`, in the COMMON git dir, owned by
+  `dev/registry.sh`** — a row cannot live in `dev/overlay.conf`, because each
+  worktree has its own copy and a target registered in one is invisible from
+  another (that is the bug the first smoke test left behind: `overlay.sh <t> dev`
+  from the main checkout could not resolve a target registered elsewhere). Port
+  policy: **3000/8080 reserved** for `dev/overlay`; pool **WDS 3300-3399, API
+  8300-8399** (`WDS 3300+i`, `API 8300+i`, lowest-free, skipping claimed or
+  listening pairs), so agents discover and claim without being told.
+  `dev/engines.sh link` farms the engine clones into a worktree's parent (t3
+  worktrees share one parent, so one farm serves all) and `cp -al` hardlinks
+  `node_modules` (~1.5s, real paths, no symlink resolution) instead of two npm
+  installs. Details: `dev/README.md` §"Spinning up a new target".
 - **Smoke test (2026-10-18) — two real agents, one real defect.** Two T3 threads
   were launched with the same model, each into its own worktree created from
   `baseRef: dev/kit`, asked (only) to follow the documented bring-up for

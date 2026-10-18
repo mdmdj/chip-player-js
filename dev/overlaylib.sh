@@ -25,19 +25,42 @@ OVERLAY_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OVERLAY_ROOT="$(cd "$OVERLAY_LIB_DIR/.." && pwd)"
 OVERLAY_CONF="${OVERLAY_CONF:-$OVERLAY_LIB_DIR/overlay.conf}"
 
-# Manifest rows, comment-stripped, as: name feature overlay wds api
+# The repository's COMMON git dir: one per checkout, shared by every worktree.
+overlay_common_dir() {
+  local c
+  c="$(git -C "$OVERLAY_ROOT" rev-parse --git-common-dir 2>/dev/null || true)"
+  case "$c" in
+    "")  : ;;
+    /*)  printf '%s\n' "$c" ;;
+    *)   printf '%s\n' "$OVERLAY_ROOT/$c" ;;
+  esac
+}
+
+# The shared target registry written by dev/registry.sh. Overridable for tests.
+OVERLAY_REGISTRY="${OVERLAY_REGISTRY:-}"
+overlay_registry_file() {
+  if [ -n "$OVERLAY_REGISTRY" ]; then printf '%s\n' "$OVERLAY_REGISTRY"; return; fi
+  printf '%s/dev-targets\n' "$(overlay_common_dir)"
+}
+
+# Manifest rows, comment-stripped, as: name feature overlay wds api. The shared
+# registry is read FIRST, so a claimed target wins over a stale local row; the
+# local dev/overlay.conf supplies the long-lived default target.
 overlay_rows() {
-  [ -f "$OVERLAY_CONF" ] || return 0
-  awk '{
-    line = $0
-    sub(/#.*/, "", line)
-    gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
-    if (line == "") next
-    n = split(line, f, /[[:space:]]+/)
-    if (n < 3) next
-    printf "%s %s %s %s %s\n", f[1], f[2], f[3],
-      (f[4] == "" ? 3000 : f[4]), (f[5] == "" ? 8080 : f[5])
-  }' "$OVERLAY_CONF"
+  local f
+  for f in "$(overlay_registry_file)" "$OVERLAY_CONF"; do
+    [ -f "$f" ] || continue
+    awk '{
+      line = $0
+      sub(/#.*/, "", line)
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
+      if (line == "") next
+      n = split(line, f, /[[:space:]]+/)
+      if (n < 3) next
+      printf "%s %s %s %s %s\n", f[1], f[2], f[3],
+        (f[4] == "" ? 3000 : f[4]), (f[5] == "" ? 8080 : f[5])
+    }' "$f"
+  done
 }
 
 # First manifest row matching a value against name, feature or overlay.

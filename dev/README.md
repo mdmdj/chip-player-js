@@ -91,7 +91,8 @@ so one checkout can drive any number of targets:
 ```
 
 To add a target, put `dev/kit` (the overlay-only whole-file content) in one place
-and build the pair from it:
+and build the pair from it — or, in one command, `./dev/overlay.sh <name> bringup`
+(see "Spinning up a new target" below):
 
 ```sh
 ./dev/kit.sh capture           # once: capture the overlay-only content
@@ -108,49 +109,69 @@ target's `WDS_PORT`/`API_PORT`. The client reads the API port from
 `window.__devApiPort`, which the dev server injects, so a second tree needs no
 rebuild. The t3 preview reaches one port, so one tree is live at a time.
 
-### Spinning up a new target from a kit worktree
-
-A worktree created from `dev/kit` already carries the dev tooling, on an overlay
-branch named `dev/overlay-<name>`; the feature branch does not exist yet, and
-`dev/overlay-new.sh` is *not* the command to reach for (the overlay branch is
-already checked out). This is the standard sequence; a second target does the
-same with its own name and port pair:
+### Spinning up a new target — one command
 
 ```sh
-name=themes                        # your target
-git branch "feature/$name" master
-git worktree add "../chip-player-js-feature-$name" "feature/$name"
-printf '%s  feature/%s  dev/overlay-%s  3300 8180\n' "$name" "$name" "$name" >> dev/overlay.conf
-git commit -qam "overlay: register $name"
-./dev/overlay.sh "$name" status    # must resolve BOTH worktrees
-
-nvm use
-npm install --ignore-scripts && npm rebuild better-sqlite3   # root, Node 24.21.0
-( cd server && npm install )
-./dev/apply.sh                     # dev shims, the server seams, seeded DBs, tiny catalog
-./dev/overlay.sh "$name" dev > "/tmp/opencode/dev-$name.log" 2>&1 &   # unique log per target
-curl -s -o /dev/null -w '%{http_code}\n' localhost:<api-port>/   # the HTML route
+./dev/overlay.sh <name> bringup      # from the main checkout or from a kit worktree
 ```
 
-`dev/apply.sh` is what makes a kit worktree runnable: it patches the dev-only
-deltas into `server/index.js` (auth bypass, per-target ports, the dev HTML
-injection), which the kit deliberately does not carry. `dev/patch-server.js
---revert` (run by `dev/remove.sh`) restores the plain file before a promote.
+`bringup` is idempotent and covers the whole sequence: it creates `feature/<name>`
+and `dev/overlay-<name>` with their worktrees — or uses *this* worktree when you
+are already on `dev/overlay-<name>`, which is the case in a worktree created from
+`dev/kit` — claims a port pair from the shared registry, links the engine
+siblings, hardlinks `node_modules` from the main checkout, runs `dev/apply.sh`,
+and copies in a real chip-core when the main checkout has one. It takes about 20
+seconds and prints the run command:
 
-The manifest row **is** the registry: one line per target with its own `wds`/`api`
-pair (3000/8080 belongs to the long-lived `dev/overlay`; take the next free pair).
-Two targets must never share a pair, each worktree installs its own
-`node_modules`, and each run should log to its own file — two agents sharing
-`/tmp/opencode/dev.log` clobber each other's crash output. Verify with `curl`;
-open the t3 preview at `mms-1:<api-port>` (not `localhost` — the preview browser
-cannot reach the loopback name) when it is your turn, since the preview reaches
-one port at a time.
+```sh
+./dev/overlay.sh <name> dev
+curl -s -o /dev/null -w '%{http_code}\n' localhost:<api>/   # the HTML route
+```
 
-Note the catalog: `dev/apply.sh` only seeds the starter fixture when
-`../game-music-emu/test.nsf` is a sibling, which it is beside the main checkout
-but not beside a worktree under `~/.t3/worktrees/`. Copy a fixture and run
-`node scripts/build-music.js` if you need a non-empty library; otherwise the app
-runs with an empty one.
+`dev/apply.sh` is what makes the tree runnable: it patches the dev-only deltas
+into `server/index.js` (auth bypass, per-target ports, the dev HTML injection),
+which the kit deliberately does not carry. `dev/patch-server.js --revert` (run by
+`dev/remove.sh`) restores the plain file before a promote.
+
+#### The registry — targets and ports
+
+`dev/registry.sh` owns the shared registry at `.git/dev-targets`. It must live in
+the **common git dir**: every worktree has its own copy of `dev/`, so a row in
+`dev/overlay.conf` is invisible from another worktree — which is why a target
+registered by one agent could not be reached by another, or by the main checkout.
+A row is a manifest line: `name feature overlay wds api`.
+
+Port policy (the rule):
+
+- **3000/8080 are reserved** for the long-lived target (`dev/overlay`).
+- targets take a pair from the pool: **WDS 3300-3399, API 8300-8399**, i.e.
+  `WDS 3300+i`, `API 8300+i` for `i` in `0..99` (API = WDS + 5000 by
+  construction). Allocated lowest-free, never a pair the registry names or a
+  socket is listening on.
+- `dev/registry.sh list` shows the claims and what is live; `release <name>`
+  frees one. `port <name>` prints a target's pair.
+
+`dev/overlay.sh list` / `status` read the registry, so every worktree sees the
+same targets.
+
+#### Engines and modules without the wait
+
+- `dev/engines.sh link` symlinks the engine clones (`libvgm`, `libxmp`,
+  `FluidLite`, `game-music-emu`, `libgsf`, `libsidplayfp`) from the main
+  checkout's parent into this worktree's parent. Every t3 worktree of a repo
+  shares one parent, so one farm serves them all, and the archives already built
+  inside the clones are reused. `dev/engines.sh check` lists what is built.
+- `node_modules` is hardlinked (`cp -al`, ~1.5 s) from the main checkout rather
+  than installed — same Node, same lockfile, and real paths, so nothing has to
+  resolve through a symlink. Re-run `npm install` in the worktree if a branch
+  changes dependencies.
+- A real `chip-core` is copied from the main checkout, so audio works with no
+  build; `NO_REAL_CORE=1 dev/bringup.sh <name>` keeps the silent stub.
+
+Each run should log to its own file — two agents sharing one log clobber each
+other's crash output. Verify with `curl`; open the t3 preview at `mms-1:<api>`
+(not `localhost` — the preview browser cannot reach the loopback name) when it is
+your turn, since the preview reaches one port at a time.
 
 To revert:
 

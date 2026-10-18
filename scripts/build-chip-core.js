@@ -1,0 +1,706 @@
+const { spawn, execSync } = require('child_process');
+const fs = require('fs');
+const chalk = require('chalk');
+const paths = require('../config/paths');
+const path = require('path');
+
+/**
+ * Compile the C libraries with emscripten.
+ */
+
+const chipModules = [
+  {
+    name: 'visualizer',
+    enabled: true,
+    sourceFiles: [
+      'src/showcqtbar.c',
+    ],
+    exportedFunctions: [
+      // ---- Visualizer functions: ----
+      '_cqt_init',
+      '_cqt_calc',
+      '_cqt_render_line',
+      '_cqt_bin_to_freq',
+    ],
+    flags: [],
+  },
+  {
+    // TODO: decouple from libADLMIDI and fluidlite,
+    //       see also ../src/players/MIDIPlayer.js:207.
+    name: 'player',
+    enabled: true,
+    sourceFiles: [
+      'src/tinyplayer.c',
+    ],
+    exportedFunctions: [
+      // ---- Tiny player functions: ----
+      // '_tp_write_audio',
+      // '_tp_open',
+      '_tp_init',
+      '_tp_unload_soundfont',
+      '_tp_load_soundfont',
+      '_tp_add_soundfont',
+      // '_tp_stop',
+      // '_tp_seek',
+      // '_tp_set_speed',
+      // '_tp_get_duration_ms',
+      // '_tp_get_position_ms',
+      '_tp_set_reverb',
+      '_tp_get_polyphony',
+      '_tp_set_polyphony',
+      '_tp_get_channel_in_use',
+      '_tp_get_channel_program',
+      '_tp_set_channel_mute',
+      '_tp_set_bank',
+      '_tp_set_synth_engine',
+      '_tp_set_ch10_melodic',
+      '_tp_get_fluid_synth',
+      // ---- MIDI synth functions: ----
+      '_tp_note_on',
+      '_tp_note_off',
+      '_tp_program_change',
+      '_tp_pitch_bend',
+      '_tp_control_change',
+      '_tp_channel_pressure',
+      '_tp_render',
+      '_tp_panic',
+      '_tp_panic_channel',
+      '_tp_reset',
+    ],
+    flags: [
+      '-DTP_ENABLE_ADLMIDI', // compile tinyplayer's OPL3 (libADLMIDI) path back in
+    ],
+  },
+  {
+    name: 'gme',
+    enabled: true,
+    sourceFiles: [
+      '../game-music-emu/build/gme/libgme.a',
+    ],
+    exportedFunctions: [
+      '_gme_open_data',
+      '_gme_play',
+      '_gme_delete',
+      '_gme_mute_voices',
+      '_gme_track_count',
+      '_gme_track_ended',
+      '_gme_voice_count',
+      '_gme_track_info',
+      '_gme_start_track',
+      '_gme_open_data',
+      '_gme_ignore_silence',
+      '_gme_set_tempo',
+      '_gme_seek_scaled', // also in upstream GME; only disable_echo below is 0.6.4+
+      '_gme_tell_scaled',
+      '_gme_set_fade',
+      '_gme_voice_name',
+      '_gme_set_stereo_depth',
+      '_gme_disable_echo', // served by the sibling game-music-emu (0.6.4+)
+      '_gme_enable_accuracy',
+    ],
+    flags: [
+      '-DHAVE_ZLIB_H',    // used by game_music_emu for vgz and lazyusf2 for psf
+      '-DHAVE_STDINT_H',
+    ],
+  },
+  {
+    name: 'libxmp',
+    enabled: true,
+    sourceFiles: [
+      // 'libxmp/lib/libxmp.a', // full libxmp build
+      // 'libxmp/libxmp-lite-stagedir/lib/libxmp-lite.a',
+      '../libxmp/build/libxmp-lite.a',
+    ],
+    exportedFunctions: [
+      '_xmp_create_context',
+      '_xmp_start_player',
+      '_xmp_play_buffer',
+      '_xmp_get_frame_info',
+      '_xmp_end_player',
+      '_xmp_inject_event',
+      '_xmp_get_module_info',
+      '_xmp_get_format_list',
+      '_xmp_stop_module',
+      '_xmp_restart_module',
+      '_xmp_seek_time',
+      // libxmp 4.7+ (the sibling tree has it). The player feature-detects, so a
+      // core without it still falls back to the order-snapping xmp_seek_time.
+      '_xmp_seek_time_frame',
+      '_xmp_channel_mute',
+      '_xmp_get_player',
+      '_xmp_load_module_from_memory',
+      '_xmp_set_player',
+      '_xmp_set_tempo_factor',
+    ],
+    flags: [],
+  },
+  {
+    name: 'libvgm',
+    enabled: true,
+    sourceFiles: [
+      '../libvgm/build/bin/libvgm-emu.a',
+      '../libvgm/build/bin/libvgm-utils.a',
+      '../libvgm/build/bin/libvgm-player.a',
+      'src/bindings/libvgm-wrapper.cpp',
+    ],
+    exportedFunctions: [
+      '_lvgm_init',
+      '_lvgm_load_data',
+      '_lvgm_start',
+      '_lvgm_stop',
+      '_lvgm_render',
+      '_lvgm_get_position_ms',
+      '_lvgm_get_cur_loop',
+      '_lvgm_get_fade_start_ms',
+      '_lvgm_get_duration_ms',
+      '_lvgm_get_loop_start_ms',
+      '_lvgm_get_loop_end_ms',
+      '_lvgm_get_metadata',
+      '_lvgm_get_voice_count',
+      '_lvgm_get_voice_name',
+      '_lvgm_get_voice_chip_name',
+      '_lvgm_get_voice_mask',
+      '_lvgm_set_voice_mask',
+      '_lvgm_seek_ms',
+      '_lvgm_set_playback_speed',
+      '_lvgm_get_playback_speed',
+      '_lvgm_set_yrw801_rom_path',
+      '_lvgm_set_enhanced_stereo',
+      '_lvgm_set_loop_count',
+      '_lvgm_set_indefinite_playback',
+      '_lvgm_get_indefinite_playback',
+      '_lvgm_reset',
+    ],
+    flags: [
+      '-I../libvgm',
+    ],
+  },
+  {
+    name: 'fluidlite',
+    enabled: true,
+    sourceFiles: [
+      '../FluidLite/build/libfluidlite.a',
+    ],
+    exportedFunctions: [
+      '_new_fluid_settings',
+      '_new_fluid_synth',
+      '_fluid_settings_setint',
+      '_fluid_settings_setnum',
+      '_fluid_settings_setstr',
+      '_fluid_synth_set_interp_method',
+      '_fluid_synth_sfload',
+      '_fluid_synth_noteon',
+      '_fluid_synth_noteoff',
+      '_fluid_synth_all_notes_off',
+      '_fluid_synth_all_sounds_off',
+      '_fluid_synth_write_float',
+      '_fluid_synth_set_reverb',
+      '_fluid_synth_set_reverb_on',
+      '_fluid_synth_set_chorus',
+      '_fluid_synth_set_chorus_on',
+      '_fluid_synth_get_polyphony',
+      '_fluid_synth_set_polyphony',
+      '_fluid_synth_bank_select',
+    ],
+    // FluidLite is a sibling clone (README), and tinyplayer.c includes its
+    // public header by name; the include dir has to come from here. The clone
+    // generates fluidlite/version.h into its build dir, so that is an include
+    // path too.
+    flags: ['-I../FluidLite/include', '-I../FluidLite/build'],
+  },
+  {
+    name: 'libADLMIDI',
+    // Enabled with the Nuked OPL3 core. The DOSBox core aborts under this
+    // Emscripten build (~DosBoxOPL3 during adl_setBank), so the archive is
+    // built with ADLMIDI_DISABLE_DOSBOX_EMULATOR (see build-subprojects.sh).
+    enabled: true,
+    sourceFiles: [
+      '../libADLMIDI/build/libADLMIDI.a',
+    ],
+    exportedFunctions: [
+      '_adl_init',
+      '_adl_panic',
+      '_adl_generate',
+      '_adl_getBankNames',
+      '_adl_getBanksCount',
+      '_adl_setBank',
+      '_adl_getNumChips',
+      '_adl_setNumChips',
+      '_adl_setSoftPanEnabled',
+      '_adl_rt_controllerChange',
+      '_adl_rt_channelAfterTouch',
+      '_adl_rt_noteOff',
+      '_adl_rt_noteOn',
+      '_adl_rt_patchChange',
+      '_adl_rt_pitchBend',
+      '_adl_rt_resetState',
+    ],
+    flags: [
+      '-IlibADLMIDI/include',
+      '-DBWMIDI_DISABLE_XMI_SUPPORT',
+      '-DBWMIDI_DISABLE_MUS_SUPPORT',
+      '-DADLMIDI_DISABLE_MIDI_SEQUENCER',
+      '-DADLMIDI_DISABLE_DOSBOX_EMULATOR',
+      '-DADLMIDI_DISABLE_JAVA_EMULATOR',
+      '-DADLMIDI_DISABLE_OPAL_EMULATOR',
+    ],
+  },
+  {
+    name: 'v2m',
+    enabled: true,
+    sourceFiles: [
+      'ronan.cpp',
+      'scope.cpp',
+      'v2mplayer.cpp',
+      'v2mconv.cpp',
+      'synth_core.cpp',
+      'sounddef.cpp',
+      'v2mwrapper.cpp',
+    ].map(file => 'farbrausch-v2m/' + file),
+    exportedFunctions: [
+      '_v2m_open',
+      '_v2m_write_audio',
+      '_v2m_get_position_ms',
+      '_v2m_get_duration_ms',
+      '_v2m_seek_ms',
+      '_v2m_set_speed',
+      '_v2m_close',
+    ],
+    flags: [
+      '-fno-asynchronous-unwind-tables',
+      '-fno-stack-protector',
+      '-ffunction-sections',
+      '-fdata-sections',
+      '-DRONAN',
+      '-s', 'SAFE_HEAP=0',
+    ],
+  },
+  {
+    name: 'n64',
+    enabled: true,
+    sourceFiles: [
+      'psflib/libpsflib.a',
+      'lazyusf2/build/liblazyusf2.a',
+      'src/bindings/lazyusf2-wrapper.cpp',
+    ],
+    exportedFunctions: [
+      '_n64_load_file',
+      '_n64_get_duration_ms',
+      '_n64_get_position_ms',
+      '_n64_seek_ms',
+      '_n64_render_audio',
+      '_n64_set_indefinite_playback',
+      '_n64_get_indefinite_playback',
+      '_n64_shutdown',
+    ],
+    flags: [
+      '-Ipsflib',
+      '-Ilazyusf2',
+      '-DEMU_COMPILE',
+      '-DEMU_LITTLE_ENDIAN',
+      '-DNO_DEBUG_LOGS',
+      '-Wno-pointer-sign',
+      '-fno-strict-aliasing',
+    ],
+  },
+  {
+    name: 'gsf',
+    // Upstream's Game Boy Advance core is an external sibling checkout, so build
+    // GSF only when it is present; without it, skip the engine rather than fail
+    // the whole build.
+    enabled: fs.existsSync(path.resolve(__dirname, '../../libgsf/build/libviogsf.a')),
+    sourceFiles: [
+      '../libgsf/build/libviogsf.a',
+      'src/bindings/gsf-wrapper.cpp',
+    ],
+    exportedFunctions: [
+      '_gsf_load_file',
+      '_gsf_get_duration_ms',
+      '_gsf_get_position_ms',
+      '_gsf_seek_ms',
+      '_gsf_render_audio',
+      '_gsf_set_indefinite_playback',
+      '_gsf_get_indefinite_playback',
+      '_gsf_set_channel_mask',
+      '_gsf_get_channel_mask',
+      '_gsf_set_speed',
+      '_gsf_get_speed',
+      '_gsf_get_driver_type',
+      '_gsf_get_track_count',
+      '_gsf_set_track_mask',
+      '_gsf_get_track_mask',
+      '_gsf_get_track_type',
+      '_gsf_get_track_name',
+      '_gsf_has_dmg_channels',
+      '_gsf_shutdown',
+    ],
+    flags: [
+      '-Ipsflib',
+      '-I../libgsf',
+      '-DEMU_COMPILE',
+      '-DEMU_LITTLE_ENDIAN',
+      '-DNO_DEBUG_LOGS',
+      '-Wno-pointer-sign',
+      '-fno-strict-aliasing',
+    ],
+  },
+  {
+    name: 'mdx',
+    enabled: true,
+    sourceFiles: [
+      'mdxmini/src/mdxmini.c',
+      'mdxmini/src/mdx2151.c',
+      'mdxmini/src/mdxmml_ym2151.c',
+      'mdxmini/src/mdxfile.c',
+      'mdxmini/src/nlg.c',
+      'mdxmini/src/pcm8.c',
+      'mdxmini/src/pdxfile.c',
+      'mdxmini/src/ym2151.c', // TODO(montag): unify with gme; slightly different versions
+    ],
+    exportedFunctions: [
+      '_mdx_set_rate',
+      '_mdx_set_dir',
+      '_mdx_open',
+      '_mdx_close',
+      '_mdx_next_frame',
+      '_mdx_frame_length',
+      '_mdx_calc_sample',
+      '_mdx_calc_log',
+      '_mdx_get_title',
+      '_mdx_get_length',
+      '_mdx_set_max_loop',
+      '_mdx_get_loop_start_ms',
+      '_mdx_get_loop_length_ms',
+      '_mdx_get_tracks',
+      '_mdx_get_current_notes',
+      '_mdx_set_speed',
+      '_mdx_get_position_ms',
+      '_mdx_set_position_ms',
+      '_mdx_create_context',
+      '_mdx_get_pdx_filename',
+      '_mdx_get_track_name',
+      '_mdx_get_track_mask',
+      '_mdx_set_track_mask',
+    ],
+    flags: [],
+  },
+  {
+    name: 'libsidplayfp',
+    enabled: true,
+    sourceFiles: [
+      '../libsidplayfp/src/.libs/libsidplayfp.a',
+      'src/bindings/libsidplayfp-wrapper.cpp',
+    ],
+    exportedFunctions: [
+      '_sid_init',
+      '_sid_load_data',
+      '_sid_get_song_md5',
+      '_sid_render',
+      '_sid_set_speed',
+      '_sid_get_duration_ms',
+      '_sid_get_position_ms',
+      '_sid_set_position_ms',
+      '_sid_set_voice_mask',
+      '_sid_get_num_subtunes',
+      '_sid_get_subtune',
+      '_sid_set_subtune',
+      '_sid_stop',
+      // 'sidGetVoiceGroups' through Embind
+    ],
+    flags: [
+      '-I../libsidplayfp/src',
+      '-lembind',
+    ],
+  },
+];
+
+const compiler = process.env.EMPP_BIN || 'em++';
+const jsOutFile = 'src/chip-core.js';
+const wasmOutFile = 'src/chip-core.wasm';
+const wasmDir = paths.appPublic;
+const wasmMapOutFile = wasmOutFile + '.map';
+const wasmMapDir = path.resolve(paths.appPublic, '..');
+
+// libsidplayfp isn't vendored in this repo; skip that module unless its static
+// lib is present or CHIP_SID=1 is set. Build the rest with CHIP_NO_SID=1.
+const sidLib = '../libsidplayfp/src/.libs/libsidplayfp.a';
+const haveSidLib = (() => { try { return fs.existsSync(sidLib); } catch { return false; } })();
+const wantSid = process.env.CHIP_NO_SID !== '1' && (haveSidLib || process.env.CHIP_SID === '1');
+if (!wantSid) {
+  console.warn('Skipping libsidplayfp module (not vendored). Set CHIP_SID=1 once built.');
+  for (const m of chipModules) if (m.name === 'libsidplayfp') m.enabled = false;
+}
+// No SIDPLAYFP_HAVE_SEEK probe here: seek()/setTempo() are mmontag/libsidplayfp
+// additions, and the wrapper calls them unguarded because upstream does too. We
+// always build against that fork (scripts/build-libsidplayfp.sh), so a probe
+// could only ever disable calls that already work. Building against the official
+// core now fails at compile time instead of silently ignoring seek and tempo.
+
+const runtimeMethods = [
+  'FS',
+  'UTF8ToString',
+  'HEAPU8',
+  'HEAPF32',
+  'stringToNewUTF8',
+  'ccall',
+  'getValue',
+  'setValue',
+];
+const exportedFns = [
+  '_malloc',
+  '_free',
+].concat(...chipModules.filter(m => m.enabled).map(m => m.exportedFunctions));
+
+/**
+ * Exports this build adds on top of upstream's engine surface, which only exist
+ * when the SOURCES in this tree define them.
+ *
+ * A worktree's engine sources come from its own branch -- a fresh feature is based
+ * on master, whose mdxmini and libvgm wrapper predate the loop-region API -- and
+ * exporting a symbol that nothing defines fails the link with a wall of wasm-ld
+ * text. So each of these is dropped unless its defining file exists here and
+ * mentions it: the build logic and the engine sources then match by construction,
+ * whatever branch the sources came from. The list is explicit rather than probed
+ * so that a symbol defined in a SIBLING archive (most of them) can never be
+ * dropped by mistake.
+ */
+const OPTIONAL_EXPORTS = [
+  ['_lvgm_get_cur_loop', 'src/bindings/libvgm-wrapper.cpp'],
+  ['_lvgm_get_loop_start_ms', 'src/bindings/libvgm-wrapper.cpp'],
+  ['_lvgm_get_loop_end_ms', 'src/bindings/libvgm-wrapper.cpp'],
+  ['_lvgm_get_fade_start_ms', 'src/bindings/libvgm-wrapper.cpp'],
+  ['_lvgm_set_loop_count', 'src/bindings/libvgm-wrapper.cpp'],
+  ['_mdx_get_loop_start_ms', 'mdxmini/src/mdxmini.c'],
+  ['_mdx_get_loop_length_ms', 'mdxmini/src/mdxmini.c'],
+];
+const omittedExports = [];
+for (const [sym, file] of OPTIONAL_EXPORTS) {
+  const i = exportedFns.indexOf(sym);
+  if (i === -1) continue; // this build does not list it anyway
+  let defined = false;
+  try {
+    defined = fs.readFileSync(path.join(__dirname, '..', file), 'utf8').includes(sym.slice(1));
+  } catch (e) { /* file absent: not defined here */ }
+  if (!defined) {
+    exportedFns.splice(i, 1);
+    omittedExports.push(sym);
+  }
+}
+if (omittedExports.length) {
+  console.log(
+    `Note: not exporting ${omittedExports.join(', ')} -- this tree's sources do ` +
+      `not define them (the branch it was based on predates them).`
+  );
+}
+const sourceFiles = [].concat(...chipModules.filter(m => m.enabled).map(m => m.sourceFiles));
+const moduleFlags = [].concat(...chipModules.filter(m => m.enabled).map(m => m.flags));
+
+const flags = [
+  /**
+   * Build flags for Emscripten 5. Last updated Apr 11, 2026.
+   */
+  // '--closure', '1',          // causes TypeError: lib.FS.mkdir is not a function
+  // '--llvm-lto', '3',
+  // '--clear-cache',        // sometimes Emscripten cache gets "poisoned"
+  // '--no-heap-copy',
+  '-s', 'EXPORTED_FUNCTIONS=[' + exportedFns.join(',') + ']',
+  '-s', 'EXPORTED_RUNTIME_METHODS=[' + runtimeMethods.join(',') + ']',
+  '-s', 'ALLOW_MEMORY_GROWTH=1',
+  '-s', `ASSERTIONS=${process.env.CHIP_ASSERTIONS || '0'}`, // assertions increase runtime size about 100K
+  '-flto',                   // Add Link-Time Optimization
+  // game-music-emu and libvgm both ship a MAME-derived YM2203/YM2608 with the
+  // same global symbols. GME needs its copies (VRC7/Z80 live in the same CMake
+  // block), so let the linker keep the first definition.
+  '-Wl,--allow-multiple-definition',
+  '-msimd128',
+  // '-s', 'NO_DISABLE_EXCEPTION_CATCHING',
+  // emmalloc trips a free-list assertion in _tp_init (libADLMIDI/fluidlite
+  // allocation churn). dlmalloc is larger but robust; overridable for testing.
+  '-s', `MALLOC="${process.env.CHIP_MALLOC || 'dlmalloc'}"`,
+  '-s', 'STACK_OVERFLOW_CHECK=0', // Disable runtime stack checks for size
+  '-s', 'MODULARIZE=1',
+  '-s', 'EXPORT_NAME=CHIP_CORE',
+  '-s', 'ENVIRONMENT=web',
+  '-s', 'USE_ZLIB=1',
+  '-s', 'EXPORT_ES6=1',
+  // '-s', 'LEGACY_VM_SUPPORT=1',
+  '-s', `INITIAL_MEMORY=${process.env.CHIP_INITIAL_MEMORY || '134217728'}`, // 128MB initial; grows as needed
+  '-s', `STACK_SIZE=${process.env.CHIP_STACK_SIZE || '5242880'}`, // 5MB stack (Emscripten 6 default)
+  '-s', 'WASM_BIGINT',       // support passing 64 bit integers to/from JS
+  '-lidbfs.js',
+  '-Oz',                     // set to O0 for fast compile during development
+  // Keep function names in the wasm name section for readable stack traces.
+  ...(process.env.CHIP_DEBUG_NAMES ? ['-g2'] : []),
+  '-o', jsOutFile,
+  /**
+   * WASM Source Maps
+   */
+  // '-g',                      // include DWARF debug symbols. Increases size ~2.5x
+  // '-gsource-map=inline',
+  /**
+   * Warnings/misc.
+   */
+  '-Qunused-arguments',
+  '-Wno-deprecated',
+  '-Wno-logical-op-parentheses',
+  '-Wno-c++11-extensions',
+  '-Wno-inconsistent-missing-override',
+  '-Wno-c++11-narrowing',
+  '-std=c++17',
+
+  ...moduleFlags,
+];
+
+console.log('Compiling to %s...', jsOutFile);
+const preJs = `/*eslint-disable*/`;
+
+// The external libraries used to live one level up (../libxmp, ../FluidLite,
+// ...); they are now vendored in this repo. Rewrite a "../name/..." path to
+// "name/..." when the sibling doesn't exist but the in-repo path does.
+const repoRoot = path.resolve(__dirname, '..');
+// Engines are referenced as ../<name> (a sibling checkout). When that sibling is
+// gone we fall back to the in-repo tree -- which is this branch's normal state,
+// but the in-repo trees are not always the version the shipped core was built
+// from (the in-repo libvgm is a stale 2023 tree; a sibling clone would silently
+// swap it). Swapping an engine's version changes playback with no error anywhere,
+// so record every fallback and refuse to build on one without an explicit
+// opt-in.
+const engineFallbacks = [];
+// The engine root is the first segment after '../' (../libvgm/build/... -> libvgm).
+const engineOf = (p) => (p.match(/^\.\.\/([a-zA-Z0-9_.-]+)/) || [])[1] || null;
+const normalizeInput = (p) => {
+  const rewrite = (target) => {
+    const local = target.replace(/^\.\.\//, '');
+    const sibling = path.resolve(repoRoot, target);
+    if (fs.existsSync(sibling) || !fs.existsSync(path.resolve(repoRoot, local))) return target;
+    const engine = engineOf(target);
+    if (engine && !engineFallbacks.includes(engine)) engineFallbacks.push(engine);
+    return local;
+  };
+  // Rewrite include flags too: -I../libvgm -> -Ilibvgm
+  const inc = p.match(/^-I(.*)$/);
+  if (inc) {
+    if (!inc[1].startsWith('../')) return p;
+    const local = rewrite(inc[1]);
+    return local === inc[1] ? p : `-I${local}`;
+  }
+  if (!p.startsWith('../')) return p;
+  return rewrite(p);
+};
+// The compiler is run from the repo root; output paths (src/chip-core.js) are
+// already relative to it.
+const args = []
+  .concat(flags.map(normalizeInput))
+  .concat(sourceFiles.map(normalizeInput));
+console.log(`Normalized invocation:\n${compiler} ${chalk.blue(args.join(' '))}\n`);
+
+// (A) Engine identity gate. Engines are referenced as ../<name> and fall back to
+// the in-repo tree when that sibling is gone -- which is this branch's normal
+// state, so a fallback alone is not suspicious. What matters is whether the
+// resolved engine CONTENT changed since the last build: a stray sibling clone or
+// a local edit swaps an engine's version with no error and no runtime symptom.
+// So compare tree hashes against the recorded manifest and fail only on a
+// change. Opt in with CHIP_ALLOW_ENGINE_FALLBACK=1.
+const { engineInfo: readEngine } = require('./build-info');
+const resolvedEngines = require('./build-info').ENGINES.map(readEngine);
+let previous = null;
+try {
+  previous = JSON.parse(fs.readFileSync(`${wasmOutFile}.buildinfo.json`, 'utf8'));
+} catch { /* no baseline yet: first build with this gate */ }
+if (engineFallbacks.length) {
+  console.warn(chalk.yellow(
+    `engine-fallback: resolved to the in-repo tree for ${engineFallbacks.join(', ')} ` +
+    '(expected on this branch; recorded below)'
+  ));
+}
+if (previous && previous.engines) {
+  const changed = resolvedEngines.filter(e => {
+    const before = previous.engines.find(p => p.name === e.name);
+    if (!before) return false;
+    return (before.tree || null) !== (e.tree || null)
+      || (before.revision || null) !== (e.revision || null)
+      || JSON.stringify(before.submodules || null) !== JSON.stringify(e.submodules || null);
+  });
+  if (changed.length) {
+    const detail = changed.map(e => {
+      const b = previous.engines.find(p => p.name === e.name);
+      return `  ${e.name}: ${b.tree || b.revision || '?'} -> ${e.tree || e.revision || '?'}`;
+    }).join('\n');
+    console.warn(chalk.yellow(`engine-content change since the last build:\n${detail}`));
+    if (process.env.CHIP_ALLOW_ENGINE_FALLBACK !== '1') {
+      console.error(chalk.red(
+        'Refusing to build: an engine\'s content differs from the recorded build.\n' +
+        'That silently changes playback (loop/fade behavior, chip set). Restore the\n' +
+        'previous engine state, or re-run with CHIP_ALLOW_ENGINE_FALLBACK=1 to accept it.'
+      ));
+      process.exit(1);
+    }
+  } else {
+    console.log('engine-content: unchanged since the recorded build.');
+  }
+}
+
+// (B) Provenance. The build used to record nothing, so a core could silently
+// stop matching its sources and there was no way to tell afterwards. Same reader
+// the bundle is stamped from (scripts/build-info.js), so the wasm manifest and
+// window.ChipCoreBuildInfo can never disagree.
+const buildInfo = Object.assign(
+  { emcc: (() => { try { return execSync(`${compiler} --version`, { stdio: ['ignore', 'pipe', 'ignore'] }).toString().split('\n')[0].trim(); } catch { return null; } })() },
+  require('./build-info').buildInfo(),
+);
+buildInfo.engines = require('./build-info').ENGINES.map(require('./build-info').engineInfo);
+buildInfo.engineFallbacks = engineFallbacks;
+fs.writeFileSync(`${wasmOutFile}.buildinfo.json`, JSON.stringify(buildInfo, null, 2) + '\n');
+console.log(`Wrote ${wasmOutFile}.buildinfo.json (${buildInfo.engines.length} engines).`);
+const stale = buildInfo.engines.filter(e => e.tier !== 'verified' && e.tier !== 'authoritative');
+if (stale.length) {
+  console.warn(chalk.yellow(
+    `engines not content-verified: ${stale.map(e => `${e.name} (${e.tier})`).join(', ')}`
+  ));
+}
+checkDuplicateSymbols(args.filter(a => a.endsWith('.a')));
+// Two archives defining the same strong symbol makes the linker silently pick
+// one, so the clash only surfaces at runtime. Weak symbols resolve
+// deterministically, so only `T` definitions are checked.
+function checkDuplicateSymbols(archives) {
+  let listings;
+  try {
+    listings = archives.map(a => ({
+      archive: a,
+      symbols: execSync(`emnm "${a}"`, { cwd: repoRoot }).toString().split('\n')
+        .filter(line => / [T] /.test(` ${line} `))
+        .map(line => line.trim().split(/\s+/).pop()),
+    }));
+  } catch (e) {
+    console.warn(chalk.yellow('check-duplicate-symbols: emnm unavailable, skipping'));
+    return;
+  }
+  const owners = new Map();
+  for (const { archive, symbols } of listings) {
+    for (const sym of new Set(symbols)) {
+      if (!owners.has(sym)) owners.set(sym, []);
+      owners.get(sym).push(archive);
+    }
+  }
+  const dupes = [...owners.entries()].filter(([, owners]) => owners.length > 1);
+  if (dupes.length > 0) {
+    throw new Error(
+      'Duplicate strong symbols across linked archives (refusing to ship linker luck):\n' +
+      dupes.map(([sym, owners]) => `  ${sym}: ${owners.join(', ')}`).join('\n')
+    );
+  }
+  console.log(`check-duplicate-symbols: ${archives.length} archives, no clashes.`);
+}
+const build_proc = spawn(compiler, args, {stdio: 'inherit', cwd: repoRoot});
+build_proc.on('exit', function (code) {
+  if (code === 0) {
+    console.log(`Built ${wasmOutFile}.`);
+    // Don't use --pre-js because it can get stripped out by closure.
+    console.log('Prepending %s: %s', jsOutFile, preJs.trim());
+    // Stamp the provenance into the glue too, so the manifest travels with the
+    // artifact even if the sidecar JSON is lost.
+    const stamp = `${preJs}\nwindow.ChipCoreBuildInfo = ${JSON.stringify(buildInfo)};`;
+    fs.writeFileSync(`${jsOutFile}.stamped`, stamp + '\n' + fs.readFileSync(jsOutFile, 'utf8'));
+    fs.renameSync(`${jsOutFile}.stamped`, jsOutFile);
+  }
+});

@@ -48,13 +48,27 @@ cd "$OV_OVERLAY_WT"
 # lives in the overlay worktree, which is what scopes it to one target.
 STATE="dev/.pre-rebase"
 
+PATCHES_REVERTED=0
+
 # Keep the recorded pre-rebase tip on failure: the die() messages above point at
 # it, and an aborted rebase is exactly when it is needed. Remove it only on a
-# clean exit.
+# clean exit. The in-place patches are put back too, unless a rebase is stopped --
+# then the tree should stay as the aborted rebase left it for the user to sort out.
 cleanup() {
   if [ "${1:-0}" -eq 0 ]; then rm -f "$STATE" "$STATE.mb"; fi
+  if [ "$PATCHES_REVERTED" = 1 ] \
+     && [ ! -d .git/rebase-merge ] && [ ! -d .git/rebase-apply ]; then
+    overlay_apply_patches "$OV_OVERLAY_WT"
+  fi
 }
 trap 'cleanup $?' EXIT
+
+# The applied dev patches are uncommitted modifications to tracked files, so they
+# would fail the clean-tree check below and block every rebase (and therefore every
+# promote and refresh) in a tree that is actually running. Take them off first;
+# cleanup puts them back.
+overlay_revert_patches "$OV_OVERLAY_WT"
+PATCHES_REVERTED=1
 
 # Tracked changes only: untracked files (the dev shims, catalog/) are invisible
 # to the tree comparison below, and a rebase that would clobber one stops on

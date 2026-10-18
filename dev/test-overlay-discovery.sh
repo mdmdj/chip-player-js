@@ -132,6 +132,24 @@ DECOY="$(./dev/engines.sh check || true)"
 rmdir FluidLite 2>/dev/null || true
 expect_contains "engines: an in-tree copy of a sibling is flagged as a decoy" "$DECOY" "DECOY"
 
+# 10. The artifact policies: a cheap sample that actually resolves, and a core
+#     whose SOURCE branch is knowable.
+SAMPLE_LIST="$(./dev/sample.sh list)"
+case "$SAMPLE_LIST" in
+  *"-- none of:"*) bad "every sample entry resolves from some source" ;;
+  *) ok "every sample entry resolves from some source" ;;
+esac
+mapfile -t SAMPLE_PATHS < <(grep -vE '^[[:space:]]*(#|$)' dev/sample.manifest)
+if [ ${#SAMPLE_PATHS[@]} -ge 12 ]; then ok "the sample spans engines (${#SAMPLE_PATHS[@]} entries)"
+else bad "the sample spans engines (${#SAMPLE_PATHS[@]} entries, want >= 12)"; fi
+for fx in TECHTRIS.MOD '16 Hurry Up!.vgz' G2MST6.MDX; do
+  case "$SAMPLE_LIST" in *"$fx"*) ok "the sample includes the $fx harness fixture" ;;
+  *) bad "the sample includes the $fx harness fixture" ;; esac
+done
+CORE_LIST="$(./dev/core.sh list)"
+case "$CORE_LIST" in *"src/chip-core.wasm"*) ok "core.sh reports which worktrees have a core" ;;
+*) bad "core.sh reports which worktrees have a core" ;; esac
+
 echo
 echo "overlay-discovery: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

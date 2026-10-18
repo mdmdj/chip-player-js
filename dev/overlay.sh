@@ -11,6 +11,7 @@
 #   dev/overlay.sh [<target>] push        dev/push-overlay.sh (force-with-lease)
 #   dev/overlay.sh [<target>] dev         npm run dev in the overlay worktree, on its ports
 #   dev/overlay.sh [<target>] arm         print the arm-key path to touch (does not touch it)
+#   dev/overlay.sh <name> bringup     one command: branches, worktrees, ports, engines, deps, run-ready
 #   dev/overlay.sh new <name> [<feature>] dev/overlay-new.sh
 #
 # <target> is a name, feature branch or overlay branch from dev/overlay.conf; with
@@ -27,7 +28,7 @@ source "$DIR/overlaylib.sh"
 
 is_cmd() {
   case "$1" in
-    list|status|plan|promote|refresh|rebase|push|dev|arm|new) return 0 ;;
+    list|status|plan|promote|refresh|rebase|push|dev|arm|new|bringup) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -63,6 +64,7 @@ case "$cmd" in
   rebase)  exec "$DIR/rebase.sh" "$target" ;;
   push)    exec "$DIR/push-overlay.sh" "$target" ;;
   new)     exec "$DIR/overlay-new.sh" "$target" ;;
+  bringup) exec "$DIR/bringup.sh" "$target" ;;
   arm)
     overlay_resolve "$target"
     overlay_require_worktrees

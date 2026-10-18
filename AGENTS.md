@@ -290,6 +290,14 @@ as a ref, so one checkout can plan/promote/rebase/push any target.
   `dev/test-dev-ports.js` (5 checks). Both are in `dev/run-tests.sh`.
   `dev/test-promote-syntax.sh` still passes (13) — the planner's target
   resolution was folded in without changing its strip/compile behaviour.
+- **Spinning up a target from a kit worktree** (an agent in a worktree created
+  from `dev/kit`, on `dev/overlay-<name>`): `overlay-new.sh` is *not* the
+  command — the overlay branch is already checked out. Create `feature/<name>`
+  from master plus its worktree, append the manifest row with a free port pair,
+  then install deps and `./dev/apply.sh`. The exact sequence is in
+  `dev/README.md` §"Spinning up a new target from a kit worktree". The manifest
+  row is the registry: each target gets its own `wds`/`api` pair, and each
+  worktree installs its own `node_modules`.
 
 ### Two mechanisms — how to choose
 

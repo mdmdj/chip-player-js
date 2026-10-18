@@ -102,7 +102,7 @@ const PATCHES = [
     required: false,
     find: `const { Canvas, loadImage } = require('skia-canvas');`,
     replace:
-      `// DEV-ONLY: skia-canvas made optional (applied by dev/apply.sh)\n` +
+      `// DEV-ONLY: skia-canvas made optional for local dev\n` +
       `let Canvas, loadImage;\n` +
       `try {\n` +
       `  ({ Canvas, loadImage } = require('skia-canvas'));\n` +

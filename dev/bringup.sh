@@ -62,6 +62,13 @@ ensure_worktree() { # branch -> path on stdout
 
 # 1-2. Branches and worktrees.
 cur="$(git -C "$ROOT" rev-parse --abbrev-ref HEAD)"
+# A worktree created from dev/kit is named for its target, `dev/overlay-<name>`. If
+# the branch is an overlay for a *different* name, this command would quietly
+# create a second pair elsewhere instead of setting up the tree you are in.
+if [ "$cur" != "$overlay" ] && [ "${cur#dev/overlay-}" != "$cur" ]; then
+  die "this worktree is on $cur, the overlay for '${cur#dev/overlay-}'.
+       Run: ./dev/overlay.sh ${cur#dev/overlay-} bringup"
+fi
 ensure_branch "$feature" "$FEATURE_BASE"
 fe_wt="$(ensure_worktree "$feature")"
 

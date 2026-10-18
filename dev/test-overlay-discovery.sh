@@ -94,6 +94,28 @@ if git cat-file -e dev/kit:dev/features 2>/dev/null; then
   bad "the kit must not carry dev/features (per-feature notes)"
 else ok "the kit carries no dev/features"; fi
 
+# 8. Two dev-environment invariants that cost real debugging (2026-10-18):
+#    * a worktree on another filesystem gets a SYMLINKED node_modules, and
+#      `.gitignore`'s `node_modules/` (trailing slash) matches only a directory --
+#      so the symlink showed as untracked forever and blocked promote/rebase;
+#    * the applied dev patches (server/index.js, UserProvider.js) are uncommitted
+#      modifications, so a rebase used to refuse every live tree.
+if grep -qx 'node_modules' .gitignore; then
+  ok ".gitignore ignores a symlinked node_modules (no trailing slash)"
+else
+  bad ".gitignore ignores a symlinked node_modules (found: $(grep -n 'node_modules' .gitignore | head -1))"
+fi
+REBASE_SRC="$(< dev/rebase.sh)"
+LIB_SRC="$(< dev/overlaylib.sh)"
+for needle in overlay_revert_patches overlay_apply_patches PATCHES_REVERTED; do
+  case "$REBASE_SRC" in *"$needle"*) ok "rebase.sh handles the in-place patches ($needle)" ;;
+  *) bad "rebase.sh handles the in-place patches ($needle)" ;; esac
+done
+for needle in overlay_revert_patches overlay_apply_patches; do
+  case "$LIB_SRC" in *"$needle()"*) ok "overlaylib defines $needle" ;;
+  *) bad "overlaylib defines $needle" ;; esac
+done
+
 echo
 echo "overlay-discovery: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

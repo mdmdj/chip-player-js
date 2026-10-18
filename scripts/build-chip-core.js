@@ -95,7 +95,7 @@ const chipModules = [
       '_gme_set_fade',
       '_gme_voice_name',
       '_gme_set_stereo_depth',
-      // '_gme_disable_echo', // 0.6.4+ API; not in the vendored 2018 game-music-emu
+      '_gme_disable_echo', // served by the sibling game-music-emu (0.6.4+)
       '_gme_enable_accuracy',
     ],
     flags: [

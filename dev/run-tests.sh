@@ -57,6 +57,9 @@ echo
 echo "== promote strip syntax (C compile, JS parse) =="
 bash "$DIR/test-promote-syntax.sh"
 echo
+echo "== server dev seams (apply/revert on both bases) =="
+node "$DIR/test-server-seams.js"
+echo
 echo "== overlay tooling (multi-target, kit) =="
 bash "$DIR/test-overlay-tooling.sh"
 echo

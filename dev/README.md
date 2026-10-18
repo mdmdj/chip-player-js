@@ -16,6 +16,10 @@ keep it out of the PR).
 - `nvm` with the repo-pinned Node version: `nvm install && nvm use`
 - `npm install` in the repo root and in `server/`
 
+In a non-interactive shell `nvm` is not on `PATH`, so export the pinned version
+directly (it is ABI-matched to `better-sqlite3`):
+`export PATH="$HOME/.nvm/versions/node/v24.21.0/bin:$PATH"`.
+
 ## Usage
 
 ```sh
@@ -123,17 +127,30 @@ git commit -qam "overlay: register $name"
 nvm use
 npm install --ignore-scripts && npm rebuild better-sqlite3   # root, Node 24.21.0
 ( cd server && npm install )
-./dev/apply.sh                     # stub core, seeded DBs, tiny catalog
-./dev/overlay.sh "$name" dev       # background it, log to a file
+./dev/apply.sh                     # dev shims, the server seams, seeded DBs, tiny catalog
+./dev/overlay.sh "$name" dev > "/tmp/opencode/dev-$name.log" 2>&1 &   # unique log per target
 curl -s -o /dev/null -w '%{http_code}\n' localhost:<api-port>/   # the HTML route
 ```
 
+`dev/apply.sh` is what makes a kit worktree runnable: it patches the dev-only
+deltas into `server/index.js` (auth bypass, per-target ports, the dev HTML
+injection), which the kit deliberately does not carry. `dev/patch-server.js
+--revert` (run by `dev/remove.sh`) restores the plain file before a promote.
+
 The manifest row **is** the registry: one line per target with its own `wds`/`api`
 pair (3000/8080 belongs to the long-lived `dev/overlay`; take the next free pair).
-Two targets must never share a pair, and each worktree installs its own
-`node_modules`. Verify with `curl`; open the t3 preview at `mms-1:<api-port>`
-(not `localhost` — the preview browser cannot reach the loopback name) when it is
-your turn, since the preview reaches one port at a time.
+Two targets must never share a pair, each worktree installs its own
+`node_modules`, and each run should log to its own file — two agents sharing
+`/tmp/opencode/dev.log` clobber each other's crash output. Verify with `curl`;
+open the t3 preview at `mms-1:<api-port>` (not `localhost` — the preview browser
+cannot reach the loopback name) when it is your turn, since the preview reaches
+one port at a time.
+
+Note the catalog: `dev/apply.sh` only seeds the starter fixture when
+`../game-music-emu/test.nsf` is a sibling, which it is beside the main checkout
+but not beside a worktree under `~/.t3/worktrees/`. Copy a fixture and run
+`node scripts/build-music.js` if you need a non-empty library; otherwise the app
+runs with an empty one.
 
 To revert:
 
@@ -150,7 +167,7 @@ To revert:
 | `shims/server-auth.js` | `server/middleware/auth.dev.js` | staged file gitignored | Fixed `dev-user`; loaded via `DEV_AUTH_MODULE` in `server/.env.local`. No tracked file patched. |
 | `shims/devtools.js` | `src/chip-player-devtools.js` | staged file gitignored | Browser test hooks (`window.__cpDev`); injected by the dev webpack entry. |
 | `shims/recorder.js` | `src/chip-player-record.js` | staged file gitignored | Clip-recording hooks (`window.__cpRec`): settings pinning, an audio mirror off the app's gain node, the green sync mark, click-by-exact-name. For the PR communication page — see `dev/record/README.md`. |
-| `patch-server.js` | `server/index.js` | target tracked (reversible) | Makes `skia-canvas` optional. |
+| `patch-server.js` | `server/index.js` | target tracked (reversible) | Applies the dev-only server deltas: `skia-canvas` optional, the dev auth bypass (`DEV_AUTH_MODULE`), per-target `API_PORT`/`WDS_PORT`, the dev `window.__devApiPort` injection, and no-cache in dev. `--revert` restores the plain file, so run `dev/remove.sh --revert` before a promote. |
 | `seed-dbs.js` | `server/users.db`, `server/csdb.db` | gitignored | Creates `users`/`playlists`/`playbacks` schemas. |
 | `import-songlengths.js` | `server/csdb.db` (`hvsc_files`) | gitignored | Imports HVSC `Songlengths.txt` lengths for local SIDs, matched by the libsidplayfp fingerprint (not md5-of-file). Fetches the canonical copy to a tmp cache unless `--file` is given; `--dry-run` changes nothing. |
 | generated | `server/.env.local` | gitignored | Points server at local dirs; sets `DEV_AUTH_MODULE`. |

@@ -207,10 +207,13 @@ your commit discipline.
 
 `capture` is a **snapshot, not a merge**: it copies the named paths from the
 source overlay onto `dev/kit`, so two agents capturing at once are
-last-write-wins, and capturing from a stale overlay reverts newer kit changes.
-Capture from the tree you just edited, and read `git diff dev/kit` before relying
-on it. Naming paths publishes just those, seeds included:
-`dev/kit.sh capture <src> AGENTS.md`.
+last-write-wins. It publishes from the **canonical overlay**
+(`KIT_CANONICAL`, default `dev/overlay`), *not* from whatever branch you are
+standing on — otherwise a feature overlay's kit-path edits (a rebuild script, a
+build flag) would silently become every future feature's starting point. To
+publish from another overlay, say so: `KIT_SOURCE=<overlay> dev/kit.sh capture`.
+Naming paths publishes just those, seeds included (`dev/kit.sh capture AGENTS.md`),
+and read `git diff dev/kit` before relying on the result.
 
 `AGENTS.md` is **seeded, not synced**: `dev/kit` holds the shared playbook as a
 template, `pull` delivers it only to a worktree that has none, and `capture` never

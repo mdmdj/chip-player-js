@@ -27,6 +27,12 @@ trap cleanup EXIT
 R1="$("$reg" claim alpha)"             # -> "alpha feature/alpha dev/overlay-alpha 3900 8900"
 R1b="$("$reg" claim alpha)"
 expect_eq "claim is idempotent" "$R1" "$R1b"
+# ...but naming a different feature must CORRECT the row: re-running bringup with a
+# different base is how a target gets re-pointed, and silently keeping the old one
+# would mis-target the promote.
+R1c="$("$reg" claim alpha feature/other)"
+expect_eq "re-claiming with a new feature reconciles the row" "$(awk '{print $2}' <<< "$R1c")" "feature/other"
+expect_eq "a bare re-claim keeps the corrected row" "$("$reg" claim alpha)" "$R1c"
 expect_eq "first claim takes the pool base" "$(awk '{print $4, $5}' <<< "$R1")" "3900 8900"
 expect_eq "claim derives feature/overlay names" "$(awk '{print $2, $3}' <<< "$R1")" "feature/alpha dev/overlay-alpha"
 

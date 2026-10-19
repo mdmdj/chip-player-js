@@ -54,11 +54,36 @@ wds_taken() { rows | awk -v w="$1" '$4 == w { f = 1 } END { exit !f }'; }
 port_live() { ss -ltn 2>/dev/null | grep -qE "[:.]$1[[:space:]]"; }
 get_row() { rows | awk -v n="$1" '$1 == n { print; exit }'; }
 
+# Replace (or append) a target's row. Used to reconcile a target whose feature or
+# overlay branch is being corrected.
+registry_put() { # name feature overlay wds api
+  touch "$REG"
+  awk -v n="$1" '$1 != n' "$REG" > "$REG.tmp"
+  mv "$REG.tmp" "$REG"
+  printf '%s %s %s %s %s\n' "$1" "$2" "$3" "$4" "$5" >> "$REG"
+}
+
 cmd_claim() {
   local name="${1:-}" feature="${2:-}" overlay="${3:-}" row wds="" api=""
   [ -n "$name" ] || die "usage: registry.sh claim <name> [<feature> [<overlay>]]"
   row="$(get_row "$name")"
-  if [ -n "$row" ]; then printf '%s\n' "$row"; return 0; fi
+  if [ -n "$row" ]; then
+    # A re-run must be able to CORRECT a target: bringup called again with a
+    # different feature branch has to reconcile, not silently keep the old pair.
+    # Only fields the caller actually named are reconciled -- `claim <name>` alone
+    # must not reset an existing target to the derived defaults.
+    local have_f have_o have_w have_a
+    read -r _ have_f have_o have_w have_a <<< "$row"
+    [ -n "$feature" ] && have_f="$feature"
+    [ -n "$overlay" ] && have_o="$overlay"
+    if [ "$have_f $have_o" != "$(awk '{print $2, $3}' <<< "$row")" ]; then
+      registry_put "$name" "$have_f" "$have_o" "$have_w" "$have_a"
+      printf '%s %s %s %s %s\n' "$name" "$have_f" "$have_o" "$have_w" "$have_a"
+      return 0
+    fi
+    printf '%s\n' "$row"
+    return 0
+  fi
 
   feature="${feature:-feature/$name}"
   overlay="${overlay:-dev/overlay-$name}"

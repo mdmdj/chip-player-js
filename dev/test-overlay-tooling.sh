@@ -128,6 +128,13 @@ PULL="$(cd "$OVB" && bash dev/kit.sh pull dev/overlay-b 2>&1 || true)"
 expect_contains "kit: an untracked feature note does not block a pull" "$PULL" "already current"
 rm -rf "$OVB/dev/features"
 
+# And a SECOND sync must not die on the vendored-tree pathspec: by then those trees
+# are gone from both sides, and `git commit -- <pathspec>` is fatal when a pathspec
+# matches nothing. (The first sync removes them, so the first sync always worked.)
+PULL2="$(cd "$OVB" && bash dev/kit.sh pull dev/overlay-b 2>&1 || true)"
+expect_contains "kit: a second sync succeeds (no dangling pathspec)" "$PULL2" "already current"
+expect_not      "kit: a second sync does not report a pathspec error" "$PULL2" "pathspec"
+
 # Register target b in the overlay's manifest (as overlay-new tells you to).
 (
   cd "$OVB"

@@ -27,6 +27,12 @@ const FORBIDDEN = [
   [/promote-paths/, 'the promotion tooling'],
   [/dev\/(record|shims|mdx-native|mdx-corpus|apply\.sh|remove\.sh|rebase\.sh|promote|push-overlay|run-tests|overlay|kit|test-[a-z-]+\.js)/,
     'a dev tool'],
+  // A dev PATH of any kind: the enumerated tools above are the ones that keep
+  // coming back, but the class is "a promoted file must not point at dev/ at all"
+  // -- naming one of our notes (dev/MIDI_LOOP_TEST_GAPS.md, say) would leak just as
+  // surely and used to slip through this gate.
+  // The lookbehind keeps URL hosts (v8.dev/, web.dev/) and mid-path uses out of it.
+  [/(?<![\w./-])dev\/[A-Za-z0-9_.-]/, 'a dev path'],
   [/catalog\/nes-audio-tests/, 'a dev fixture'],
   [/\b(EXES04|FACE04|popm2[15]|DAR2_4|G2MST6|MTS2_32|DTWNB18|SIDE11C|CTTY|SPD35|KNA14_EX|utabi46b|SEIYA_N|WBALL0_EX)\b/,
     'a dev-catalog file name'],

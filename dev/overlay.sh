@@ -6,7 +6,7 @@
 #   dev/overlay.sh [<target>] status      resolved target, worktrees, ports, arm state
 #   dev/overlay.sh [<target>] plan        dev/promote.sh (plan only; no write path)
 #   dev/overlay.sh [<target>] promote     dev/promote-apply.sh (requires the arm key)
-#   dev/overlay.sh [<target>] refresh     kit sync + dev/rebase.sh
+#   dev/overlay.sh [<target>] refresh [--dry-run]  kit sync + rebase; `all` = every target
 #   dev/overlay.sh [<target>] rebase      dev/rebase.sh (the legacy rebase model)
 #   dev/overlay.sh [<target>] push        dev/push-overlay.sh (force-with-lease)
 #   dev/overlay.sh [<target>] dev         npm run dev in the overlay worktree, on its ports
@@ -83,14 +83,7 @@ case "$cmd" in
 
   help) usage ;;
 
-  refresh)
-    overlay_resolve "$target"
-    overlay_require_worktrees
-    # Sync the overlay-only content from the kit (a commit, not a rewrite), then
-    # put the overlay back on top of the feature branch.
-    git show-ref --verify --quiet refs/heads/dev/kit && "$DIR/kit.sh" pull "$OV_OVERLAY"
-    exec "$DIR/rebase.sh" "$target"
-    ;;
+  refresh) exec "$DIR/refresh.sh" ${target:+"$target"} ${extra:+"$extra"} ;;
 
   dev)
     overlay_resolve "$target"

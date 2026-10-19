@@ -65,7 +65,7 @@ worktree created from `dev/kit` (or from another overlay) needs nothing else fir
 | Give a worktree a bigger catalog | `./dev/sample.sh steal <other-worktree>` (or `node dev/fetch-seo-fixtures.mjs`) |
 | Publish feature work | `./dev/overlay.sh <t> plan` → arm → `./dev/overlay.sh <t> promote` |
 | Publish dev tooling | `./dev/kit.sh capture` (to the kit), then `./dev/kit.sh pull <target>` on each target |
-| Refresh an overlay | `./dev/overlay.sh <t> refresh` (kit pull + rebase; unaffected by the applied patches) |
+| Refresh an overlay | `./dev/overlay.sh <t> refresh [--dry-run]` — kit sync + rebase, **verified**; `all` refreshes every target, skipping the ones it cannot |
 | Publish the overlay / the kit | `./dev/push-overlay.sh`, `git push origin dev/kit` |
 | Stage/undo the dev environment | `./dev/apply.sh`, `./dev/remove.sh` |
 
@@ -78,6 +78,14 @@ one target", "Spinning up a new target", "The registry", "Engines and modules",
 - **The kit's currency is asserted.** `dev/test-overlay-discovery.sh` fails if a
   tool or doc changed on the overlay but was not captured, so "documented" and
   "delivered to a new worktree" cannot drift apart.
+- **A refresh is verified, and can be looked at first.** `./dev/overlay.sh <t>
+  refresh --dry-run` prints what the kit would change in that worktree (the files
+  the kit *supplies*, so nothing is listed that a pull would not touch) and whether
+  the rebase would do anything, and touches nothing. A real refresh then syncs the
+  kit, rebases, and **asserts that nothing outside the paths the kit owns moved** —
+  a refresh that touched feature code is a bug, and it says so and names the
+  pre-refresh tip to restore from. `./dev/overlay.sh all refresh` does every
+  registered target and prints one verdict each.
 - **If a `pull`/`refresh` refuses naming `dev/features/`** (or any of the tests the
   kit does not carry), that worktree predates the guard learning to ignore
   never-carried paths: move the note aside once, pull, and put it back. Only

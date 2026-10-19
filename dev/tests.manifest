@@ -29,6 +29,7 @@
 # Each marker is a file the feature ADDS (something master does not have), so its
 # presence is proof the feature's code is in this tree.
 group subtunes src/players/EndDetector.js src/players/midi/endRule.js scripts/subtune-headers.js
+group replaygain src/ReplayGain.js src/loudness.js src/loudness-worker.js
 
 # --- infrastructure: tests the kit and the tooling. Always run. -------------
 test infra - dev/test-overlay-tooling.sh
@@ -60,3 +61,4 @@ test feature subtunes dev/test-local-subtunes.js
 test feature subtunes dev/test-subtunes-server.js
 test feature subtunes dev/test-search.js
 test feature subtunes dev/test-play-seo.js
+test feature replaygain dev/test-replaygain.js

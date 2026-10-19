@@ -69,9 +69,49 @@ worktree created from `dev/kit` (or from another overlay) needs nothing else fir
 | Publish the overlay / the kit | `./dev/push-overlay.sh`, `git push origin dev/kit` |
 | Stage/undo the dev environment | `./dev/apply.sh`, `./dev/remove.sh` |
 
-Details for each are in the sections below: "Promoting feature work", "More than
-one target", "Spinning up a new target", "The registry", "Engines and modules",
-"Where your work goes", "Tests".
+Details for each are in the sections below: "The tools", "Promoting feature work",
+"More than one target", "Spinning up a new target", "The registry", "Engines and
+modules", "Where your work goes", "Tests".
+
+## The tools
+
+One entry point (`overlay.sh`) and the tools it and the workflows call. All of it
+lives under `dev/`, is carried to every target by the kit, and never reaches the PR.
+
+| Tool | What it is for |
+| --- | --- |
+| `overlay.sh` | the front end: `list`, `status`, `plan`, `promote`, `refresh`, `rebase`, `push`, `dev`, `arm`, `new`, `bringup`, `help` |
+| `bringup.sh` | one-command setup of a worktree (branches, port, engines, modules, apply, sample, core) |
+| `overlay-new.sh` | create `feature/<name>` + `dev/overlay-<name>` and their worktrees, from the kit |
+| `refresh.sh` | bring an overlay (or `all`) up to date: kit sync + rebase, verified; `--dry-run` |
+| `registry.sh` | the shared target/port registry, in the common git dir |
+| `kit.sh` | the dev layer itself: `capture` (to the kit), `pull` (into a target), `list`, `owned`, `never` |
+| `engines.sh` | the engine inventory: `check` (flags a decoy), `link` (farms the siblings) |
+| `core.sh` | choose the chip-core's base: `list`, `use`, `steal`, `from`, `build` |
+| `sample.sh` | the cheap catalog sample: `seed`, `steal`, `list` |
+| `apply.sh` / `remove.sh` | stage / undo the dev environment (shims, DBs, the in-place patches) |
+| `patch-server.js` / `patch-client.js` | those in-place deltas: idempotent and reversible, applied by `apply.sh`, undone by `remove.sh` |
+| `run-tests.sh` | the registered harnesses, driven by `tests.manifest` |
+| `promote.sh` → `promote-plan.sh` → `promote-apply.sh` | publish feature work to the reviewable branch (the plan is read-only; `promote-apply.sh` needs the arm key) |
+| `rebase.sh` / `push-overlay.sh` | put the overlay back on top and verify the tree / publish it `--force-with-lease` |
+| `check-promotable-refs.js` | the gate: nothing that can reach the PR may name overlay-only material |
+| `record/` | the clip recorder and page builder for the PR changelog (its own `record/README.md`) |
+| `overlaylib.sh`, `patch-lib.js` | internal libraries for the tools above, documented in their own headers |
+| `fixtures.js`, `make-loop-pedal-midi.js`, `seed-dbs.js`, `import-songlengths.js`, `fetch-seo-fixtures.mjs` | the harness and catalog helpers: synthetic parser fixtures, a built loop-pedal MIDI, `apply.sh`'s DB seeding, song lengths, SEO fixtures |
+
+What it all reads:
+
+| File | What it holds |
+| --- | --- |
+| `overlay.conf` | the manifest: `name feature-branch overlay-branch [wds api]` per target |
+| `promote-paths.txt` | the paths that are overlay-only **areas** — whole trees that never promote |
+| `tests.manifest` | the test registry: a `group` line per feature, one `infra`/`feature` line per harness |
+| `sample.manifest` | the files the cheap catalog sample fetches |
+| `.promote-armed` | the arm key (gitignored, per-worktree): the one act that lets a promotion write |
+
+The other two mechanisms are not files: a `DEV-BEGIN … DEV-END` region inside a
+feature file (a chunk that strips to prod behaviour exactly) and the single
+hand-carry list, `server/index.js`. Both are explained under "Where your work goes".
 
 ## Housekeeping
 
@@ -321,6 +361,12 @@ note — `dev/features/<name>.md` — and keep `AGENTS.md` to what is true for *
 feature. `dev/features/**` is never captured into the kit, so one feature's
 notes cannot follow the next feature around, and it sits inside `dev/**`, so it
 never reaches the PR either.
+
+The older, pre-`dev/features/` notes sit at `dev/*.md` (`MIDI_LOOP_TEST_GAPS.md`,
+`UPSTREAM_PR_PLAN.md`, `pr-body.md`, `pr-body.suggested.md`,
+`prod-midi-collections.md`); they are listed as never-carried for the same reason —
+one feature's record rather than the kit's tooling — so a new worktree does not
+inherit them. `ENGINE_BUILD_MIGRATION.md` *is* tooling, and is carried.
 
 To revert:
 

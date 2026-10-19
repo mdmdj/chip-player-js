@@ -316,17 +316,25 @@ Dev-only harnesses (plain Node + `assert`, no framework and no new deps). They
 are removed with the rest of `dev/` before the PR.
 
 ```sh
-./dev/run-tests.sh    # every harness (parser/build checks need catalog/)
+./dev/run-tests.sh    # registry-driven; see dev/tests.manifest
 ```
 
-Plain Node + `assert`, plus a few bash harnesses — no framework, no new deps, and
-removed with the rest of `dev/` before the PR. The overlay work has its own:
-`test-overlay-tooling.sh` (kit capture/pull, a second target promoted end to
-end), `test-overlay-registry.sh` (port claiming and discovery),
-`test-server-seams.js` (the `server/index.js` dev patches, on both bases),
-`test-dev-ports.js` (per-target port wiring), `test-promote-syntax.sh` (the
-strip/compile validation), and `test-overlay-discovery.sh` (the entry points and
-the docs a new worktree needs).
+**Tests are source-coupled, like the core's export list: they belong to the branch
+whose code they test, not to the kit.** `dev/tests.manifest` is the registry — a
+`group` line names the files that prove a feature is present, and each harness is
+either `infra` (tests the tooling; always shipped) or `feature` (tests the app;
+travels with the branch):
+
+- derived from a branch that has the code → you inherit its tests, and they are
+  expected to pass;
+- derived from one with none (current master) → you get the bare infrastructure and
+  the feature tests are **skipped with the reason**, not failed.
+
+`run-tests.sh` is driven by that file and nothing is hard-coded in it; the kit
+derives its never-carried list from the same file, so a feature's tests are pruned
+automatically. Add a feature with one `group` line plus a `test feature` line per
+harness. Plain Node + `assert` and a few bash harnesses — no framework, no new
+deps, and removed with the rest of `dev/` before the PR.
 
 `test-build.js` writes a temp subdir under `catalog/`, runs the builder filtered
 to it (twice, to exercise reprocessing), asserts the `music`/`subtune` rows, and

@@ -323,6 +323,18 @@ as a ref, so one checkout can plan/promote/rebase/push any target.
   `dev/features/<name>.md`, which is never captured into the kit and never
   promoted. The model, the four buckets and the capture caveats are in
   `dev/README.md` §"Where your work goes — two publication paths".
+- **Tests are source-coupled, like the core's export list (2026-10-19).** They
+  belong to the branch whose code they test, so the kit ships the bare
+  infrastructure and `dev/tests.manifest` is the registry: a `group` line names the
+  files that prove a feature is present, and each harness is `infra` (tooling) or
+  `feature` (the app). `run-tests.sh` is driven by it, and `kit.sh` derives its
+  never-carried list from it, so a feature's tests are pruned from the kit and, on a
+  tree without that feature (a fresh feature off master), they are **skipped with
+  the reason, not failed** — that was the visualizer smoke test's "17 of 21
+  harnesses fail". Adding a feature means one `group` line plus a `test feature`
+  line per harness; adding a tooling test means one `test infra` line. `dev/record/
+  scenarios.check.mjs` follows the same rule for the clip registry's harness
+  references (a missing *feature* harness warns; a typo still fails).
 - **The engine inventory is `dev/engines.sh check` (2026-10-18).** Two sources and
   nothing else: **siblings** (`game-music-emu`, `libxmp`, `libvgm`, `FluidLite`,
   `libgsf`, `libsidplayfp`, cloned beside the checkout) and **in-repo**

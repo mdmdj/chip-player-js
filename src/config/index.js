@@ -16,6 +16,17 @@ if (process.env.NODE_ENV === 'development') {
   SOUNDFONT_URL_PATH = `http://${devHostname}:${devPort}/soundfonts`;
 }
 
+// Node tools (the catalog loudness scanner) run the player classes offline
+// against a local catalog and metadata server. Point the same modules at it
+// instead of the public API. This wins over the dev block so a scanner run with
+// NODE_ENV=development still resolves its own files.
+if (typeof process !== 'undefined' && process.env && process.env.CHIP_LOUDNESS_BASE) {
+  const base = process.env.CHIP_LOUDNESS_BASE.replace(/\/+$/, '');
+  API_BASE = `${base}/api`;
+  CATALOG_PREFIX = `${base}/catalog`;
+  SOUNDFONT_URL_PATH = `${base}/soundfonts`;
+}
+
 const MAX_SAMPLE_RATE = 48000; // Higher rates are problematic for some players.
 const MAX_VOICES = 64;
 const REPLACE_STATE_ON_SEEK = false;

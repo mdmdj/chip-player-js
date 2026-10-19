@@ -1,15 +1,88 @@
-# Dev shims
+# The dev overlay — how to use it
 
-This directory exists so the app can run locally without a full chip-core
-WebAssembly build, Firebase credentials, or a real music catalog. **It is all
-removable.** Before opening a PR, run:
+The app runs from a **dev overlay**: a reusable dev layer plus one working branch
+per feature. Two pieces are shared and maintained once; everything else is a
+per-target binding.
+
+| Piece | What it is |
+| --- | --- |
+| `dev/kit` | the dev layer as its own branch — `dev/**`, the engine layout and inventory, the test registry and runner, and the `AGENTS.md` **template** |
+| `feature/<name>` | the reviewable PR branch for one feature. Never carries `dev/` |
+| `dev/overlay-<name>` | the branch you work on: `feature/<name>` + the kit + feature work |
+| `dev/overlay.conf` | the manifest — one line per target: name, feature branch, overlay branch, ports |
+| `.git/dev-targets` | the live registry, shared by every worktree: which targets exist and the ports they claimed |
+
+A worktree *is* one target's dev tree. You commit normally on the overlay;
+publishing is deliberate, and has two paths — **feature → promote**, **dev files →
+capture/pull** (see "Where your work goes" below).
+
+## Start here
 
 ```sh
-./dev/remove.sh
+./dev/overlay.sh                 # every command, with the target syntax
+./dev/overlay.sh list            # the targets and their ports
+./dev/overlay.sh <name> bringup  # make THIS worktree runnable (~20 s, idempotent)
+./dev/overlay.sh <name> dev      # run it, on its claimed ports
+./dev/run-tests.sh               # the registered tests
 ```
 
-That undoes every change `dev/apply.sh` made. Then delete this directory (or
-keep it out of the PR).
+`bringup` is the whole setup in one command: branches and worktrees if they are
+missing, a port pair claimed from the registry, the engine farm, `node_modules`
+from the main checkout, `dev/apply.sh`, the sample catalog, and a chip-core. A
+worktree created from `dev/kit` (or from another overlay) needs nothing else first.
+
+## The five rules it is built on
+
+1. **`dev/kit` is a template, not a snapshot.** `AGENTS.md` is *seeded*: a new
+   worktree gets the template, and `pull` never overwrites a worktree's own notes.
+   A feature's history belongs in `dev/features/<name>.md`, which is never captured
+   into the kit and never promoted.
+2. **Tests are source-coupled.** `dev/tests.manifest` is the registry: the kit ships
+   the *infrastructure* tests, and a branch's own tests travel with it. Derive from
+   a branch that has the code and its tests run (and are expected to pass); derive
+   from one with none and the feature tests are **skipped with the reason**.
+3. **The chip-core is source-coupled.** `dev/core.sh` treats a core as a build of
+   the *engine sources*, so you choose its base — `CORE_REF` (default `master`) for
+   a fresh feature, or the branch it extends.
+4. **The catalog sample is cheap.** 16 files, one per engine family plus the
+   harness fixtures (`dev/sample.manifest`), placed by symlink → hardlink → copy.
+   Large collections are never copied automatically; take one deliberately.
+5. **Promotion is your act.** `dev/overlay-subtunes` (or any overlay) and the
+   reviewable branch are different things: the arm key is the decision, and nothing
+   else promotes.
+
+## Workflows
+
+| Task | Command |
+| --- | --- |
+| New target on master | `./dev/overlay.sh <name> bringup` |
+| New target stacked on an existing one | `./dev/overlay.sh <name> bringup <feature-branch>` on a worktree cut from that overlay |
+| See what a worktree is | `./dev/overlay.sh <name> status` |
+| Run the app | `./dev/overlay.sh <name> dev` (background it; one log per target) |
+| Run the tests | `./dev/run-tests.sh` (`VERBOSE=1` for full output) |
+| Add a test | one `infra`/`feature` line in `dev/tests.manifest` (+ a `group` line naming the feature's marker files) |
+| Choose the chip-core's base | `./dev/core.sh list`, then `use <ref>`; or `CORE_REF=<ref> bringup`; `build` builds from this tree's sources |
+| Give a worktree a bigger catalog | `./dev/sample.sh steal <other-worktree>` (or `node dev/fetch-seo-fixtures.mjs`) |
+| Publish feature work | `./dev/overlay.sh <t> plan` → arm → `./dev/overlay.sh <t> promote` |
+| Publish dev tooling | `./dev/kit.sh capture` (to the kit), then `./dev/kit.sh pull <target>` on each target |
+| Refresh an overlay | `./dev/overlay.sh <t> refresh` (kit pull + rebase; unaffected by the applied patches) |
+| Publish the overlay / the kit | `./dev/push-overlay.sh`, `git push origin dev/kit` |
+| Stage/undo the dev environment | `./dev/apply.sh`, `./dev/remove.sh` |
+
+Details for each are in the sections below: "Promoting feature work", "More than
+one target", "Spinning up a new target", "The registry", "Engines and modules",
+"Where your work goes", "Tests".
+
+## Housekeeping
+
+- **The kit's currency is asserted.** `dev/test-overlay-discovery.sh` fails if a
+  tool or doc changed on the overlay but was not captured, so "documented" and
+  "delivered to a new worktree" cannot drift apart.
+- **Ports:** 3000/8080 belong to the long-lived target; a target claims a pair from
+  WDS 3300-3399 / API 8300-8399 (`dev/registry.sh list` shows what is taken).
+- **Never push to `upstream`** — everything stays in the fork (`origin`).
+- **Before a PR:** `./dev/remove.sh` (it reverts the in-place patches), then delete
+  or exclude this directory; nothing here is part of the PR.
 
 ## Prerequisites
 

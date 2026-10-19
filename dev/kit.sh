@@ -59,7 +59,7 @@ KIT_BASE="${KIT_BASE:-master}"
 # baggage carried into every other feature's worktree. (The build script's
 # source-coupled parts are handled in the script itself: its export list drops a
 # symbol the tree's engine sources do not define, so one script serves any base.)
-KIT_NEVER="${KIT_NEVER:-dev/features}"
+KIT_NEVER="${KIT_NEVER:-dev/features dev/MIDI_LOOP_TEST_GAPS.md dev/UPSTREAM_PR_PLAN.md dev/pr-body.md dev/pr-body.suggested.md dev/prod-midi-collections.md}"
 # The seam file: its dev delta is not a whole-file copy, so it is not in the kit
 # either (dev/apply.sh patches it in place instead).
 KIT_EXCLUDE="${KIT_EXCLUDE:-server/index.js}"

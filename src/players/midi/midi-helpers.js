@@ -167,7 +167,7 @@ class EventIterator {
       // boundary (see rebaseReplay) so the replay never sends a second NoteOn for
       // a still-sounding note, which the MIDI spec calls invalid. The composer's
       // authored release past the loop end still plays in the outro, at its
-      // authored position. See dev/MIDI_LOOP_TEST_GAPS.md.
+      // authored position.
       // Notes that cross the seam, released at every replay boundary (see
       // rebaseReplay). A release sitting past the loop end is still pending when
       // the replay re-triggers the same pitch, and a second NoteOn for a

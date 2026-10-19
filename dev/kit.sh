@@ -216,8 +216,14 @@ cmd_pull() { # write dev/kit onto the target's overlay worktree
   paths=("${deliver[@]}")
   [ ${#paths[@]} -gt 0 ] || { echo "kit: $ov already current with $KIT_BRANCH"; return 0; }
 
-  # Refuse to clobber pending work in the paths the kit owns.
-  if [ -n "$(git -C "$wt" status --porcelain -- "${paths[@]}")" ]; then
+  # Refuse to clobber pending work in the paths the kit owns -- but a worktree's own
+  # feature notes (dev/features/**) and the tests it carries are EXPECTED to sit
+  # there untracked, and they live under `dev/**`, so counting them as pending work
+  # in a kit path would mean a refresh could never run.
+  local -a excl=()
+  local n
+  while IFS= read -r n; do [ -n "$n" ] && excl+=(":(exclude)$n"); done < <(kit_never_paths "$KIT_BRANCH")
+  if [ -n "$(git -C "$wt" status --porcelain -- "${paths[@]}" "${excl[@]}")" ]; then
     die "$ov has uncommitted changes in kit paths; commit or stash first"
   fi
 
@@ -225,8 +231,8 @@ cmd_pull() { # write dev/kit onto the target's overlay worktree
   # populate_from already staged (checkout updates the index; rm stages the
   # deletion), so there is nothing to add -- and `git add -A -- <gone path>`
   # would fail on the deleted vendored tree.
-  if [ -n "$(git -C "$wt" status --porcelain -- "${paths[@]}")" ]; then
-    git -C "$wt" commit -q -m "kit: sync overlay-only content from $KIT_BRANCH" -- "${paths[@]}"
+  if [ -n "$(git -C "$wt" status --porcelain -- "${paths[@]}" "${excl[@]}")" ]; then
+    git -C "$wt" commit -q -m "kit: sync overlay-only content from $KIT_BRANCH" -- "${paths[@]}" "${excl[@]}"
     echo "kit: $ov updated from $KIT_BRANCH ($(git -C "$wt" rev-parse --short HEAD))"
   else
     echo "kit: $ov already current with $KIT_BRANCH"

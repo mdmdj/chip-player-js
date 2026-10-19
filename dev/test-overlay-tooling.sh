@@ -121,6 +121,13 @@ expect_not "new: the seam file is not carried" "$(cat "$OVB/server/index.js")" "
 # its own AGENTS.md, so the seed leaves it alone.
 expect_eq  "pull: a target's own AGENTS.md is not overwritten" "$(cat "$OVB/AGENTS.md")" "BASE TEMPLATE"
 
+# A worktree's own feature notes sit UNTRACKED under dev/** -- a path the kit
+# carries -- so counting them as pending work would refuse every kit sync forever.
+mkdir -p "$OVB/dev/features" && printf 'b notes\n' > "$OVB/dev/features/b.md"
+PULL="$(cd "$OVB" && bash dev/kit.sh pull dev/overlay-b 2>&1 || true)"
+expect_contains "kit: an untracked feature note does not block a pull" "$PULL" "already current"
+rm -rf "$OVB/dev/features"
+
 # Register target b in the overlay's manifest (as overlay-new tells you to).
 (
   cd "$OVB"

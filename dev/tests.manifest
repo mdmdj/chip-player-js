@@ -1,0 +1,62 @@
+# The test registry. `dev/run-tests.sh` is driven by this file; nothing is
+# hard-coded in the runner.
+#
+# The rule, the same one the chip-core uses: TESTS ARE SOURCE-COUPLED. A harness
+# tests whatever code its branch has, so it belongs to that branch, not to the kit.
+# The kit ships only the bare infrastructure -- the runner, this registry, and the
+# harnesses that test the tooling itself -- and a branch's own tests travel with
+# the branch:
+#
+#   * derived from a branch that has the code -> you inherit its tests, and they are
+#     expected to pass;
+#   * derived from a branch with no tests (current master) -> you get the bare
+#     infrastructure and the feature tests are SKIPPED, with a reason, not failed.
+#
+# A `group` declares a feature and the files that prove it is present. A feature
+# test runs only when every marker of its group exists in this tree. That is what
+# keeps a master-based worktree from reporting 17 failures for code it does not
+# have.
+#
+# Syntax (whitespace separated, `#` starts a comment):
+#   group <name> <marker-file> [<marker-file>...]
+#   test  infra|feature  <group|->  <path>
+#
+# Add a feature as: one `group` line naming a file only that feature adds, plus a
+# `test feature <group> <path>` line per harness. Add a harness that tests the
+# tooling as `test infra - <path>`.
+
+# --- feature markers -------------------------------------------------------
+# Each marker is a file the feature ADDS (something master does not have), so its
+# presence is proof the feature's code is in this tree.
+group subtunes src/players/EndDetector.js src/players/midi/endRule.js scripts/subtune-headers.js
+
+# --- infrastructure: tests the kit and the tooling. Always run. -------------
+test infra - dev/test-overlay-tooling.sh
+test infra - dev/test-overlay-registry.sh
+test infra - dev/test-overlay-discovery.sh
+test infra - dev/test-promote-syntax.sh
+test infra - dev/test-server-seams.js
+test infra - dev/test-client-seams.js
+test infra - dev/test-dev-ports.js
+test infra - dev/test-devtools.js
+test infra - dev/check-promotable-refs.js
+test infra - dev/record/scenarios.check.mjs
+
+# --- feature: tests the app and the engines. Run when the feature is here. --
+test feature subtunes dev/test-parsers.js
+test feature subtunes dev/test-build.js
+test feature subtunes dev/test-sequencer.js
+test feature subtunes dev/test-songrefs.js
+test feature subtunes dev/test-blind-loop.js
+test feature subtunes dev/test-end-detector.js
+test feature subtunes dev/test-midi-loops.js
+test feature subtunes dev/test-xmp-loops.js
+test feature subtunes dev/test-vgm-loops.js
+test feature subtunes dev/test-gme-loops.js
+test feature subtunes dev/test-mdx-loops.js
+test feature subtunes dev/test-v2m-loops.js
+test feature subtunes dev/test-sid-load.js
+test feature subtunes dev/test-local-subtunes.js
+test feature subtunes dev/test-subtunes-server.js
+test feature subtunes dev/test-search.js
+test feature subtunes dev/test-play-seo.js

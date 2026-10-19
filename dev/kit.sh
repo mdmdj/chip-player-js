@@ -85,6 +85,22 @@ kit_source() {
   echo "$KIT_CANONICAL"
 }
 
+# Feature test harnesses are source-coupled: they belong to the branch whose code
+# they test, so the kit never carries them. The list comes from the registry
+# (dev/tests.manifest), so adding a feature's tests means editing one file.
+kit_feature_tests() { # ref
+  git show "$1:dev/tests.manifest" 2>/dev/null \
+    | awk '$1 == "test" && $2 == "feature" { print $4 }'
+}
+
+# Everything the kit must not carry: the explicit list above plus the registry's
+# feature tests.
+kit_never_paths() { # ref
+  local n
+  for n in $KIT_NEVER; do printf '%s\n' "$n"; done
+  kit_feature_tests "$1"
+}
+
 # Overlay-only pathspecs, read from a ref, minus the exclusions (KIT_EXCLUDE and
 # KIT_NEVER are never carried), optionally filtered to/away from the seeds.
 kit_paths() { # ref [--seed|--no-seed]
@@ -161,11 +177,10 @@ cmd_capture() { # [<path>...] -- naming paths publishes just those (from the sou
   # cannot ride along -- and so a path that used to be carried gets pruned. `-f`
   # because populate_from staged them (git rm refuses a staged file otherwise).
   local nev
-  for nev in $KIT_NEVER; do
-    if [ -e "$wt/$nev" ]; then
-      git -C "$wt" rm -r -q -f --ignore-unmatch -- "$nev"
-    fi
-  done
+  while IFS= read -r nev; do
+    [ -n "$nev" ] || continue
+    [ -e "$wt/$nev" ] && git -C "$wt" rm -r -q -f --ignore-unmatch -- "$nev"
+  done < <(kit_never_paths "$src")
   git -C "$wt" add -A -- .
   if git -C "$wt" diff --cached --quiet; then
     echo "kit: $KIT_BRANCH already current with $src"
@@ -227,13 +242,14 @@ cmd_list() {
   echo "seeded (delivered only to a target that has none, never captured up):"
   kit_paths "$(kit_exists && echo "$KIT_BRANCH" || echo "$src")" --seed | sed 's/^/  /'
   echo "never captured (not template material):"
-  local nev; for nev in $KIT_NEVER; do echo "  $nev"; done
+  local nev; while IFS= read -r nev; do [ -n "$nev" ] && echo "  $nev"; done < <(kit_never_paths "$(kit_exists && echo "$KIT_BRANCH" || echo "$src")")
 }
 
 case "${1:-}" in
   capture) shift; cmd_capture "$@" ;;
   pull)    [ -n "${2:-}" ] || die "usage: dev/kit.sh pull <target>"; cmd_pull "$2" ;;
   list)    cmd_list ;;
+  never)   kit_never_paths "$(kit_exists && echo "$KIT_BRANCH" || echo "$(kit_source)")" ;;
   "")      sed -n '2,29p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' ;;
   *)       die "unknown command '$1' (capture|pull|list)" ;;
 esac

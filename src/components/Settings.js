@@ -22,6 +22,18 @@ const silenceOptions = [
   { value: 5, label: '5 seconds' },
 ];
 
+const normalizationOptions = [
+  { value: 'off', label: 'Off' },
+  { value: 'song', label: 'Per song' },
+  { value: 'album', label: 'Per folder (album)' },
+];
+
+const normalizationTargetOptions = [
+  { value: -23, label: 'Quiet (-23 LUFS)' },
+  { value: -18, label: 'Balanced (-18 LUFS)' },
+  { value: -14, label: 'Loud (-14 LUFS)' },
+];
+
 // DEV-BEGIN (stripped for promotion; dev-only end-detector tuning panel. A
 // player that uses EndDetector exposes it as `player.endDetector`; this
 // component and its usage below strip together, leaving production untouched.)
@@ -109,7 +121,7 @@ function Settings(props) {
   const theme = settings?.theme;
   const silenceDuration = settings?.silenceDuration ?? -1;
   const showLoopArea = settings?.showLoopArea ?? true;
-  const volumeNormalization = settings?.volumeNormalization ?? 'auto';
+  const volumeNormalization = settings?.volumeNormalization ?? 'song';
   const normalizationTarget = Number(settings?.normalizationTarget ?? -18);
 
   const handleThemeChange = useCallback((e) => {
@@ -139,13 +151,12 @@ function Settings(props) {
   const normalizationStatus = (() => {
     if (volumeNormalization === 'off') return null;
     if (replayGainSource === 'pending') return 'Analyzing...';
-    const prefix = volumeNormalization === 'auto' ? 'Auto · ' : '';
     if (replayGainSource === 'album') {
       const progress = replayGainAlbumProgress;
       const suffix = progress ? ` (${progress.analyzed}/${progress.total} tracks)` : '';
-      return `${prefix}Album ${formatGain(replayGainDb)}${suffix}`;
+      return `Album ${formatGain(replayGainDb)}${suffix}`;
     }
-    if (replayGainSource === 'song') return `${prefix}Song ${formatGain(replayGainDb)}`;
+    if (replayGainSource === 'song') return `Song ${formatGain(replayGainDb)}`;
     return null;
   })();
 
@@ -205,6 +216,47 @@ function Settings(props) {
           Show Loop Area
         </label>
       </span>
+      <span className='PlayerParams-param'>
+        <label
+          htmlFor='volumeNormalization'
+          title='ReplayGain-style level matching. "Per folder" keeps an album at one gain.'
+          className="PlayerParams-label-wide">
+          Volume Normalization:{' '}
+        </label>
+        <select
+          id='volumeNormalization'
+          onChange={handleNormalizationChange}
+          value={volumeNormalization}>
+          {normalizationOptions.map(option =>
+            <option key={option.value} value={option.value}>{option.label}</option>
+          )}
+        </select>
+      </span>
+      {volumeNormalization !== 'off' &&
+        <span className='PlayerParams-param'>
+          <label
+            htmlFor='normalizationTarget'
+            title='Integrated loudness target. Quiet leaves more headroom; Loud matches streaming players but may limit peaks.'
+            className="PlayerParams-label-wide">
+            Loudness Target:{' '}
+          </label>
+          <select
+            id='normalizationTarget'
+            onChange={handleNormalizationTargetChange}
+            value={normalizationTarget}>
+            {normalizationTargetOptions.map(option =>
+              <option key={option.value} value={option.value}>{option.label}</option>
+            )}
+          </select>
+        </span>}
+      {normalizationStatus &&
+        <div className='PlayerParams-hint'>
+          {normalizationStatus}
+          {' '}
+          <span title='Static gain is capped so the track does not clip; very dynamic songs may still end up below the target.'>
+            (peak-capped)
+          </span>
+        </div>}
       {/* DEV-BEGIN (stripped for promotion; dev-only end-detector tuning) */}
       <EndDetectorTuning sequencer={sequencer} />
       {/* DEV-END */}

@@ -103,8 +103,7 @@ class App extends React.Component {
     this.midiPlayer = null; // Need a reference to MIDIPlayer to handle SoundFont loading.
     this.normalizationGain = 1;
     this.replayGainSong = null;
-    this.replayGainSongKey = null;
-    this.replayGainContext = null;
+    this.replayGainSongPath = null;
     window.ChipPlayer = this;
 
 
@@ -234,7 +233,7 @@ class App extends React.Component {
       sampleRate: audioCtx.sampleRate,
       getSettings: () => this.props.userContext?.settings,
       onChange: this.handleReplayGainChange,
-      fetchServer: (filepath, subtune) => this.fetchLoudness(filepath, subtune),
+      fetchBuffer: (filepath) => this.fetchSongBuffer(filepath),
     });
 
     // Populate all mounted IDBFS file systems from IndexedDB.
@@ -473,8 +472,7 @@ class App extends React.Component {
 
     if (ejected) {
       this.replayGainSong = null;
-      this.replayGainSongKey = null;
-      this.replayGainContext = null;
+      this.replayGainSongPath = null;
       this.replayGain?.clear();
       clearTimeout(this.playbackTimer);
       this.playbackKey = null;
@@ -492,25 +490,18 @@ class App extends React.Component {
         }
       }
     } else {
-      // A play is per song *and* sub-tune, not per file: sibling sub-tunes share
-      // one songId, and the catalog metadata for the next one can land before
-      // its player state does (SID waits on HVSC metadata). Track the full
-      // SongRef, and only start a new timer when that identity changes.
-      const currRef = this.sequencer.getCurrSongRef();
-      const currRefKey = currRef ? songRefKey(currRef) : null;
-
-      const replayGainPath = this.sequencer.getCurrSongPath();
-      const replayGainBuffer = this.sequencer.getCurrSongBuffer();
-      const replayGainContext = this.sequencer.getCurrContext();
-      if (replayGainPath && replayGainBuffer && currRefKey
-          && (currRefKey !== this.replayGainSongKey || replayGainContext !== this.replayGainContext)) {
-        this.replayGainSongKey = currRefKey;
-        this.replayGainContext = replayGainContext;
+      const player = this.sequencer.getPlayer();
+      const songPath = this.sequencer.getCurrSongPath();
+      const currSongRef = this.sequencer.getCurrSongRef();
+      const songTitleKey = songRefKey(currSongRef);
+      const songBuffer = this.sequencer.getCurrSongBuffer();
+      const replayGainKey = songRefKey(currSongRef);
+      if (songPath && songBuffer && replayGainKey !== this.replayGainSongKey) {
+        this.replayGainSongKey = replayGainKey;
         this.replayGainSong = {
-          filepath: replayGainPath,
-          buffer: replayGainBuffer,
-          subtune: currRef?.subtune || 0,
-          context: replayGainContext,
+          filepath: songPath,
+          buffer: songBuffer,
+          subtune: currSongRef?.subtune || 0,
         };
         this.startReplayGain(this.replayGainSong);
       }
@@ -768,30 +759,59 @@ class App extends React.Component {
   }
 
   applyOutputGain() {
-    if (!this.gainNode || !this.normalizationGainNode) return;
+    if (!this.gainNode) return;
     const volume = Math.max(0, Math.min(2, this.state.volume * 0.01));
-    const normalization = Math.max(0, Math.min(8, this.normalizationGain || 1));
-    const now = this.audioCtx.currentTime;
-    this.normalizationGainNode.gain.setTargetAtTime(normalization, now, 0.06);
-    this.gainNode.gain.setTargetAtTime(volume, now, 0.06);
+    // The normalization multiplier is a replay gain; the user's volume is still
+    // theirs. Cap the product so a bad scan cannot blow the output up.
+    const target = Math.max(0, Math.min(8, volume * (this.normalizationGain || 1)));
+    this.gainNode.gain.setTargetAtTime(target, this.audioCtx.currentTime, 0.06);
   }
 
-  startReplayGain(song) {
+  async startReplayGain(song) {
     if (!this.replayGain) return;
+    const mode = this.props.userContext?.settings?.volumeNormalization || 'song';
+    let albumPaths;
+    if (mode === 'album') {
+      albumPaths = await this.getAlbumPaths(song.filepath);
+      // The user may have moved on while the folder listing was fetched.
+      if (this.replayGainSong !== song) return;
+    }
     this.replayGain.setSong({
       filepath: song.filepath,
       buffer: song.buffer,
-      subtune: song.subtune || 0,
-      isLocal: song.filepath.startsWith('local/'),
-      context: song.context,
+      subtune: this.sequencer?.getSubtune?.() || 0,
+      albumPaths,
     });
   }
 
-  async fetchLoudness(filepath, subtune = 0) {
-    const url = `${API_BASE}/loudness?path=${encodeURIComponent(filepath)}&subtune=${subtune}`;
-    const response = await fetch(url);
-    if (!response.ok) return null;
-    return response.json();
+  async fetchSongBuffer(filepath) {
+    if (filepath.startsWith('local/')) {
+      return this.localFilesManager.read(filepath);
+    }
+    const response = await fetch(getUrlFromFilepath(filepath));
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.arrayBuffer();
+  }
+
+  async getAlbumPaths(filepath) {
+    if (filepath.startsWith('local/')) {
+      return this.playContexts['local'] || [filepath];
+    }
+    const dir = pathe.dirname(filepath);
+    if (!dir || dir === '.' || dir === '/') return [filepath];
+    if (!this.playContexts[dir]) {
+      try {
+        await this.fetchDirectory(dir);
+      } catch (e) {
+        return [filepath];
+      }
+    }
+    const siblings = (this.playContexts[dir] || []).filter(path => path !== filepath);
+    if (siblings.length === 0) return [filepath];
+    // A 1000-file collection folder is not an album. Treating it as one would
+    // scan for minutes and would apply a meaningless average.
+    if (siblings.length > 40) return [filepath];
+    return [filepath, ...siblings];
   }
 
   handleCycleRepeat() {

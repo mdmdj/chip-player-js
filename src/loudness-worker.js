@@ -59,14 +59,7 @@ globalThis.self.onmessage = (event) => {
     }
     try {
       const analyze = await getAnalyzer();
-      const measurement = await analyze(buffer, filepath, {
-        subtune: subtune || 0,
-        allSubtunes: !!message.allSubtunes,
-        maxSubtunes: message.maxSubtunes,
-        maxRenderSeconds: message.maxRenderSeconds,
-        wallBudgetMs: message.wallBudgetMs,
-        isCancelled: () => cancelled.has(id),
-      });
+      const measurement = await analyze(buffer, filepath, subtune || 0, () => cancelled.has(id));
       if (cancelled.has(id)) {
         cancelled.delete(id);
         reportCancelled(id);

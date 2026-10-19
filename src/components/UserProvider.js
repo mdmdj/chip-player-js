@@ -31,7 +31,7 @@ const DEFAULT_SETTINGS = {
   showLoopArea: true,
   // ReplayGain-style loudness normalization. On by default: the point is that
   // quiet engines and songs do not need the volume slider at 150%.
-  volumeNormalization: 'auto',
+  volumeNormalization: 'song',
   normalizationTarget: -18,
 };
 

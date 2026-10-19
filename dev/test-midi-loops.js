@@ -434,7 +434,10 @@ catalogCheck(DOOM, 'piano roll unchanged for files without loops (DOOM)', () => 
 
 const GYRO = 'Nintendo 64 (SoundFont MIDI)/Pilotwings 64/13 - Gyrocopter.mid';
 
-check('Gyrocopter: padded END_OF_TRACK does not inflate duration', () => {
+// catalogCheck, not check: the file lives in the curated collection, and a worktree
+// seeded with the cheap sample (dev/sample.manifest) does not have it. A plain
+// `check` would report a failure for a file that is simply not here.
+catalogCheck(GYRO, 'Gyrocopter: padded END_OF_TRACK does not inflate duration', () => {
   const mf = loadMidi(GYRO);
   const { events, loopStartMs, loopEndMs } = mf.getPlaybackEvents(true);
   const dur = events[events.length - 1].playTime;

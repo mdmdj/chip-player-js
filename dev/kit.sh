@@ -39,7 +39,7 @@
 #   ./dev/kit.sh list                  # what the kit carries, seeds, never carries
 #
 # capture publishes from KIT_SOURCE, or from the canonical overlay (KIT_CANONICAL,
-# default dev/overlay) -- NOT from whatever branch you are on, so standing in a
+# default dev/overlay-subtunes) -- NOT from whatever branch you are on, so standing in a
 # feature overlay cannot publish that feature's kit-path edits as the template.
 # Naming paths (AGENTS.md) overrides the seed rule and publishes those alone.
 # pull writes onto a target's overlay worktree and commits only what it changed.
@@ -79,7 +79,7 @@ kit_exists() { git -C "$ROOT" show-ref --verify --quiet "refs/heads/$KIT_BRANCH"
 # everyone's -- publishing them by standing in the wrong directory is exactly how
 # one feature's baggage becomes the next feature's starting point. Publish from
 # another overlay on purpose with KIT_SOURCE=<overlay>.
-KIT_CANONICAL="${KIT_CANONICAL:-dev/overlay}"
+KIT_CANONICAL="${KIT_CANONICAL:-dev/overlay-subtunes}"
 kit_source() {
   if [ -n "${KIT_SOURCE:-}" ]; then echo "$KIT_SOURCE"; return; fi
   echo "$KIT_CANONICAL"

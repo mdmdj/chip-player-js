@@ -35,7 +35,7 @@ runs `dev/apply.sh` and copies in a real chip-core (~20s):
 `dev/overlay.sh` with no arguments lists every command. See "Spinning up a new
 target" below for what bring-up does and the port policy.
 
-For the long-lived `dev/overlay` itself the original two steps still apply:
+For the long-lived `dev/overlay-subtunes` itself the original two steps still apply:
 
 ```sh
 ./dev/apply.sh   # install shims, seed databases, build a tiny catalog
@@ -65,7 +65,7 @@ an error, not an implicit full re-shoot). See `dev/record/README.md`.
 
 ## Promoting feature work to the reviewable branch
 
-`dev/overlay` is the working branch; the reviewable PR branch
+`dev/overlay-subtunes` is the working branch; the reviewable PR branch
 (`feature/subtunes-as-first-class`) must contain only feature work. Promoting is
 two steps, and the second one is deliberately not a flag on the first:
 
@@ -76,7 +76,7 @@ touch dev/.promote-armed   # arm the writer
 ```
 
 The key file exists so promoting is an act a person does on purpose.
-`promote-apply.sh` then runs the whole mechanical tail: it puts `dev/overlay`
+`promote-apply.sh` then runs the whole mechanical tail: it puts `dev/overlay-subtunes`
 back on top (`dev/rebase.sh`, which verifies the tree did not move) and
 publishes both branches (the feature branch, then `dev/push-overlay.sh`).
 `PROMOTE_SKIP_PUSH=1` stops after the rebase.
@@ -88,8 +88,8 @@ against the pre-rebase tip. The script takes that diff as its job, names any
 commit the rebase emptied or dropped, and tells you to `git rebase --abort`
 rather than `--continue` if a rebase stops.
 
-The rebase rewrites `dev/overlay`'s history, so its push is `--force-with-lease`
-(`dev/push-overlay.sh`) — never `git pull` `dev/overlay` after a rebase.
+The rebase rewrites `dev/overlay-subtunes`'s history, so its push is `--force-with-lease`
+(`dev/push-overlay.sh`) — never `git pull` `dev/overlay-subtunes` after a rebase.
 
 See "Dev overlay & promotion" in the repo-root `AGENTS.md` for what counts as
 feature work and how the DEV-region stripping works.
@@ -158,7 +158,7 @@ A row is a manifest line: `name feature overlay wds api`.
 
 Port policy (the rule):
 
-- **3000/8080 are reserved** for the long-lived target (`dev/overlay`).
+- **3000/8080 are reserved** for the long-lived target (`dev/overlay-subtunes`).
 - targets take a pair from the pool: **WDS 3300-3399, API 8300-8399**, i.e.
   `WDS 3300+i`, `API 8300+i` for `i` in `0..99` (API = WDS + 5000 by
   construction). Allocated lowest-free, never a pair the registry names or a
@@ -217,7 +217,7 @@ your commit discipline.
 `capture` is a **snapshot, not a merge**: it copies the named paths from the
 source overlay onto `dev/kit`, so two agents capturing at once are
 last-write-wins. It publishes from the **canonical overlay**
-(`KIT_CANONICAL`, default `dev/overlay`), *not* from whatever branch you are
+(`KIT_CANONICAL`, default `dev/overlay-subtunes`), *not* from whatever branch you are
 standing on — otherwise a feature overlay's kit-path edits (a rebuild script, a
 build flag) would silently become every future feature's starting point. To
 publish from another overlay, say so: `KIT_SOURCE=<overlay> dev/kit.sh capture`.

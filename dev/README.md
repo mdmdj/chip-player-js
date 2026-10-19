@@ -78,6 +78,10 @@ one target", "Spinning up a new target", "The registry", "Engines and modules",
 - **The kit's currency is asserted.** `dev/test-overlay-discovery.sh` fails if a
   tool or doc changed on the overlay but was not captured, so "documented" and
   "delivered to a new worktree" cannot drift apart.
+- **If a `pull`/`refresh` refuses naming `dev/features/`** (or any of the tests the
+  kit does not carry), that worktree predates the guard learning to ignore
+  never-carried paths: move the note aside once, pull, and put it back. Only
+  *tracked* modifications to a kit path genuinely block a sync.
 - **Ports:** 3000/8080 belong to the long-lived target; a target claims a pair from
   WDS 3300-3399 / API 8300-8399 (`dev/registry.sh list` shows what is taken).
 - **Never push to `upstream`** — everything stays in the fork (`origin`).

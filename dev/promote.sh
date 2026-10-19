@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 #
-# DEV-ONLY: show what would be promoted from dev/overlay to
+# DEV-ONLY: show what would be promoted from the overlay to
 # feature/subtunes-as-first-class. This script CANNOT promote: it has no write
 # path at all. That is deliberate -- promotion writes commits to the reviewable
 # PR branch, so it must be asked for, not reached for. See
 # dev/promote-apply.sh for the (armed) writer.
 #
 # The feature branch is the reviewable PR and must contain ONLY feature work.
-# dev/overlay stacks dev tooling and audio/engine work on top. When you finish a
+# the overlay stacks dev tooling and audio/engine work on top. When you finish a
 # chunk of feature work on the overlay branch, look at the plan here and decide.
 #
 # How it decides what is feature:

@@ -141,7 +141,7 @@ if [ "${NO_REAL_CORE:-0}" != 1 ]; then
   # A core is a build of the ENGINE SOURCES, so which one matters. Default: a core
   # built from CORE_REF (master) -- a fresh feature then behaves like upstream. A
   # feature extending unmerged engine work asks for that branch's core instead:
-  #   CORE_REF=dev/overlay ./dev/bringup.sh <name>
+  #   CORE_REF=dev/overlay-subtunes ./dev/bringup.sh <name>
   if bash "$DIR/core.sh" use "${CORE_REF:-master}" "$ov_wt" >/dev/null 2>&1; then
     echo "bringup: chip-core from ${CORE_REF:-master}"
   elif bash "$DIR/core.sh" from "$main_wt" "$ov_wt" >/dev/null 2>&1; then

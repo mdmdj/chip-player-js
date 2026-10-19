@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 #
-# DEV-ONLY: publish dev/overlay to origin.
+# DEV-ONLY: publish the overlay to origin.
 #
 #   ./dev/push-overlay.sh
 #
-# dev/rebase.sh rewrites dev/overlay's history every promote (it replays all of
+# dev/rebase.sh rewrites the overlay's history every promote (it replays all of
 # the branch's commits onto the feature branch), so the remote tip is never an
 # ancestor and a plain `git push` is always rejected as non-fast-forward. The
 # branch therefore needs --force-with-lease, which overwrites only if the remote
 # still matches what this checkout last fetched.
 #
-# NEVER `git pull` dev/overlay after a rebase: it would reconcile the stale
+# NEVER `git pull` the overlay after a rebase: it would reconcile the stale
 # remote history back into the rebased one -- the wrong direction, and it can
 # reintroduce every pre-rebase commit. If a push is rejected, `git fetch` and
 # look; do not pull.

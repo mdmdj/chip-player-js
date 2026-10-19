@@ -166,7 +166,9 @@ export function createLoudnessAnalyzer(core, sampleRate) {
     const first = allSubtunes ? Math.min(subtuneCount, maxSubtunes) : 1;
     for (let index = 0; index < first; index++) {
       if (isCancelled && isCancelled()) throw cancelledError();
-      const subtune = allSubtunes ? index : targetSubtune;
+      const subtune = allSubtunes
+        ? index
+        : Math.max(0, Math.min(targetSubtune, subtuneCount - 1));
       if (allSubtunes && index > 0) {
         // Reload for each subtune. It is slower than playSubtune() but it is
         // isolated from auto-advance and from players whose stop() closes the

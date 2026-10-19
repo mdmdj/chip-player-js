@@ -102,7 +102,12 @@ function startLoudnessServer({ dbPath, catalogRoot, soundfontRoot, csdbPath }) {
     }
     if (!root) return sendJson(res, 404, { error: 'not found' });
 
-    const file = safeJoin(root, rest);
+    let file;
+    try {
+      file = safeJoin(root, rest);
+    } catch (e) {
+      return sendJson(res, 400, { error: 'bad path' });
+    }
     if (!file) return sendJson(res, 403, { error: 'forbidden' });
     let stat;
     try {

@@ -259,6 +259,8 @@ case "${1:-}" in
   pull)    [ -n "${2:-}" ] || die "usage: dev/kit.sh pull <target>"; cmd_pull "$2" ;;
   list)    cmd_list ;;
   never)   kit_never_paths "$(kit_exists && echo "$KIT_BRANCH" || echo "$(kit_source)")" ;;
+  owned)   kit_paths "$(kit_exists && echo "$KIT_BRANCH" || echo "$(kit_source)")" ;;
+  carried) kit_paths "$(kit_exists && echo "$KIT_BRANCH" || echo "$(kit_source)")" --no-seed ;;
   "")      sed -n '2,29p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' ;;
   *)       die "unknown command '$1' (capture|pull|list)" ;;
 esac

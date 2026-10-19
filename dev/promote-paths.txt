@@ -62,10 +62,9 @@ libADLMIDI/**
 # Feature work here must still be hand-carried: repeat that step every time.
 server/index.js
 
-# Engine feature-detection + remote-dev tweaks on shared files. Only
-# src/config/index.js remains: dev-only throughout (LAN hostname over
-# localhost), correctly listed. MIDIPlayer (2 ADLMIDI guards) and XMPPlayer
-# (1 seek_time_frame fallback) needed no regions -- both hunks are portable
-# compat that behaves identically against upstream cores, so they delisted
-# cleanly with their loop feature.
-src/config/index.js
+# Engine feature-detection + remote-dev tweaks on shared files. src/config/index.js
+# used to be listed because its only delta was the dev overlay's LAN hostname; it
+# now carries a feature override for the offline loudness scanner too, so the dev
+# block is a DEV region and the file promotes. MIDIPlayer (2 ADLMIDI guards) and
+# XMPPlayer (1 seek_time_frame fallback) needed no regions -- both hunks are
+# portable compat that behaves identically against upstream cores.

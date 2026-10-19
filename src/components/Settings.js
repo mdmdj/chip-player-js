@@ -253,7 +253,7 @@ function Settings(props) {
         <div className='PlayerParams-hint'>
           {normalizationStatus}
           {' '}
-          <span title='Static gain is capped so the track does not clip; very dynamic songs may still end up below the target.'>
+          <span title='Static gain is capped so the track does not clip at 100% volume; very dynamic songs may still end up below the target.'>
             (peak-capped)
           </span>
         </div>}

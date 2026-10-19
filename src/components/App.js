@@ -806,7 +806,9 @@ class App extends React.Component {
         return [filepath];
       }
     }
-    const siblings = (this.playContexts[dir] || []).filter(path => path !== filepath);
+    const siblings = Array.from(new Set(
+      (this.playContexts[dir] || []).filter(path => path !== filepath)
+    ));
     if (siblings.length === 0) return [filepath];
     // A 1000-file collection folder is not an album. Treating it as one would
     // scan for minutes and would apply a meaningless average.

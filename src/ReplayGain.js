@@ -311,7 +311,12 @@ export default class ReplayGain {
     const copy = copyForTransfer(buffer);
     return new Promise((resolve, reject) => {
       this.pendingJobs.set(id, { resolve, reject });
-      worker.postMessage({ type: 'analyze', id, filepath, buffer: copy, subtune }, [copy]);
+      try {
+        worker.postMessage({ type: 'analyze', id, filepath, buffer: copy, subtune }, [copy]);
+      } catch (e) {
+        this.pendingJobs.delete(id);
+        reject(e);
+      }
     });
   }
 }

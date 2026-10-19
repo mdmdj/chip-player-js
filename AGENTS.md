@@ -226,10 +226,14 @@ the dev core from an unpinned clone.
 `runTimeline(...)`. Use it to drive the real UI and spy on player state instead of
 listening.
 
-`./dev/run-tests.sh` runs every harness (plain Node + `assert`, plus a few bash
-checks — no framework, no new deps). `dev/test-overlay-*.sh` cover the overlay
-tooling itself: kit capture/pull, port claiming, discovery. Prefer driving the real
-UI, and assert on the **artefact** the user would see, not the state you set.
+`./dev/run-tests.sh` runs the registered harnesses (plain Node + `assert`, plus a
+few bash checks — no framework, no new deps). `dev/tests.manifest` is the registry
+and states the rule: tests are **source-coupled**, so the kit ships the
+infrastructure tests and a branch's own tests travel with the branch. A feature
+test runs only when its group's marker files exist here; otherwise it is skipped
+with the reason, not failed — so add your feature's tests with one `group` line plus
+a `test feature` line per harness. Prefer driving the real UI, and assert on the
+**artefact** the user would see, not the state you set.
 
 ## Conventions & cautions
 

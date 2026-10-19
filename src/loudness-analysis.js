@@ -74,8 +74,11 @@ export function createLoudnessAnalyzer(core, sampleRate) {
   function measureSubtune(player, targetSubtune, options, deadline, started) {
     const meter = new LoudnessMeter(sampleRate);
     const durationMs = player.getDurationMs();
+    // Six seconds of tail: GME's default fade is five seconds after the track
+    // length, and stopping exactly on the computed frame would mark every
+    // normal track "partial". The extra time lets the engine stop itself.
     const durationSeconds = isFinitePositive(durationMs)
-      ? Math.min(durationMs / 1000, options.maxRenderSeconds)
+      ? Math.min(durationMs / 1000 + 6, options.maxRenderSeconds)
       : DEFAULT_DURATION_SECONDS;
     const maxFrames = Math.ceil(durationSeconds * sampleRate);
     let frames = 0;

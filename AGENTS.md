@@ -519,8 +519,7 @@ at compile time rather than silently ignoring seek and tempo, which is better.
   (mdxmini fixes were leaking into the plan before) and no longer lists
   `N64Player`/`UserProvider`/`MIDIPlayer`/`XMPPlayer` (all promote cleanly:
   regions strip, portable guards ride along).
-- Remaining path-listed files are intentional: `src/config/index.js` is
-  dev-only throughout (LAN hostname) and `server/index.js` stays listed
+- Remaining path-listed files are intentional: `server/index.js` stays listed
   (DEV_AUTH_MODULE/skia seams) plus one hand item that is now DONE — the `?play=`
   handler's `subtuneCount` injection is hand-carried alongside the promoted
   `getSongByIdStmt` column (see "The 1 hard-coded seam" above); the remaining

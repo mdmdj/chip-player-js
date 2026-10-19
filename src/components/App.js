@@ -103,7 +103,7 @@ class App extends React.Component {
     this.midiPlayer = null; // Need a reference to MIDIPlayer to handle SoundFont loading.
     this.normalizationGain = 1;
     this.replayGainSong = null;
-    this.replayGainSongPath = null;
+    this.replayGainSongKey = null;
     window.ChipPlayer = this;
 
 
@@ -233,7 +233,7 @@ class App extends React.Component {
       sampleRate: audioCtx.sampleRate,
       getSettings: () => this.props.userContext?.settings,
       onChange: this.handleReplayGainChange,
-      fetchBuffer: (filepath) => this.fetchSongBuffer(filepath),
+      fetchServer: (filepath, subtune) => this.fetchLoudness(filepath, subtune),
     });
 
     // Populate all mounted IDBFS file systems from IndexedDB.
@@ -472,7 +472,7 @@ class App extends React.Component {
 
     if (ejected) {
       this.replayGainSong = null;
-      this.replayGainSongPath = null;
+      this.replayGainSongKey = null;
       this.replayGain?.clear();
       clearTimeout(this.playbackTimer);
       this.playbackKey = null;
@@ -767,53 +767,21 @@ class App extends React.Component {
     this.gainNode.gain.setTargetAtTime(target, this.audioCtx.currentTime, 0.06);
   }
 
-  async startReplayGain(song) {
+  startReplayGain(song) {
     if (!this.replayGain) return;
-    const mode = this.props.userContext?.settings?.volumeNormalization || 'song';
-    let albumPaths;
-    if (mode === 'album') {
-      albumPaths = await this.getAlbumPaths(song.filepath);
-      // The user may have moved on while the folder listing was fetched.
-      if (this.replayGainSong !== song) return;
-    }
     this.replayGain.setSong({
       filepath: song.filepath,
       buffer: song.buffer,
-      subtune: this.sequencer?.getSubtune?.() || 0,
-      albumPaths,
+      subtune: song.subtune || 0,
+      isLocal: song.filepath.startsWith('local/'),
     });
   }
 
-  async fetchSongBuffer(filepath) {
-    if (filepath.startsWith('local/')) {
-      return this.localFilesManager.read(filepath);
-    }
-    const response = await fetch(getUrlFromFilepath(filepath));
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    return response.arrayBuffer();
-  }
-
-  async getAlbumPaths(filepath) {
-    if (filepath.startsWith('local/')) {
-      return this.playContexts['local'] || [filepath];
-    }
-    const dir = pathe.dirname(filepath);
-    if (!dir || dir === '.' || dir === '/') return [filepath];
-    if (!this.playContexts[dir]) {
-      try {
-        await this.fetchDirectory(dir);
-      } catch (e) {
-        return [filepath];
-      }
-    }
-    const siblings = Array.from(new Set(
-      (this.playContexts[dir] || []).filter(path => path !== filepath)
-    ));
-    if (siblings.length === 0) return [filepath];
-    // A 1000-file collection folder is not an album. Treating it as one would
-    // scan for minutes and would apply a meaningless average.
-    if (siblings.length > 40) return [filepath];
-    return [filepath, ...siblings];
+  async fetchLoudness(filepath, subtune = 0) {
+    const url = `${API_BASE}/loudness?path=${encodeURIComponent(filepath)}&subtune=${subtune}`;
+    const response = await fetch(url);
+    if (!response.ok) return null;
+    return response.json();
   }
 
   handleCycleRepeat() {

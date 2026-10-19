@@ -1,14 +1,17 @@
 /**
  * ReplayGain manager.
  *
- * Owns the scan worker and the per-song / per-folder measurements, and tells the
- * app what linear gain to apply. The audio graph stays simple: the app multiplies
- * the user's volume by `linear` on its existing gain node.
+ * Catalog tracks are measured by `scripts/analyze-loudness.js` and served from
+ * the catalog database, so the browser does no work for them: one small lookup
+ * and the gain is applied. Local files have no catalog row, so those are
+ * measured here in a worker — with a hard watchdog, because a malformed file can
+ * keep a wasm engine inside one call where JavaScript cannot interrupt it.
  *
- * Two modes:
- *   song  - static gain from the track's integrated loudness.
- *   album - static gain from the duration-weighted loudness of every track in the
- *           same folder, so an album keeps its internal dynamics.
+ * Modes:
+ *   song  - static gain from the selected song's integrated loudness.
+ *   album - for a catalog folder, the folder's aggregate; for a multi-song file
+ *           (catalog or local), the file's sub-tunes aggregated. A single-song
+ *           local file is simply its track gain.
  * Off leaves the output exactly as it was.
  */
 import {
@@ -21,7 +24,14 @@ import {
 } from './loudness-cache';
 
 const DEFAULT_TARGET_LUFS = -18;
-const MAX_ALBUM_TRACKS = 40;
+
+const MAX_LOCAL_BYTES = 64 * 1024 * 1024;
+const MAX_LOCAL_RENDER_SECONDS = 300;
+const LOCAL_WALL_BUDGET_MS = 15000;
+const LOCAL_JOB_TIMEOUT_MS = 30000;
+const LOCAL_MAX_SUBTUNES = 32;
+const LOCAL_RETRY_MS = 24 * 60 * 60 * 1000;
+const CACHE_VERSION = 1;
 
 function byteLengthOf(buffer) {
   if (!buffer) return 0;
@@ -38,12 +48,17 @@ function copyForTransfer(buffer) {
   return new Uint8Array(buffer).slice().buffer;
 }
 
+function finite(value) {
+  return Number.isFinite(value);
+}
+
 export default class ReplayGain {
-  constructor({ sampleRate, getSettings, onChange, fetchBuffer }) {
+  constructor({ sampleRate, getSettings, onChange, fetchServer, analysisTimeoutMs }) {
     this.sampleRate = sampleRate;
     this.getSettings = getSettings;
     this.onChange = onChange;
-    this.fetchBuffer = fetchBuffer;
+    this.fetchServer = fetchServer;
+    this.analysisTimeoutMs = analysisTimeoutMs || LOCAL_JOB_TIMEOUT_MS;
 
     this.worker = null;
     this.nextJobId = 1;
@@ -51,12 +66,12 @@ export default class ReplayGain {
     this.scanToken = 0;
 
     this.song = null;
-    this.trackMeasurement = null;
-    this.albumMeasurement = null;
-    this.albumProgress = null;
-
-    this.trackCache = new Map(); // filepath -> measurement (including byteLength)
+    this.remote = null;
+    this.local = null;
     this.lastEmitted = null;
+
+    this.remoteCache = new Map(); // `${path}\0${subtune}` -> server response
+    this.localCache = new Map();  // filepath -> local cache entry
   }
 
   get mode() {
@@ -75,169 +90,233 @@ export default class ReplayGain {
       return;
     }
     if (this.mode === 'off') {
-      this.scanToken++; // stop applying late results to a now-off setting
+      this.scanToken++;
       this.cancelPending();
       this.applyCurrentGain();
       return;
     }
-    if (this.mode === 'song' && this.trackMeasurement) {
-      this.applyCurrentGain();
-    } else if (this.mode === 'album' && this.albumMeasurement) {
-      this.applyCurrentGain();
-    } else {
-      this.startSong(this.song);
+    if (this.song.isLocal) {
+      // Switching to album mode needs every sub-tune of a multi-song file.
+      if (this.mode === 'album' && !this.localAllSubtunes()) {
+        this.setSong(this.song);
+      } else {
+        this.applyCurrentGain();
+      }
+      return;
     }
+    this.applyCurrentGain();
   }
 
   clear() {
     this.scanToken++;
     this.cancelPending();
     this.song = null;
-    this.trackMeasurement = null;
-    this.albumMeasurement = null;
-    this.albumProgress = null;
+    this.remote = null;
+    this.local = null;
     this.emit({ gainDb: 0, linear: 1, source: 'off' });
-  }
-
-  cancelPending() {
-    if (!this.worker) return;
-    for (const [id, job] of this.pendingJobs) {
-      this.worker.postMessage({ type: 'cancel', id });
-      const error = new Error('cancelled');
-      error.cancelled = true;
-      job.reject(error);
-    }
-    this.pendingJobs.clear();
   }
 
   /**
    * @param {object} song
    * @param {string} song.filepath
-   * @param {ArrayBuffer|Uint8Array} song.buffer
    * @param {number} [song.subtune]
-   * @param {string[]} [song.albumPaths] - sibling paths in the same folder
+   * @param {ArrayBuffer|Uint8Array} [song.buffer] - local files only
+   * @param {boolean} [song.isLocal]
    */
   setSong(song) {
-    this.song = song;
-    this.trackMeasurement = null;
-    this.albumMeasurement = null;
-    this.albumProgress = null;
-    this.startSong(song);
+    this.song = {
+      filepath: song.filepath,
+      subtune: Number.isInteger(song.subtune) ? song.subtune : 0,
+      buffer: song.buffer,
+      isLocal: !!song.isLocal || song.filepath.startsWith('local/'),
+    };
+    this.remote = null;
+    this.local = null;
+    this.startSong(this.song);
   }
 
   async startSong(song) {
-    // A new song outranks any album siblings still queued for the previous one.
     this.cancelPending();
     const token = ++this.scanToken;
     if (this.mode === 'off') {
       this.emit({ gainDb: 0, linear: 1, source: 'off' });
       return;
     }
-
-    // A cached track can be applied before any work is scheduled. This is what
-    // makes the second play of a song (and every play after a reload) seamless.
-    const cached = await this.cachedFor(song.filepath, byteLengthOf(song.buffer));
-    if (token !== this.scanToken) return;
-    if (cached) {
-      this.trackMeasurement = cached;
-      this.applyCurrentGain();
+    if (song.isLocal) {
+      await this.startLocal(song, token);
     } else {
-      this.emit({ gainDb: 0, linear: 1, source: 'pending' });
+      await this.startCatalog(song, token);
     }
+  }
 
-    const track = cached || await this.scanTrack(song.filepath, song.buffer, song.subtune || 0);
-    if (token !== this.scanToken) return;
-    if (!track || track.silent) {
-      this.trackMeasurement = track || null;
+  // --- Catalog: read the measured row; never scan in the browser ----------
+
+  async startCatalog(song, token) {
+    const key = `${song.filepath}\0${song.subtune}`;
+    let response = this.remoteCache.get(key);
+    if (!response) {
+      try {
+        response = await this.fetchServer(song.filepath, song.subtune);
+      } catch (e) {
+        response = null;
+      }
+      if (token !== this.scanToken) return;
+      if (response) this.remoteCache.set(key, response);
+    }
+    if (!response) {
+      this.remote = null;
+      this.devWarnMissing(song);
       this.applyCurrentGain();
       return;
     }
-    this.trackMeasurement = track;
+    this.remote = response;
     this.applyCurrentGain();
-
-    if (this.mode === 'album') {
-      await this.scanAlbum(token, song);
-    }
   }
 
-  async cachedFor(filepath, byteLength) {
-    const memory = this.trackCache.get(filepath);
-    if (memory) {
-      if (!byteLength || memory.byteLength === byteLength) return memory;
-      return null;
-    }
-    const cached = await getCachedTrack(filepath);
-    if (!cached) return null;
-    if (byteLength && cached.byteLength !== byteLength) return null;
-    this.trackCache.set(filepath, cached);
-    return cached;
+  devWarnMissing(song) {
+    // DEV-BEGIN (stripped for promotion; catalog coverage warning for developers)
+    console.warn(
+      'ReplayGain: no catalog loudness row for %s (subtune %d); playing at unity gain.',
+      song.filepath, song.subtune,
+    );
+    // DEV-END
   }
 
-  async scanTrack(filepath, buffer, subtune = 0) {
-    const byteLength = byteLengthOf(buffer);
-    try {
-      const measurement = await this.requestAnalysis(filepath, buffer, subtune);
-      const value = {
-        ...measurement,
-        path: filepath,
+  // --- Local: measure in the worker, with limits and a watchdog ------------
+
+  startLocal(song, token) {
+    const byteLength = byteLengthOf(song.buffer);
+    if (byteLength > MAX_LOCAL_BYTES) {
+      this.local = {
+        version: CACHE_VERSION,
+        status: 'skipped',
         byteLength,
-        analyzedAt: Date.now(),
+        retryAfter: Infinity,
+        reason: 'too large',
       };
-      this.trackCache.set(filepath, value);
-      putCachedTrack(filepath, value);
-      return value;
-    } catch (e) {
-      if (!(e && e.cancelled)) {
-        console.warn(`ReplayGain: could not analyze ${filepath}:`, e.message || e);
-      }
-      return null;
+      this.localCache.set(song.filepath, this.local);
+      putCachedTrack(song.filepath, this.local);
+      this.applyCurrentGain();
+      return;
     }
-  }
-
-  async scanAlbum(token, song) {
-    const paths = Array.isArray(song.albumPaths) ? song.albumPaths : [];
-    if (paths.length < 2 || paths.length > MAX_ALBUM_TRACKS) {
-      // Not an album-shaped folder, or too large for a meaningful album gain.
+    const key = song.filepath;
+    const cached = this.localCache.get(key) || null;
+    if (cached && this.canUseLocal(cached, byteLength)) {
+      if (token !== this.scanToken) return;
+      this.local = cached;
+      this.applyCurrentGain();
       return;
     }
 
-    const measurements = new Map();
-    if (this.trackMeasurement) measurements.set(song.filepath, this.trackMeasurement);
-
-    for (const filepath of paths) {
-      if (token !== this.scanToken || this.mode !== 'album') return;
-      if (measurements.has(filepath)) continue;
-
-      let measurement = this.trackCache.get(filepath) || await getCachedTrack(filepath);
-      if (token !== this.scanToken || this.mode !== 'album') return;
-
-      if (!measurement && this.fetchBuffer) {
-        try {
-          const buffer = await this.fetchBuffer(filepath);
-          if (token !== this.scanToken || this.mode !== 'album') return;
-          if (buffer) measurement = await this.scanTrack(filepath, buffer, 0);
-        } catch (e) {
-          if (!(e && e.cancelled)) {
-            console.debug(`ReplayGain: no album scan for ${filepath}:`, e.message || e);
-          }
+    // Check IndexedDB once per path; the in-memory map is filled from it.
+    return getCachedTrack(key).then((stored) => {
+      if (token !== this.scanToken) return;
+      if (stored && stored.version === CACHE_VERSION && stored.byteLength === byteLength) {
+        this.localCache.set(key, stored);
+        if (this.canUseLocal(stored, byteLength)) {
+          this.local = stored;
+          this.applyCurrentGain();
+          return;
+        }
+        if (this.isRetrying(stored)) {
+          this.local = stored;
+          this.emit({ gainDb: 0, linear: 1, source: 'off' });
+          return;
         }
       }
+      this.local = null;
+      this.emit({ gainDb: 0, linear: 1, source: 'pending' });
+      const allSubtunes = this.mode === 'album';
+      return this.scanLocal(song, token, allSubtunes);
+    });
+  }
 
-      if (measurement) measurements.set(filepath, measurement);
-      this.albumProgress = { analyzed: measurements.size, total: paths.length };
+  canUseLocal(entry, byteLength) {
+    if (!entry || entry.version !== CACHE_VERSION || entry.byteLength !== byteLength) return false;
+    if (this.isRetrying(entry)) return false;
+    if (this.mode === 'album' && entry.subtuneCount > 1 && !entry.allSubtunes) return false;
+    return true;
+  }
+
+  isRetrying(entry) {
+    if (!entry) return false;
+    if (entry.status === 'skipped') return true;
+    return entry.status !== 'ok'
+      && entry.status !== 'partial'
+      && typeof entry.retryAfter === 'number'
+      && entry.retryAfter > Date.now();
+  }
+
+  localAllSubtunes() {
+    if (!this.local) return false;
+    return !!this.local.allSubtunes
+      || (this.local.subtuneCount || 1) <= 1;
+  }
+
+  async scanLocal(song, token, allSubtunes) {
+    try {
+      const result = await this.requestAnalysis(song.filepath, song.buffer, {
+        subtune: song.subtune,
+        allSubtunes,
+        maxSubtunes: LOCAL_MAX_SUBTUNES,
+        maxRenderSeconds: MAX_LOCAL_RENDER_SECONDS,
+        wallBudgetMs: LOCAL_WALL_BUDGET_MS,
+        timeoutMs: this.analysisTimeoutMs,
+      });
+      if (token !== this.scanToken) return;
+      const entry = {
+        version: CACHE_VERSION,
+        byteLength: byteLengthOf(song.buffer),
+        status: result.status || 'ok',
+        subtuneCount: result.subtuneCount || 1,
+        allSubtunes: !!allSubtunes,
+        subtunes: {},
+        file: result.file || null,
+        engine: result.engine,
+        analyzedAt: Date.now(),
+      };
+      for (const track of result.tracks || []) {
+        entry.subtunes[track.subtune] = track;
+      }
+      if (!entry.subtunes[song.subtune] && result.lufs) {
+        entry.subtunes[song.subtune] = result;
+      }
+      this.localCache.set(song.filepath, entry);
+      putCachedTrack(song.filepath, entry);
+      this.local = entry;
+      this.applyCurrentGain();
+    } catch (e) {
+      if (token !== this.scanToken) return;
+      const timedOut = e && e.timeout;
+      this.local = {
+        version: CACHE_VERSION,
+        byteLength: byteLengthOf(song.buffer),
+        status: timedOut ? 'timeout' : 'error',
+        retryAfter: Date.now() + LOCAL_RETRY_MS,
+        reason: e && e.message ? e.message : String(e),
+      };
+      this.localCache.set(song.filepath, this.local);
+      putCachedTrack(song.filepath, this.local);
+      if (!(e && e.cancelled)) {
+        console.warn(`ReplayGain: local scan failed for ${song.filepath}:`, this.local.reason);
+      }
       this.applyCurrentGain();
     }
-
-    if (token !== this.scanToken || this.mode !== 'album') return;
-    const album = albumFromTracks([...measurements.values()]);
-    if (!album) return;
-    this.albumMeasurement = {
-      ...album,
-      path: song.filepath,
-      byteLength: 0,
-    };
-    this.applyCurrentGain();
   }
+
+  localMeasurement() {
+    if (!this.local || !this.local.subtunes) return null;
+    if (this.mode === 'album') {
+      if (this.local.file) return this.local.file;
+      const tracks = Object.values(this.local.subtunes);
+      if (this.local.subtuneCount > 1) return albumFromTracks(tracks);
+    }
+    return this.local.subtunes[this.song?.subtune || 0]
+      || this.local.subtunes[0]
+      || null;
+  }
+
+  // --- Gain ---------------------------------------------------------------
 
   applyCurrentGain() {
     const mode = this.mode;
@@ -246,12 +325,32 @@ export default class ReplayGain {
       return;
     }
 
-    const measurement = mode === 'album'
-      ? (this.albumMeasurement || this.trackMeasurement)
-      : this.trackMeasurement;
+    let measurement = null;
+    let source = 'pending';
+    if (this.song?.isLocal) {
+      const local = this.localMeasurement();
+      if (local && finite(local.lufs)) {
+        measurement = local;
+        source = mode === 'album' && this.local?.subtuneCount > 1 ? 'album' : 'song';
+      }
+    } else if (this.remote) {
+      const album = this.remote.album;
+      const useAlbum = mode === 'album'
+        && album
+        && album.status === 'complete'
+        && finite(album.lufs);
+      measurement = useAlbum ? album : this.remote.track;
+      if (measurement && finite(measurement.lufs)) {
+        source = useAlbum ? 'album' : 'song';
+      } else {
+        measurement = null;
+      }
+    }
 
-    if (!measurement || measurement.silent) {
-      this.emit({ gainDb: 0, linear: 1, source: 'pending' });
+    if (!measurement) {
+      // A missing catalog row is deliberately silent in the UI; the dev-only
+      // warning above is the signal.
+      this.emit({ gainDb: 0, linear: 1, source: 'off' });
       return;
     }
 
@@ -260,17 +359,32 @@ export default class ReplayGain {
       ...gain,
       lufs: measurement.lufs,
       peakDb: measurement.peakDb,
-      source: mode === 'album' && this.albumMeasurement ? 'album' : 'song',
-      albumAnalyzed: this.albumProgress?.analyzed,
-      albumTotal: this.albumProgress?.total,
+      source,
+      subtuneCount: this.song?.isLocal
+        ? this.local?.subtuneCount
+        : this.remote?.subtuneCount,
     });
   }
 
   emit(result) {
-    const key = `${result.source}|${result.gainDb.toFixed(2)}|${result.albumAnalyzed || ''}|${result.albumTotal || ''}`;
+    const key = `${result.source}|${result.gainDb.toFixed(2)}`;
     if (key === this.lastEmitted) return;
     this.lastEmitted = key;
     this.onChange(result);
+  }
+
+  // --- Worker -------------------------------------------------------------
+
+  cancelPending() {
+    if (!this.worker) return;
+    for (const [id, job] of this.pendingJobs) {
+      this.worker.postMessage({ type: 'cancel', id });
+      clearTimeout(job.timer);
+      const error = new Error('cancelled');
+      error.cancelled = true;
+      job.reject(error);
+    }
+    this.pendingJobs.clear();
   }
 
   ensureWorker() {
@@ -282,6 +396,7 @@ export default class ReplayGain {
       const job = this.pendingJobs.get(message.id);
       if (!job) return;
       this.pendingJobs.delete(message.id);
+      clearTimeout(job.timer);
       if (message.type === 'result') {
         job.resolve(message.measurement);
       } else if (message.type === 'cancelled') {
@@ -294,26 +409,52 @@ export default class ReplayGain {
     };
     worker.onerror = (event) => {
       console.warn('ReplayGain worker error:', event.message || event);
-      for (const job of this.pendingJobs.values()) {
-        job.reject(new Error(event.message || 'Loudness worker error'));
-      }
-      this.pendingJobs.clear();
-      this.worker = null;
+      this.failAll(new Error(event.message || 'Loudness worker error'));
     };
     worker.postMessage({ type: 'init', sampleRate: this.sampleRate });
     this.worker = worker;
     return worker;
   }
 
-  requestAnalysis(filepath, buffer, subtune = 0) {
+  failAll(error) {
+    for (const job of this.pendingJobs.values()) {
+      clearTimeout(job.timer);
+      job.reject(error);
+    }
+    this.pendingJobs.clear();
+    if (this.worker) {
+      try { this.worker.terminate(); } catch (e) { /* already gone */ }
+    }
+    this.worker = null;
+  }
+
+  requestAnalysis(filepath, buffer, options) {
     const worker = this.ensureWorker();
     const id = this.nextJobId++;
     const copy = copyForTransfer(buffer);
     return new Promise((resolve, reject) => {
-      this.pendingJobs.set(id, { resolve, reject });
+      const timer = setTimeout(() => {
+        const error = new Error(`local scan timed out after ${options.timeoutMs} ms`);
+        error.timeout = true;
+        // terminate() is the only way to stop a wasm call that never returns.
+        this.failAll(error);
+        reject(error);
+      }, options.timeoutMs);
+      this.pendingJobs.set(id, { resolve, reject, timer });
       try {
-        worker.postMessage({ type: 'analyze', id, filepath, buffer: copy, subtune }, [copy]);
+        worker.postMessage({
+          type: 'analyze',
+          id,
+          filepath,
+          buffer: copy,
+          subtune: options.subtune,
+          allSubtunes: options.allSubtunes,
+          maxSubtunes: options.maxSubtunes,
+          maxRenderSeconds: options.maxRenderSeconds,
+          wallBudgetMs: options.wallBudgetMs,
+        }, [copy]);
       } catch (e) {
+        clearTimeout(timer);
         this.pendingJobs.delete(id);
         reject(e);
       }

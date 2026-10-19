@@ -29,7 +29,10 @@ require.extensions['.js'] = function (mod, filename) {
   const source = fs.readFileSync(filename, 'utf8');
   const out = babel.transformSync(source, {
     filename,
-    presets: [['@babel/preset-env', { targets: { node: 'current' }, modules: 'commonjs' }]],
+    presets: [
+      ['@babel/preset-env', { targets: { node: 'current' }, modules: 'commonjs' }],
+      '@babel/preset-react',
+    ],
     sourceMaps: false,
   });
   return mod._compile(out.code, filename);

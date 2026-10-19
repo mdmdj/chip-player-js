@@ -36,6 +36,7 @@ function ensureLoudnessSchema(db) {
       duration_sec REAL,
       engine TEXT,
       render_ms INTEGER,
+      reason TEXT,
       analyzed_at INTEGER
     );
 
@@ -67,6 +68,12 @@ function ensureLoudnessSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_loudness_path ON loudness(path);
     CREATE INDEX IF NOT EXISTS idx_loudness_status ON loudness_files(status);
   `);
+
+  // Additive migration for a catalog created by an earlier build of this table.
+  const columns = db.prepare('PRAGMA table_info(loudness_files)').all().map(c => c.name);
+  if (!columns.includes('reason')) {
+    db.exec('ALTER TABLE loudness_files ADD COLUMN reason TEXT');
+  }
 }
 
 module.exports = {

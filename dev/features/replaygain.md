@@ -1,22 +1,22 @@
-# replaygain — design and measurements
+# replaygain — design, measurements and the catalog scanner
 
-Feature branch: `feature/replaygain` (overlay `dev/overlay-replaygain`).
+Feature branch: `feature/replaygain`, stacked on `feature/subtunes-as-first-class`
+(the sub-tune identity model is what makes per-sub-tune loudness and the
+multi-song-file album meaningful). Overlay: `dev/overlay-replaygain`.
 
 ## The problem
 
 Volume varies by engine, game and song by more than the volume slider can
 compensate for. The slider tops out at 150% (+3.5 dB); the ear-labelled samples
 below span about 10.6 dB of integrated loudness. Some engines are also very loud:
-the V2M fixture measures about -9 LUFS with a peak above 0 dBFS, so it is already
+the V2M fixture measures about -10 LUFS with a peak above 0 dBFS, so it is already
 clipping before the user touches anything.
 
 ## What was measured
 
-`dev/test-replaygain.js` renders the samples through the same player classes and
-the same wasm core the app uses, at 48 kHz, and measures BS.1770 integrated
-loudness plus sample peak. These are the eight files that could be downloaded
-from the links (four returned Cloudflare 403s from this network; retry later or
-add them by hand):
+The specimens are rendered through the same player classes and wasm core the app
+uses, at 48 kHz, with BS.1770-4 gating (400 ms blocks, 100 ms hop, -70 LUFS and
+relative -10 dB gates). Peak is sample peak.
 
 | Label | File | LUFS | Peak dBFS | Gain at -18 (peak-safe) |
 | --- | --- | ---: | ---: | ---: |
@@ -29,82 +29,132 @@ add them by hand):
 | kinda loud | Lufia / Battle of the Island in the Void | -21.1 | -6.6 | +5.6 |
 | kinda loud | Mega Man X3 / Doppler Stage | -22.5 | -7.2 | +6.2 |
 
-The order matches the ear labels except End of Match (labelled quiet, measures
-like Doppler), which is why the feature uses measured loudness rather than a
-curated list.
-
 Raw spread: 10.6 dB. After peak-safe normalization to -18 LUFS: 2.1 dB. The
-quietest track is limited by its peak (it would need +13.8 dB to reach -18), so
-it lands at about -20 LUFS. That is the honest limit of a static replay gain
-without a limiter; see "Next steps".
+quietest tracks stop around -20 LUFS because their peaks cannot go higher without
+clipping; see "Limits".
 
-The album measurement is duration-weighted: an album is all of its tracks played
-back to back, so its mean square is the time-weighted mean of the tracks'. For
-the samples, the `quiet` folder becomes -27.8 LUFS (+7.3 dB, peak-limited), the
-`medium` folder -29.7 LUFS (+7.8 dB), and `kinda-loud` -21.5 LUFS (+3.5 dB).
+Four of the supplied links were 403 from this network (`9AR51lDC`, `NWA8rHky`,
+`xqUWlAHK`, `MCRZHzfs`). Add them under
+`catalog/replaygain-samples/loud/` and both the browser and scanner tests pick
+them up.
 
-## How it works
+## Catalog: server-side, stored in catalog.db
 
-1. **Measurement** (`src/loudness.js`): K-weighting (high shelf + 38 Hz RLB high
-   pass) at the actual sample rate, 400 ms gating blocks with a 100 ms hop,
-   absolute -70 LUFS and relative -10 dB gates. Peak is sample peak. This is
-   BS.1770-4 / EBU R128, not ReplayGain 1.0's 95th-percentile filter; the result
-   is directly comparable to the LUFS numbers streaming services quote.
-2. **Rendering** (`src/loudness-analysis.js`, in `src/loudness-worker.js`): a
-   second wasm core in a worker loads the song through the real player classes
-   and runs `processAudio` in a tight loop. No audio context, so it runs as fast
-   as the CPU allows (roughly 60-90x real time for GME, 300x for libxmp, 16x for
-   V2M). It is the same code path the audio callback uses, including duration
-   fades and subtune handling.
-3. **Gain**: `gainDb = target - measuredLufs`, then clamped so
-   `peakDb + gainDb <= -1 dBFS`, and bounded to [-24, +24] dB. This prevents
-   clipping without a limiter and turns already-hot engines (V2M) down.
-4. **Cache** (`src/loudness-cache.js`): IndexedDB keyed by filepath; the value
-   includes the byte length, so a changed file is rescanned. A cached track is
-   applied on the first frame of the next play, including after a reload.
-5. **Modes** (`src/ReplayGain.js`): `off`, `per song`, and `per folder (album)`.
-   Album mode scans the folder's siblings in the worker and applies one gain to
-   all of them, preserving the album's internal dynamics. Folders over 40 files
-   are treated as collections, not albums, and use song gain. In album mode the
-   current track's gain is applied while the rest of the folder is measured, then
-   the album gain takes over.
-6. **UI** (`Settings`): Off / Per song / Per folder, target Quiet (-23), Balanced
-   (-18) or Loud (-14), plus the current gain. Defaults: Per song, Balanced.
+The browser does **no analysis for catalog tracks**. A separate scanner fills
+`catalog.db`; the server serves the rows; the client applies a lookup.
 
-The app's existing gain node multiplies the user's volume by the normalization
-linear factor, so the slider still works and still tops out at 150%.
+```sh
+node scripts/build-music.js          # first, as usual
+node scripts/analyze-loudness.js     # then the loudness pass (resumable)
+node scripts/analyze-loudness.js --filter spc --limit 100 --verbose
+node scripts/analyze-loudness.js --force        # after a measurement change
+node scripts/analyze-loudness.js --retry-failed # retry errors/timeouts
+```
 
-## Known limits and next steps
+`scripts/analyze-loudness.js` is a batch tool, not an HTTP runtime dependency:
+
+- One child process pool (default `min(4, cpus-1)`), each with its own wasm core.
+  The parent owns the only SQLite writer.
+- A tiny local HTTP server serves the catalog, `public/soundfonts`, `/metadata`
+  and `/hvsc`; `CHIP_LOUDNESS_BASE` points `src/config` at it, so a scan is
+  offline and reproducible.
+- Resumable/incremental: candidates are rows whose size, mtime or
+  `LOUDNESS_VERSION` moved. Progress is committed per file. A killed run resumes.
+- Watchdog: if a child does not answer within `--timeout` (default 120 s), it is
+  killed and respawned. A pathological file is recorded as `timeout`, not allowed
+  to wedge the scan (JavaScript cannot interrupt a wasm C loop).
+- Files over `--max-size` (default 32 MB) are recorded as skipped. The catalog's
+  black MIDIs are the reason this exists.
+- Multi-song files are measured **per sub-tune** (the analyzer reloads each
+  sub-tune, capped by `--max-subtunes`, default 64) and get a duration-weighted
+  file aggregate.
+
+### Schema (created by build-music, ensured at server startup)
+
+- `loudness_files` — one row per file: status, `subtune_count`,
+  `analyzed_subtunes`, the file-level aggregate (`lufs`, `peak_db`,
+  `duration_sec`), engine, reason.
+- `loudness` — one row per `(path, subtune)`; what song mode uses.
+- `loudness_albums` — one row per directory; used for a normal album. It is
+  `complete` only when every file in the folder measured successfully; a partial
+  album is not applied.
+
+The client treats a multi-song file as its own album (the file aggregate); a
+single-song file uses its containing directory. This is the "album for songdir
+(multi-song file)" rule.
+
+### API
+
+`GET /api/loudness?path=<relative>&subtune=<n>`
+
+```json
+{
+  "track": { "path": "…", "subtune": 3, "status": "ok", "lufs": -23.4,
+             "peakDb": -6.4, "durationSec": 101.0, "partial": false, "engine": "gme" },
+  "album": { "kind": "file", "status": "complete", "lufs": -27.7,
+             "peakDb": -6.4, "trackCount": 28, "durationSec": 1790.9 },
+  "subtuneCount": 28
+}
+```
+
+A missing row returns `{track:null, album:null, subtuneCount:null}`. The client
+plays at unity, shows nothing, and logs a warning only inside a `DEV-BEGIN`
+region.
+
+## Local files: browser worker, hardened
+
+Local files have no catalog row, so they are the only browser-side scans.
+
+- `src/ReplayGain.js` requests `allSubtunes` in album mode; a multi-song local
+  file's album is the file aggregate. A single-song local file is track gain even
+  in album mode.
+- **Watchdog:** the main thread times out a job (30 s), `worker.terminate()`s it,
+  caches the failure for 24 h, and falls back to unity. This is the only reliable
+  way to stop a wasm call that never returns.
+- **Bounds:** 64 MB file cap, 300 s render cap, 15 s worker wall budget, 30 s job
+  timeout, 32 local sub-tunes. The worker checks cancellation/wall time and yields
+  to the event loop every ~0.5 s.
+- An oversized/failed file is cached as `skipped`/`timeout` and is not retried on
+  every play.
+
+## Gain
+
+`gainDb = target - measuredLufs`, capped so `peakDb + gainDb <= -1 dBFS` and
+bounded to [-24, +24] dB. This prevents clipping without a limiter and turns hot
+engines (V2M) down. The app multiplies the user's volume by the linear gain; the
+slider still tops out at 150%.
+
+Target options: Quiet (-23), Balanced (-18, default), Loud (-14). Settings:
+Off / Per song / Per folder (album).
+
+## Limits / next steps
 
 - **Peak-limited tracks stop short of the target.** A static gain cannot raise a
-  track whose peak is already close to full scale. A look-ahead limiter (or a
-  soft clipper) after the gain node would allow the Loud target to actually
-  reach -14 on those tracks. Not done here because it changes the sound, not just
-  the level, and needs a listening test to choose the threshold/attack.
-- **First play is at unity gain for a second or two** while the worker scans.
-  Subsequent plays are instant from cache. A partial live estimate could remove
-  the gap, but would be a second measurement path.
-- **MIDI's first scan downloads the SoundFont** into the worker's filesystem
-  (the main player has its own filesystem), so the first MIDI scan can take
-  much longer than the track. Later MIDI scans reuse the worker's copy.
-- **Long/slow engines are capped** at 20 seconds of wall time and marked
-  `partial`; the part that was rendered is still measured. The N64 and SID
-  fixtures hit this, so their numbers are approximate.
-- **Album scans fetch every sibling.** A cold 4-track folder took about 12 s in
-  this tree; the progress is visible in Settings and the worker is cancellable
-  when the user changes song.
-- **No server precompute.** A catalog-wide scan would take hours (9.5k files at
-  roughly 1-3 s each), so measurement is on demand and cached per browser.
-- **The four missing sample links** were 403 from this network
-  (`9AR51lDC`, `NWA8rHky`, `xqUWlAHK`, `MCRZHzfs`). Add the files under
-  `catalog/replaygain-samples/loud/` and the harness picks them up.
+  track whose peak is already near full scale. A look-ahead limiter would let
+  Loud reach -14 on those tracks; not done because it changes the sound and needs
+  a listening test.
+- The **first local play** is at unity until the worker finishes; later plays are
+  instant from IndexedDB. Catalog plays are immediate.
+- **Catalog coverage is a scanner responsibility.** A new file plays neutral until
+  the next scan; the scanner summary reports measured/failed/skipped.
+- **`server/index.js` is path-listed**, so its `/loudness` route is a hand-carry
+  at promotion time. So are the route's `dbStatements` if the feature branch is
+  promoted without `server/database.js` (it is not path-listed, so normally the
+  promote carries it; keep the pair together).
+- **`src/config/index.js` now promotes**: its dev block is a DEV region and the
+  `CHIP_LOUDNESS_BASE` override is feature code for the scanner. Removing it from
+  `dev/promote-paths.txt` is deliberate.
 
 ## Verify
 
 ```sh
-./dev/run-tests.sh                 # dev/test-replaygain.js asserts the numbers above
-./dev/overlay.sh replaygain dev    # then play a sample with normalization on/off
+./dev/run-tests.sh
+# or individually:
+node dev/test-replaygain.js          # measurements + gain math
+node dev/test-loudness-catalog.js    # scanner snapshot, album, timeout, sub-tunes
+node dev/test-loudness-client.js     # watchdog, catalog lookup, local album
+node dev/test-loudness-server.js     # HTTP route (skips if no dev server)
 ```
 
-The harness skips the engine measurements when the tree has only the silent stub
-core or no sample folder; the gain/meter maths still run.
+The catalog harness snapshots `catalog.db` and never writes the live one. The
+server harness skips when the dev server or scanned rows are absent.

@@ -41,18 +41,6 @@ require.extensions['.jpg'] = (mod) => { mod.exports = 'image'; };
 require.extensions['.jpeg'] = (mod) => { mod.exports = 'image'; };
 require.extensions['.svg'] = (mod) => { mod.exports = 'image'; };
 
-// Point the player modules at the scanner's local metadata/catalog server
-// without touching the path-listed src/config/index.js. `src/config` exports a
-// plain CommonJS snapshot, and the player modules read these properties at call
-// time, so mutating the loaded module is enough.
-if (process.env.CHIP_LOUDNESS_BASE) {
-  const base = process.env.CHIP_LOUDNESS_BASE.replace(/\/+$/, '');
-  const config = require('../src/config');
-  config.API_BASE = `${base}/api`;
-  config.CATALOG_PREFIX = `${base}/catalog`;
-  config.SOUNDFONT_URL_PATH = `${base}/soundfonts`;
-}
-
 async function loadChipCore() {
   const jsPath = path.resolve(__dirname, '..', 'src', 'chip-core.js');
   const wasmPath = path.resolve(__dirname, '..', 'src', 'chip-core.wasm');

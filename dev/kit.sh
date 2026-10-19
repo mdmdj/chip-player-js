@@ -136,10 +136,11 @@ populate_from() { # src dest path...
     bare="$(kit_bare "$p")"
     if git -C "$dest" cat-file -e "$src:$bare" 2>/dev/null; then
       git -C "$dest" checkout "$src" -- "$bare"
+      printf '%s\n' "$bare"
     elif git -C "$dest" cat-file -e "HEAD:$bare" 2>/dev/null; then
       git -C "$dest" rm -r -q --ignore-unmatch -- "$bare"
+      printf '%s\n' "$bare"
     fi
-    printf '%s\n' "$bare"
   done
 }
 
@@ -227,12 +228,14 @@ cmd_pull() { # write dev/kit onto the target's overlay worktree
     die "$ov has uncommitted changes in kit paths; commit or stash first"
   fi
 
-  populate_from "$KIT_BRANCH" "$wt" "${paths[@]}" >/dev/null
-  # populate_from already staged (checkout updates the index; rm stages the
-  # deletion), so there is nothing to add -- and `git add -A -- <gone path>`
-  # would fail on the deleted vendored tree.
-  if [ -n "$(git -C "$wt" status --porcelain -- "${paths[@]}" "${excl[@]}")" ]; then
-    git -C "$wt" commit -q -m "kit: sync overlay-only content from $KIT_BRANCH" -- "${paths[@]}" "${excl[@]}"
+  local -a touched=()
+  mapfile -t touched < <(populate_from "$KIT_BRANCH" "$wt" "${paths[@]}")
+  # Commit only what populate_from touched: the full path list includes the vendored
+  # trees, which exist in neither the kit nor HEAD in a master-based overlay after its
+  # first sync, and `git commit -- <pathspec>` is fatal when a pathspec matches
+  # nothing -- so a second sync used to abort after staging everything.
+  if [ ${#touched[@]} -gt 0 ] && [ -n "$(git -C "$wt" status --porcelain -- "${touched[@]}" "${excl[@]}")" ]; then
+    git -C "$wt" commit -q -m "kit: sync overlay-only content from $KIT_BRANCH" -- "${touched[@]}" "${excl[@]}"
     echo "kit: $ov updated from $KIT_BRANCH ($(git -C "$wt" rev-parse --short HEAD))"
   else
     echo "kit: $ov already current with $KIT_BRANCH"

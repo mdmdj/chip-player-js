@@ -63,9 +63,9 @@ if [ ${#KPATHS[@]} -gt 0 ]; then ok "kit path list is readable (${#KPATHS[@]} pa
 else bad "kit path list is readable"; fi
 EXCL=()
 for n in "${NEVER[@]}"; do [ -n "$n" ] && EXCL+=(":(exclude)$n"); done
-DRIFT="$(git diff --name-only dev/kit dev/overlay -- "${KPATHS[@]}" "${EXCL[@]}" 2>/dev/null || true)"
+DRIFT="$(git diff --name-only dev/kit dev/overlay-subtunes -- "${KPATHS[@]}" "${EXCL[@]}" 2>/dev/null || true)"
 if [ -z "$DRIFT" ]; then
-  ok "the kit matches dev/overlay for everything it carries"
+  ok "the kit matches dev/overlay-subtunes for everything it carries"
 else
   bad "the kit is stale for: $(tr '\n' ' ' <<< "$DRIFT") -- run ./dev/kit.sh capture"
 fi
@@ -76,10 +76,10 @@ SEEDED="$(printf '%s\n' "$KLIST" | awk '/^seeded/{f=1;next} f && !/^  /{exit} f{
 expect_contains "the kit reports AGENTS.md as seeded" "$SEEDED" "AGENTS.md"
 expect_contains "the kit reports dev/features as never captured" "$KLIST" "dev/features"
 TEMPLATE="$(git show dev/kit:AGENTS.md)"
-if [ "$TEMPLATE" != "$(git show dev/overlay:AGENTS.md)" ]; then
-  ok "the template differs from dev/overlay's notes (seeded, not synced)"
+if [ "$TEMPLATE" != "$(git show dev/overlay-subtunes:AGENTS.md)" ]; then
+  ok "the template differs from dev/overlay-subtunes's notes (seeded, not synced)"
 else
-  bad "the template differs from dev/overlay's notes (a sync would clobber history)"
+  bad "the template differs from dev/overlay-subtunes's notes (a sync would clobber history)"
 fi
 if [ "$(wc -l <<< "$TEMPLATE")" -ge 80 ]; then ok "the template is a real playbook"
 else bad "the template is a real playbook ($(wc -l <<< "$TEMPLATE") lines)"; fi

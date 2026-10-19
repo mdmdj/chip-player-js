@@ -82,7 +82,7 @@ for (const ref of ['master', 'feature/subtunes-as-first-class']) {
 {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cseams-'));
   const tmp = path.join(dir, 'UserProvider.js');
-  const overlayCopy = cp.execFileSync('git', ['show', 'dev/overlay:' + REL], { cwd: ROOT, encoding: 'utf8' });
+  const overlayCopy = cp.execFileSync('git', ['show', 'dev/overlay-subtunes:' + REL], { cwd: ROOT, encoding: 'utf8' });
   fs.writeFileSync(tmp, overlayCopy);
   const r = run(tmp);
   check('a file that already has a dev user is left alone', () => {

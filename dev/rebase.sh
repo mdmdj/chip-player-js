@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# DEV-ONLY: put dev/overlay back on top of the feature branch after a promote.
+# DEV-ONLY: put the overlay back on top of the feature branch after a promote.
 #
 #   ./dev/rebase.sh
 #

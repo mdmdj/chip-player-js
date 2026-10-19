@@ -25,6 +25,24 @@ const errors = [];
 const warnings = [];
 const fail = (id, msg) => errors.push(`${id}: ${msg}`);
 
+// The test registry says which harnesses belong to which feature (see
+// dev/tests.manifest and dev/run-tests.sh): a clip whose harness is a feature test
+// is only runnable on a tree that has that feature.
+const featureTestGroups = new Map();
+const groupMarkers = new Map();
+try {
+  const manifest = fs.readFileSync(path.join(ROOT, 'dev/tests.manifest'), 'utf8');
+  for (const line of manifest.split('\n')) {
+    const f = line.replace(/#.*/, '').trim().split(/\s+/);
+    if (f[0] === 'group') groupMarkers.set(f[1], f.slice(2));
+    else if (f[0] === 'test' && f[1] === 'feature') featureTestGroups.set(f[3], f[2]);
+  }
+} catch (e) { /* no registry: every harness reference is checked literally */ }
+const groupPresent = (name) => {
+  const markers = groupMarkers.get(name) || [];
+  return markers.length > 0 && markers.every((m) => fs.existsSync(path.join(ROOT, m)));
+};
+
 const ids = new Set();
 for (const s of scenarios) {
   if (ids.has(s.id)) fail(s.id, 'duplicate id');
@@ -129,7 +147,18 @@ for (const s of scenarios) {
   const span = Math.max(...(s.steps || [{ atMs: 0 }]).map((st) => st.atMs || 0));
   if (span > 120000) fail(s.id, `scripted span ${span}ms exceeds the 120s clip budget`);
 
-  if (s.harness && !fs.existsSync(path.join(ROOT, s.harness))) fail(s.id, `harness does not exist: ${s.harness}`);
+  // A harness reference must resolve -- but a clip whose harness is a FEATURE test
+  // is only runnable on a branch that has that feature, and the kit does not carry
+  // a branch's tests (dev/tests.manifest states the rule). So a missing harness
+  // that the registry knows as a feature test SKIPS; anything else is a typo.
+  if (s.harness && !fs.existsSync(path.join(ROOT, s.harness))) {
+    const feature = featureTestGroups.get(s.harness);
+    if (feature && !groupPresent(feature)) {
+      warnings.push(`${s.id}: harness ${s.harness} is a ${feature} test this tree does not have -- clip not runnable here`);
+    } else {
+      fail(s.id, `harness does not exist: ${s.harness}`);
+    }
+  }
   if (!s.harness) warnings.push(`${s.id}: no harness reference`);
 
   // A clip that loops a song has to start from "already playing": the host

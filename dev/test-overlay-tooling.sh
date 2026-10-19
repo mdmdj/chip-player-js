@@ -61,7 +61,7 @@ git branch dev/overlay-a feature/a
 git worktree add -q "$WORK/ov-a" dev/overlay-a
 mkdir -p "$WORK/ov-a/dev"
 for f in overlaylib.sh promote.sh promote-plan.sh promote-apply.sh rebase.sh \
-         push-overlay.sh kit.sh overlay-new.sh overlay.sh; do
+         push-overlay.sh kit.sh overlay-new.sh overlay.sh refresh.sh registry.sh; do
   cp "$SRC/dev/$f" "$WORK/ov-a/dev/$f"
 done
 chmod +x "$WORK/ov-a/dev/"*.sh
@@ -136,16 +136,30 @@ expect_contains "kit: a second sync succeeds (no dangling pathspec)" "$PULL2" "a
 expect_not      "kit: a second sync does not report a pathspec error" "$PULL2" "pathspec"
 
 # Register target b in the overlay's manifest (as overlay-new tells you to).
-(
-  cd "$OVB"
-  printf 'b  feature/b  dev/overlay-b  3300 8180\n' >> dev/overlay.conf
-  git add dev/overlay.conf && git commit -qm "b: manifest row"
-)
+# Register target b the way the real flow does: in the SHARED REGISTRY, not in the
+# carried manifest -- a kit pull legitimately resets dev/overlay.conf to the kit's
+# copy, and the registry is the live source (that is why bringup registers there).
+(cd "$OVB" && WDS_BASE=3900 API_BASE=8900 bash dev/registry.sh claim b feature/b dev/overlay-b >/dev/null)
 
 # A fresh overlay has nothing to promote: the kit content is all overlay-only.
 FRESH="$(bash "$OVB/dev/promote.sh" b)"
 expect_contains "plan: fresh overlay has nothing to promote" "$FRESH" "Nothing to promote"
 expect_contains "plan: names the resolved pair" "$FRESH" "feature/b <- dev/overlay-b (b)"
+
+# --- refresh: dry-run first, then the real thing, and it is verified ---------
+PRE_HEAD="$(git -C "$OVB" rev-parse HEAD)"
+DRY_OUT="$(cd "$OVB" && bash dev/refresh.sh b --dry-run 2>&1 || true)"
+expect_contains "refresh: --dry-run reports the kit's state" "$DRY_OUT" "kit is current here"
+expect_contains "refresh: --dry-run reports the rebase status" "$DRY_OUT" "rebase:"
+expect_eq "refresh: --dry-run changes nothing" "$(git -C "$OVB" rev-parse HEAD)" "$PRE_HEAD"
+
+REF_OUT="$(cd "$OVB" && bash dev/refresh.sh b 2>&1 || true)"
+expect_contains "refresh: reports the target ok" "$REF_OUT" "  ok"
+expect_contains "refresh: summary counts it" "$REF_OUT" "1 refreshed, 0 skipped, 0 failed"
+
+# ...and `all` reaches every registered target
+ALL_OUT="$(cd "$OVB" && bash dev/refresh.sh all --dry-run 2>&1 || true)"
+expect_contains "refresh: all covers the registered targets" "$ALL_OUT" "== a =="
 
 # --- b's feature work is promoted, stripped, without touching a --------------
 (

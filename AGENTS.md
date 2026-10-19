@@ -66,7 +66,7 @@ child.
 A child starts **cold**: no session history, no memory of this file. Its prompt
 must carry the repo path, the exact commands, the acceptance criteria, the
 harness's flags and columns, and the rules (no push, no promote, no rebase; commit
-on `dev/overlay`; revert and report if the single attempt fails). Ask for numbers
+on `dev/overlay-subtunes`; revert and report if the single attempt fails). Ask for numbers
 first, and for **fail-before / pass-after** on every check — a child reporting
 "all green" without that has told you nothing. The native harness columns
 (`dev/mdx-native/region`) and `dev/mdx-native/check.sh` are the usual evidence.
@@ -108,7 +108,7 @@ a list of commits to remember:
   sitemap (`scripts/build-sitemap.js`). No `dev/` shims, no vendored-engine
   *build* tooling, no `AGENTS.md`/`.nvmrc`.
   `git diff master..feature/subtunes-as-first-class` is the reviewable PR.
-- **`dev/overlay`** — stacked on top of the feature branch and holds everything
+- **`dev/overlay-subtunes`** — stacked on top of the feature branch and holds everything
   that must **not** be part of the PR: our engine build scripts and core selection,
   `src/tinyplayer.c`, the vendored-tree deletion, `AGENTS.md`, `.nvmrc`,
   `.gitignore`, `config/webpack.config.dev.js`, and the `dev/` shims, harnesses and
@@ -116,12 +116,12 @@ a list of commits to remember:
   tooling we need to work, layered on the reviewable feature. This is where the app
   is developed and run. Lives in our fork (`origin`); nothing here is part of the PR.
 
-**The invariant:** `dev/overlay` is `feature/subtunes-as-first-class` plus
+**The invariant:** `dev/overlay-subtunes` is `feature/subtunes-as-first-class` plus
 overlay-only deltas (dev tooling, engine build, `DEV-BEGIN` regions, and the
 path-listed seams). Either side may move; `./dev/rebase.sh` reconciles them.
 
-**Primary workflow — develop on `dev/overlay`, promote feature work up.**
-`dev/overlay` is the branch the app runs from (the main worktree), so feature
+**Primary workflow — develop on `dev/overlay-subtunes`, promote feature work up.**
+`dev/overlay-subtunes` is the branch the app runs from (the main worktree), so feature
 work is authored there. When a chunk is done, lift it to the PR branch with
 `./dev/promote.sh` (plan) → arm → `./dev/promote-apply.sh`; between promotes,
 catch overlay up to any feature-branch movement with `./dev/rebase.sh`.
@@ -135,13 +135,13 @@ branch directly.
 
 `./dev/rebase.sh` rebases (`-X theirs`, so DEV regions survive) **and verifies
 the tree did not move**, which a hand-run rebase cannot tell you. The rebase
-rewrites `dev/overlay`'s history, so publish it with `./dev/push-overlay.sh`
-(a `--force-with-lease` push) — never `git pull` `dev/overlay` after a rebase.
+rewrites `dev/overlay-subtunes`'s history, so publish it with `./dev/push-overlay.sh`
+(a `--force-with-lease` push) — never `git pull` `dev/overlay-subtunes` after a rebase.
 Never rebase by hand; expect *duplicated* content in path-listed files, which the
 script's check is for (see the handoff notes). Never commit overlay content
 (dev shims, engine build tooling, `AGENTS.md`) to the feature branch, and never
 push either branch to `upstream` — everything stays in our fork (`origin`). The
-main worktree (`chip-player-js/`) runs `dev/overlay`; the feature branch is
+main worktree (`chip-player-js/`) runs `dev/overlay-subtunes`; the feature branch is
 checked out in the sibling `chip-player-js-feature/` worktree. "Promote" is its
 own step and is **the user's to trigger** — see "Dev overlay & promotion" below
 before going near `dev/promote-apply.sh` or `dev/.promote-armed`.
@@ -149,7 +149,7 @@ before going near `dev/promote-apply.sh` or `dev/.promote-armed`.
 ## Dev overlay & promotion
 
 > **Promotion is user-initiated. Do not promote because you finished something.**
-> Landing a fix on `dev/overlay` and landing it on the reviewable PR branch are
+> Landing a fix on `dev/overlay-subtunes` and landing it on the reviewable PR branch are
 > different acts, and only the second one is a decision for the user:
 >
 > - **Never run `dev/promote-apply.sh`** and **never create `dev/.promote-armed`**
@@ -165,7 +165,7 @@ before going near `dev/promote-apply.sh` or `dev/.promote-armed`.
 >   harness references it; `dev/run-tests.sh` runs parsers and harnesses only.
 >   If you ever add one that does, that is the bug, not the policy.
 
-`dev/overlay` is the **dirty working branch**: it deliberately mixes feature,
+`dev/overlay-subtunes` is the **dirty working branch**: it deliberately mixes feature,
 audio/engine and dev-tooling commits, and that is fine. The goal is not a clean
 tree — it is a **deterministic, low-effort way to promote feature work to the
 parent** without leaking overlay content. Promotion is two steps, the second of
@@ -206,15 +206,15 @@ Two rules the stripping obeys, both learned the hard way:
   to produce a file that was wrong but still committed.
 
 It writes the result into the feature-branch worktree and commits it there as one
-commit ("Promote feature work from dev/overlay"), leaves `dev/overlay`
+commit ("Promote feature work from dev/overlay"), leaves `dev/overlay-subtunes`
 untouched, and refuses if `DEV-BEGIN`/`DEV-END` sentinels are unbalanced. Then
-`promote-apply.sh` puts `dev/overlay` back on top — **via the script, not by
+`promote-apply.sh` puts `dev/overlay-subtunes` back on top — **via the script, not by
 hand** — and publishes both branches:
 
 ```sh
 ./dev/rebase.sh        # rebases onto the feature branch, then verifies the tree
 git -C ../chip-player-js-feature push origin feature/subtunes-as-first-class
-./dev/push-overlay.sh  # --force-with-lease; NEVER `git pull` dev/overlay
+./dev/push-overlay.sh  # --force-with-lease; NEVER `git pull` dev/overlay-subtunes
 ```
 
 The rebase is the only step of the cycle that can change the tree without saying
@@ -231,7 +231,7 @@ that the tool's job:
 - `git range-diff` over the two ranges **names every commit the rebase emptied
   or dropped**. A promoted commit is expected here — the feature branch carries
   the work now, so only its dev-only remainder is left, and the commit and its
-  message stay on `dev/overlay`. A commit that is gone *and* whose content is
+  message stay on `dev/overlay-subtunes`. A commit that is gone *and* whose content is
   not on the feature branch is a lost change;
 - `git diff <tip> HEAD` **must be empty**, *unless the base supplied the
   movement*. That exception is not academic: on 2026-10-07, catching up to
@@ -259,7 +259,7 @@ interrupted-then-resumed rebase, **not** from the hand-carry convention, and
 ### More than one target — the tooling is portable (2026-10-18)
 
 The promote/rebase/push scripts used to hardcode `feature/subtunes-as-first-class`
-and `dev/overlay`, so a checkout could drive exactly one target. They now resolve
+and `dev/overlay-subtunes`, so a checkout could drive exactly one target. They now resolve
 the (feature, overlay) pair from **`dev/overlay.conf`** — one line per target:
 `name feature-branch overlay-branch [wds-port api-port]` — via
 `dev/overlaylib.sh`. Nothing reads `HEAD` any more; the overlay branch is named
@@ -306,7 +306,7 @@ as a ref, so one checkout can plan/promote/rebase/push any target.
   worktree has its own copy and a target registered in one is invisible from
   another (that is the bug the first smoke test left behind: `overlay.sh <t> dev`
   from the main checkout could not resolve a target registered elsewhere). Port
-  policy: **3000/8080 reserved** for `dev/overlay`; pool **WDS 3300-3399, API
+  policy: **3000/8080 reserved** for `dev/overlay-subtunes`; pool **WDS 3300-3399, API
   8300-8399** (`WDS 3300+i`, `API 8300+i`, lowest-free, skipping claimed or
   listening pairs), so agents discover and claim without being told.
   `dev/engines.sh link` farms the engine clones into a worktree's parent (t3
@@ -569,7 +569,7 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
   - Invariant: **`package.json` must stay unmodified** and the lockfile too (hence
     `--no-package-lock`); `node_modules` is gitignored. Verify with
     `git diff --stat package.json package-lock.json` (empty) after installing.
-- **Dev shims** live in `dev/` on `dev/overlay` only (never on the feature
+- **Dev shims** live in `dev/` on `dev/overlay-subtunes` only (never on the feature
   branch), tracked so the dev environment is reproducible. They stage
   **untracked, gitignored** modules rather than patching tracked files, so a
   working tree stays clean (`git status` shows only intentional overlay edits):
@@ -781,7 +781,7 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
 > vendored in-repo; `mdxmini/` and `farbrausch-v2m/` compile from source.
 > `scripts/build-subprojects.sh` builds all of them to the paths
 > `build-chip-core.js` links. (The vendor-tree deletion and sibling build live on
-> `dev/overlay` only; they are in `dev/promote-paths.txt` and never reach the PR.)
+> `dev/overlay-subtunes` only; they are in `dev/promote-paths.txt` and never reach the PR.)
 >
 > **What follows is kept for its findings, but its build mechanics are
 > pre-migration — read with these corrections:**
@@ -945,7 +945,7 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
 
 Real audio works locally. `./scripts/build-subprojects.sh` (the sibling clones +
 the vendored `libADLMIDI`/`psflib`/`lazyusf2`) and `node scripts/build-chip-core.js`
-produce `src/chip-core.{js,wasm}`. This work lives on `dev/overlay`, **not** the
+produce `src/chip-core.{js,wasm}`. This work lives on `dev/overlay-subtunes`, **not** the
 feature branch. See "Audio engine roadmap" for what remains.
 
 Prereqs (Arch): `sudo pacman -S cmake emscripten xa` (emcc lands in
@@ -1522,12 +1522,12 @@ because `Sequencer` copies its context).
     when Skip Silence is on), the head no longer folds into the band with
     repeat off / mid-fade enable, the loop count is only re-derived when
     actually leaving a looping state, and leaving a deep repeat plays the full
-    fade (`durationExtended`) instead of ending instantly. On `dev/overlay`.
+    fade (`durationExtended`) instead of ending instantly. On `dev/overlay-subtunes`.
 14. MDX Repeat One: native engine loop (`mdx_set_max_loop(0)`) plus an exact
     loop band from new `mdxmini` loop-point getters; two engine fixes (fade-end
     latch, microsecond-accurate position) came out of it, plus the fade-tail
     capture ported from VGM so enabling Repeat One mid-fade keeps the head on
-    the tail. See "MDX (mdxmini)". On `dev/overlay`.
+    the tail. See "MDX (mdxmini)". On `dev/overlay-subtunes`.
 
 **Caveat:** `Sequencer.playContext` copies its context, so array-identity
 checks no longer work. Compare a live context to a stored one with
@@ -1581,7 +1581,7 @@ checks no longer work. Compare a live context to a stored one with
   speed questions — at 2x the engine consumes *different material*, so it compares
   two different pieces of music. Use a fixed control in the song (the loop point) or
   an engine counter instead.
-- **Branch model:** see "Branches" above. `dev/overlay` is the working branch
+- **Branch model:** see "Branches" above. `dev/overlay-subtunes` is the working branch
   (the app runs there); feature work is authored there and promoted up to
   `feature/subtunes-as-first-class` (the PR). `./dev/rebase.sh` reconciles the
   two. Hand-carries (path-listed files) are the only feature work authored on
@@ -1611,7 +1611,7 @@ checks no longer work. Compare a live context to a stored one with
   without the server half, every row below a song folder plays the wrong song.
   Same shape as P1: carry both by hand, together.
 - **Shuffle play and "is this a song folder?" (2026-10-06).** Three commits on
-  `dev/overlay` — `af4e8aeb7` (shuffle play on a song-folder page returned
+  `dev/overlay-subtunes` — `af4e8aeb7` (shuffle play on a song-folder page returned
   nothing: `/shuffle` prefix-matched `path/`, which a *file* path never
   matches), `e9daed24c` (shuffle every sub-tune instead of one random sub-tune
   per file — one statement, `LEFT JOIN subtune`, one row per playable song, so
@@ -1802,7 +1802,7 @@ checks no longer work. Compare a live context to a stored one with
     the root value rather than the emergent behaviour.
 - **Testing is deliberately NOT in the PR.** The dev harnesses stay in `dev/`
     (excluded by `dev/promote-paths.txt`) and are version-controlled on
-    `dev/overlay`, so they persist without being shipped. Rationale: the repo has
+    `dev/overlay-subtunes`, so they persist without being shipped. Rationale: the repo has
     no test runner, no CI and no `test` script; a tracked suite would silently
     skip ~30% of its checks because `catalog/` is gitignored
     (`test-parsers.js` real-file checks `return` silently, `test-midi-loops.js`
@@ -1825,7 +1825,7 @@ checks no longer work. Compare a live context to a stored one with
   carries upstream as a *merge* (not a rebase, so the sub-tune commits keep their
   identity) and `git diff master..feature/subtunes-as-first-class` is feature-only
   (**49 files** as of 2026-10-16; re-measure rather than trusting the count — it
-  was 47 before this promote). `dev/overlay` differs from it by DEV regions only;
+  was 47 before this promote). `dev/overlay-subtunes` differs from it by DEV regions only;
   `dev/promote.sh` reports "Nothing to promote" (the healthy state — do not run it
   per change). `dev/rebase.sh` verifies the tree; never rebase by hand.
   - **2026-10-16 promotion (user-armed).** The P1 pair from the review round, plus
@@ -2079,7 +2079,7 @@ checks no longer work. Compare a live context to a stored one with
 5. Before PR: the feature branch is already feature-only, so there is nothing to
    strip. Push `feature/subtunes-as-first-class` to our fork (`origin`) and open
    the PR against `mmontag:master` — never push to `upstream`, and never include
-   `dev/overlay`. The diff is `git diff master..feature/subtunes-as-first-class`.
+   `dev/overlay-subtunes`. The diff is `git diff master..feature/subtunes-as-first-class`.
 
 ## Repeat One / looping model
 
@@ -2893,7 +2893,7 @@ contract instead of a bug.
 ## Handoff (2026-10-16) — MDX/loop work, and what the next session starts with
 
 **In flight when this session ended:** subagent `p1-pair-fixes-1` is fixing two
-greptile P1s on `dev/overlay`. Its commits land on the overlay either way — but
+greptile P1s on `dev/overlay-subtunes`. Its commits land on the overlay either way — but
 **read its report and verify the fail-before/pass-after claims** before promoting:
 - `MDXPlayer.js:120` — playback counts joint sections (`loop_gate_value`) while
   `mdx_get_length` still measures the raw per-track minimum (it resolves
@@ -2903,7 +2903,7 @@ greptile P1s on `dev/overlay`. Its commits land on the overlay either way — bu
   while the read decision is per-account, so A's slow toggle plus a switch to B
   can leave B's server favorites unread. Track pending per account.
 
-**Status (same session, later):** both landed on `dev/overlay` (`2f85761f5`,
+**Status (same session, later):** both landed on `dev/overlay-subtunes` (`2f85761f5`,
 `52b596c26`). Independent re-run: native **12 ok**, `./dev/promote.sh` stayed
 clean throughout; `dev/test-mdx-loops.js` **21**;
 `check-faves-account-switch.mjs` **20 passed / 0 failed** (was 17/3).
@@ -2978,7 +2978,7 @@ wrap), reverted in `22547bcfe`.
 
 Upstream's merge adds GSF via `src/bindings/gsf-wrapper.cpp`, but the sibling was
 never built here, so the core skipped the engine — and the guard that skips it
-resolved the wrong path. Both fixed, on `dev/overlay`:
+resolved the wrong path. Both fixed, on `dev/overlay-subtunes`:
 
 - **`../libgsf` = joshbarrass/viogsf**, cloned and built with emscripten per
   upstream's README (`emcmake cmake .. && emmake make`). Newer clang rejects
@@ -3052,7 +3052,7 @@ drew 72062 ms while the audio played 144125. A *song change* self-healed (state'
 buffer changed, so the roll re-parsed), which is why it read as a first-load
 oddity rather than a persistent one.
 
-**The fix (`dev/overlay`).** Both inputs now come from one source, so they cannot
+**The fix (`dev/overlay-subtunes`).** Both inputs now come from one source, so they cannot
 disagree: `App` takes `midiData` from `sequencer.getCurrSongBuffer()` (state's
 copy only as a fallback), `Visualizer` takes the gate from
 `sequencer.getCurrSongPath()`, and `PianoRollVisualizer` re-parses when

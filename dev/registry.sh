@@ -14,7 +14,7 @@
 #   name  feature-branch  overlay-branch  wds  api
 #
 # Port policy (the rule):
-#   * 3000 / 8080 are reserved for the long-lived target (dev/overlay).
+#   * 3000 / 8080 are reserved for the long-lived target (dev/overlay-subtunes).
 #   * pool: WDS 3300+i, API 8300+i for i in 0..99 (`WDS_BASE`/`API_BASE`/`POOL`).
 #   * a pair is taken if the registry names it OR a socket listens on it.
 #

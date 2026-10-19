@@ -121,7 +121,7 @@ overlay_resolve() {
     echo "         name one (dev/overlay.sh list), or set PROMOTE_TARGET." >&2
     return 1
   fi
-  OV_OVERLAY="${PROMOTE_OVERLAY:-${cur:-dev/overlay}}"
+  OV_OVERLAY="${PROMOTE_OVERLAY:-${cur:-dev/overlay-subtunes}}"
   OV_NAME="$(basename "$OV_FEATURE")"
 
   # Refuse an ambiguous retarget: naming a feature branch while standing on some

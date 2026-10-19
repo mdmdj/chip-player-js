@@ -362,11 +362,11 @@ feature. `dev/features/**` is never captured into the kit, so one feature's
 notes cannot follow the next feature around, and it sits inside `dev/**`, so it
 never reaches the PR either.
 
-The older, pre-`dev/features/` notes sit at `dev/*.md` (`MIDI_LOOP_TEST_GAPS.md`,
-`UPSTREAM_PR_PLAN.md`, `pr-body.md`, `pr-body.suggested.md`,
-`prod-midi-collections.md`); they are listed as never-carried for the same reason —
-one feature's record rather than the kit's tooling — so a new worktree does not
-inherit them. `ENGINE_BUILD_MIGRATION.md` *is* tooling, and is carried.
+The older, pre-`dev/features/` notes are still on the overlay that wrote them (they
+are tracked on its branch, so they are never lost) but the kit deliberately does not
+carry them — they are one feature's record rather than the kit's tooling, and a new
+worktree should not inherit them. `ENGINE_BUILD_MIGRATION.md` *is* tooling, and is
+carried.
 
 To revert:
 

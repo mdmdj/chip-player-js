@@ -53,15 +53,19 @@ for f in AGENTS.md dev/README.md dev/overlay.sh dev/overlaylib.sh dev/bringup.sh
   else bad "kit carries $f (run ./dev/kit.sh capture)"; fi
 done
 
-# 5. ...and carries them CURRENT for the paths it SYNCS. Seed paths are excluded:
-#    the kit's AGENTS.md is a template and is *meant* to differ from an overlay's.
+# 5. ...and carries them CURRENT. "Everything it carries" is the carried pathspecs
+#    minus the never-carried paths (the seeded AGENTS.md, per-feature notes, and the
+#    feature tests): those are deliberately absent, so they cannot read as drift.
 KLIST="$(./dev/kit.sh list)"
 mapfile -t KPATHS < <(printf '%s\n' "$KLIST" | awk '/^carries/{f=1;next} f && !/^  /{exit} f{sub(/^ +/,"");print}')
+mapfile -t NEVER < <(./dev/kit.sh never)
 if [ ${#KPATHS[@]} -gt 0 ]; then ok "kit path list is readable (${#KPATHS[@]} paths)"
 else bad "kit path list is readable"; fi
-DRIFT="$(git diff --name-only dev/kit dev/overlay -- "${KPATHS[@]}" 2>/dev/null || true)"
+EXCL=()
+for n in "${NEVER[@]}"; do [ -n "$n" ] && EXCL+=(":(exclude)$n"); done
+DRIFT="$(git diff --name-only dev/kit dev/overlay -- "${KPATHS[@]}" "${EXCL[@]}" 2>/dev/null || true)"
 if [ -z "$DRIFT" ]; then
-  ok "the kit matches dev/overlay for everything it syncs"
+  ok "the kit matches dev/overlay for everything it carries"
 else
   bad "the kit is stale for: $(tr '\n' ' ' <<< "$DRIFT") -- run ./dev/kit.sh capture"
 fi
@@ -162,6 +166,31 @@ done
 CORE_LIST="$(./dev/core.sh list)"
 case "$CORE_LIST" in *"src/chip-core.wasm"*) ok "core.sh reports which worktrees have a core" ;;
 *) bad "core.sh reports which worktrees have a core" ;; esac
+
+# 11. The test registry: tests are source-coupled, so the kit ships the runner and
+#     the registry and the INFRASTRUCTURE tests, never a branch's feature tests.
+MANIFEST_KIT="$(git show dev/kit:dev/tests.manifest 2>/dev/null || cat dev/tests.manifest)"
+REGISTERED="$(printf '%s\n' "$MANIFEST_KIT" | awk '$1 == "test" { print $4 }')"
+UNREGISTERED=""
+for f in dev/test-*.js dev/test-*.sh dev/check-promotable-refs.js dev/record/scenarios.check.mjs; do
+  grep -qxF -- "$f" <<< "$REGISTERED" || UNREGISTERED="$UNREGISTERED $f"
+done
+if [ -z "$UNREGISTERED" ]; then ok "every harness is registered in tests.manifest"
+else bad "unregistered harness(es):$UNREGISTERED"; fi
+expect_contains "the kit carries the test registry" "$(git cat-file -e dev/kit:dev/tests.manifest 2>/dev/null && echo yes)" "yes"
+expect_contains "the kit carries the runner"        "$(git cat-file -e dev/kit:dev/run-tests.sh 2>/dev/null && echo yes)" "yes"
+for f in dev/test-server-seams.js dev/test-client-seams.js dev/test-overlay-tooling.sh dev/test-devtools.js; do
+  if git cat-file -e "dev/kit:$f" 2>/dev/null; then ok "kit carries infra test $f"
+  else bad "kit carries infra test $f"; fi
+done
+for f in dev/test-parsers.js dev/test-end-detector.js dev/test-midi-loops.js dev/test-songrefs.js; do
+  if git cat-file -e "dev/kit:$f" 2>/dev/null; then bad "kit must not carry feature test $f"
+  else ok "kit does not carry feature test $f"; fi
+done
+# The registry must state the feature markers, or a master-based tree would run
+# them and fail instead of skipping.
+case "$MANIFEST_KIT" in *"group subtunes"*) ok "the registry declares the feature markers" ;;
+*) bad "the registry declares the feature markers" ;; esac
 
 echo
 echo "overlay-discovery: $pass passed, $fail failed"

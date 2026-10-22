@@ -313,6 +313,17 @@ as a ref, so one checkout can plan/promote/rebase/push any target.
   worktrees share one parent, so one farm serves all) and `cp -al` hardlinks
   `node_modules` (~1.5s, real paths, no symlink resolution) instead of two npm
   installs. Details: `dev/README.md` §"Spinning up a new target".
+- **`bringup`/`new` accept `[<feature-branch>]`, and `overlay.sh` must forward it
+  (2026-10-19).** `./dev/overlay.sh <name> bringup feature/x` is the documented
+  way to stack a new overlay on the branch its code came from, but `overlay.sh`
+  forwarded only `$target`, so `bringup.sh` defaulted to `feature/<name>` cut
+  from `master` — a wrong feature branch and a wrong feature worktree, silently.
+  The fix is `exec "$DIR/bringup.sh" "$target" "${3:-}"` (same for `new`). After
+  any bring-up, `./dev/overlay.sh <name> status` must name the intended feature
+  branch; `registry.sh claim` reconciles an existing row's branches now, so a
+  correction is a re-claim, not `release` + `claim`. `dev/overlay.sh` is
+  path-listed dev-only content, so a `kit pull` can revert a local fix — check it
+  after a refresh.
 - **Publishing has two paths, and this file is a template (2026-10-18).** You
   commit normally on the overlay; promote takes the feature files (regions
   stripped, path-listed areas skipped) and `dev/kit.sh capture`/`pull` take the
@@ -321,7 +332,8 @@ as a ref, so one checkout can plan/promote/rebase/push any target.
   takes an overlay's copy up. So **keep feature detail out of this file** — put
   the design, measurements, hand-offs and history of your feature in
   `dev/features/<name>.md`, which is never captured into the kit and never
-  promoted. The model, the four buckets and the capture caveats are in
+  promoted. This overlay's note is `dev/features/visualizer.md` (Butterchurn /
+  MilkDrop). The model, the four buckets and the capture caveats are in
   `dev/README.md` §"Where your work goes — two publication paths".
 - **Tests are source-coupled, like the core's export list (2026-10-19).** They
   belong to the branch whose code they test, so the kit ships the bare
@@ -548,6 +560,10 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
 - Root install: `npm install --ignore-scripts` then `npm rebuild better-sqlite3`.
   (The unused `sqlite3` devDependency cannot build on Node 24; `--ignore-scripts`
   skips it. Root `better-sqlite3` is needed by `scripts/build-music.js`.)
+  For a reproducible tree use `npm ci --ignore-scripts`, then
+  `npm rebuild better-sqlite3` (verified 2026-10-22: 1699 packages in ~1 min,
+  manifests byte-identical; `npm ci` without `--ignore-scripts` still trips the
+  Node-24 `sqlite3` build).
 - Server deps: `npm install` inside `server/` (builds `better-sqlite3` and
   `skia-canvas` fine).
 - **`npm install --no-save` is a trap here; install everything in ONE command.**
@@ -569,6 +585,24 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
   - Invariant: **`package.json` must stay unmodified** and the lockfile too (hence
     `--no-package-lock`); `node_modules` is gitignored. Verify with
     `git diff --stat package.json package-lock.json` (empty) after installing.
+  - **An interrupted `--no-save` install leaves a partially-written tree, and the
+    error looks like a code bug.** A reify that hits a timeout is killed mid-write;
+    the next dev build then fails to resolve `html-webpack-plugin/lib/loader.js`
+    and floods `@babel/runtime/helpers/esm/*` with errors. Let the install finish
+    (or re-run it) and restart the dev server; the tree repairs itself. Do not
+    start "fixing" imports. Check the installed versions directly
+    (`node -e "require('webpack/package.json').version"`), not a killed process's
+    exit code.
+  - **5.106 is the lockfile's webpack, not a hard runtime requirement (2026-10-19).**
+    5.112 has `webpack/hot/log.js` back and compiled the dev build cleanly here, so
+    the 5.111 breakage does not apply. `--no-save` still drifts whatever is
+    installed, so verify the version after every install; `npm ci` restores the
+    lock's tree (and drops any `--no-save` package).
+  - **A shipped feature's dependency is not a dev install (2026-10-22).** Add it
+    with `npm install --save-exact <pkg>@<ver>` so `package.json` and the lock
+    carry it (the visualizer's `butterchurn` / `butterchurn-presets` are the
+    example); `--no-save` is only for local tooling. Pinned versions plus a
+    committed lock are deterministic without vendoring the source.
 - **Dev shims** live in `dev/` on `dev/overlay-subtunes` only (never on the feature
   branch), tracked so the dev environment is reproducible. They stage
   **untracked, gitignored** modules rather than patching tracked files, so a
@@ -2756,6 +2790,11 @@ Testing gotchas learned the hard way:
   `__cpRec.result()`) to find out whether a "failed" call actually landed.
   Correlates with calling it right after `preview_navigate`, while the app is
   still fetching. See `dev/record/FINDINGS.md`.
+- **A synthetic `element.click()` from `preview_evaluate` does not reliably fire
+  React 16's handlers.** It worked for the visualizer's renderer radios but was
+  silently ignored on the Settings tab; the T3 `preview_click` (selector/locator)
+  is the real click path. When a click seems to do nothing, retry with
+  `preview_click` before concluding the handler is broken.
 - Script a whole scenario (play → wait → toggle → record) inside ONE
   `evaluate` call; the preview host drops tabs between calls and evaluate
   times out at 15 s, so never rely on state surviving across calls for a
@@ -2954,6 +2993,13 @@ retry loop, and verify both: `ps -eo pid,cmd | grep -E 'npm run dev|concurrently
 scripts/start\.js|--watch server'` (must be empty) and `ss -ltn | grep -cE
 ':(3000|8080)'` (must be 0) *before* starting one. Use the `xargs` kill above; the
 `for p in $pids` form silently kills nothing under zsh and the loop reports success.
+
+**Tell whose tree a port owner is — `readlink /proc/<pid>/cwd` (2026-10-19).** A
+live `npm run dev` whose cwd is another agent's worktree is not yours to kill. A
+concurrent `dev/overlay-replaygain` session repeatedly took our ports down while
+we verified; the surviving processes were theirs, in `t3-89a4b1fa`. Check cwd and
+the registry row (`dev/registry.sh list`) before killing, and restart only your
+target's tree.
 
 **The DEV-region stripper's non-JS check is a compile now (fixed 2026-10-16,
 `ad7936197`).** It used to count only **open braces** — `tr -cd '{' | wc -c` over

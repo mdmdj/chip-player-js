@@ -153,6 +153,12 @@ export function createLoudnessAnalyzer(core, sampleRate) {
 
     const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
     await player.loadData(bytes, filepath, {}, targetSubtune);
+    // MIDI's soundfont load is asynchronous in the player; without this the
+    // first MIDI would measure the silence before the synth was ready.
+    if (player.soundfontPromise) {
+      await player.soundfontPromise;
+      if (isCancelled && isCancelled()) throw cancelledError();
+    }
     if (isCancelled && isCancelled()) throw cancelledError();
 
     let subtuneCount = 1;

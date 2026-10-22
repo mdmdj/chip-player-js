@@ -127,6 +127,28 @@ slider still tops out at 150%.
 Target options: Quiet (-23), Balanced (-18, default), Loud (-14). Settings:
 Off / Per song / Per folder (album).
 
+## Catalog refresh and format coverage (2026-10-22)
+
+The worktree catalog was refreshed to **383 files / 79 sub-tunes**, and the
+scanner was run over all of them (`--force`, 6 workers, 60 s cap):
+
+- **347 files measured, 36 N64 timeouts, 0 errors, 0 skipped.**
+- **421 sub-tune rows**; 25 complete directory albums, 5 partial.
+- All formats present in the catalog measured: `ay`, `gbs`, `it`, `mdx`, `mid`,
+  `midi`, `minigsf`, `miniusf`, `mod`, `nsf`, `nsfe`, `s3m`, `sid`, `smf`, `spc`,
+  `v2m`, `vgm`, `vgz`, `xm` (**19 extensions**).
+- Fixtures added for the missing practical extensions: `loudness-formats/nsf/
+  db_apu.nsf`, and Bach's Goldberg Variation 04 as `.mid`, `.midi` and `.smf`.
+- Not covered: `.gsf` (the catalog has only `.minigsf`; same GSF player) and
+  `.mus` (no `.mus` fixture exists in the catalog). Both are format-level gaps,
+  not scanner failures.
+- The 36 N64 timeouts are long tracks that need more than the 60 s cap; a spot
+  check completed in **142 s**, so rerun those with `--retry-failed --timeout 300`
+  (or longer). The other 294 N64 files measured.
+- MIDI initially measured silence because `MIDIPlayer` loads the SoundFont
+  asynchronously. The player now exposes `soundfontPromise` and the analyzer
+  awaits it; the fixtures measure -20.7 dB (Bach) and -23.3 dB (tempo test).
+
 ## Limits / next steps
 
 - **Peak-limited tracks stop short of the target.** A static gain cannot raise a

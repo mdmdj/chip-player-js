@@ -27,10 +27,20 @@ die() { echo "promote: $*" >&2; exit 1; }
 # overlay and the feature branch are usually checked out in their own worktree
 # (both open at once), so operate on the overlay's rather than failing on a busy
 # branch.
+#
+# Two kinds of dirt are invisible to a plan and so are not blockers: UNTRACKED
+# files (a dev/features note; the plan diffs COMMITTED trees) and the two applied
+# dev patches, which live as uncommitted edits in server/index.js and
+# src/components/UserProvider.js by design. Excluding the patch paths means a
+# plan works on a live tree with the patches applied -- the case where reverting
+# them by hand used to be the only way to dry-run. Any feature work in those two
+# files must still be committed first: they are path-listed/hand-carried, so the
+# plan cannot see uncommitted hunks there anyway.
 overlay_require_worktrees
 cd "$OV_OVERLAY_WT"
-if [ -n "$(git status --porcelain)" ]; then
-  die "$OVERLAY_BRANCH worktree is dirty. Commit or stash, then re-run so the plan matches what you reviewed."
+if [ -n "$(git status --porcelain -uno -- . \
+        ':(exclude)server/index.js' ':(exclude)src/components/UserProvider.js')" ]; then
+  die "$OVERLAY_BRANCH worktree has uncommitted changes. Commit or stash, then re-run so the plan matches what you reviewed."
 fi
 
 git rev-parse --verify -q "$FEATURE" >/dev/null || die "branch $FEATURE not found"
@@ -82,6 +92,13 @@ strip_regions() {
 # region that really broke the file (it removed a semicolon, say) left the count
 # untouched and slipped through. The compiler can tell the two apart; a count
 # cannot.
+# JSON and CSS are parsed, not guessed: JSON.parse (node itself) and postcss (a
+# declared dependency of the CRA toolchain, so it is already in node_modules). A
+# feature that adds a dependency or a stylesheet touches package.json, the
+# lockfile and *.css, and those used to read as "no checker" -- which blocked a
+# legitimate plan. postcss' parse is brace-aware, which is the damage stripping
+# does; if it is not installed, CSS is still refused rather than accepted
+# unvalidated, the same rule as every other language.
 # Parse a .js file that may contain JSX, which node --check rejects outright.
 parses_as_jsx() {
   node -e '
@@ -128,6 +145,32 @@ check_compiles() { # file stripped
   fi
 }
 
+check_json() { # file stripped
+  local file="$1" stripped="$2"
+  if ! node -e 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))' \
+      "$stripped" 2>"$TMPDIR_P/json.err"; then
+    echo "promote: $file is not valid JSON after stripping DEV regions" >&2
+    head -3 "$TMPDIR_P/json.err" >&2
+    return 1
+  fi
+}
+
+check_css() { # file stripped
+  local file="$1" stripped="$2"
+  if ! node -e 'require.resolve("postcss")' >/dev/null 2>&1; then
+    echo "promote: no CSS parser (postcss) installed; refusing to promote $file unvalidated" >&2
+    return 1
+  fi
+  if ! node -e '
+      const fs = require("fs");
+      require("postcss").parse(fs.readFileSync(process.argv[1], "utf8"), { from: undefined });
+    ' "$stripped" 2>"$TMPDIR_P/css.err"; then
+    echo "promote: $file does not parse as CSS after stripping DEV regions" >&2
+    head -3 "$TMPDIR_P/css.err" >&2
+    return 1
+  fi
+}
+
 check_syntax() {
   local file="$1" stripped="$2"
   case "$file" in
@@ -143,6 +186,12 @@ check_syntax() {
       ;;
     *.c|*.cc|*.cpp|*.cxx|*.h|*.hpp|*.hh|*.hxx)
       check_compiles "$file" "$stripped" || return 1
+      ;;
+    *.json)
+      check_json "$file" "$stripped" || return 1
+      ;;
+    *.css)
+      check_css "$file" "$stripped" || return 1
       ;;
     *)
       # No compiler for this language means we cannot tell whether stripping

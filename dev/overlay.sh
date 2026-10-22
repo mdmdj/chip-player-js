@@ -71,8 +71,8 @@ case "$cmd" in
   promote) exec "$DIR/promote-apply.sh" "$target" ;;
   rebase)  exec "$DIR/rebase.sh" "$target" ;;
   push)    exec "$DIR/push-overlay.sh" "$target" ;;
-  new)     exec "$DIR/overlay-new.sh" "$target" ;;
-  bringup) exec "$DIR/bringup.sh" "$target" ;;
+  new)     exec "$DIR/overlay-new.sh" "$target" "${3:-}" ;;
+  bringup) exec "$DIR/bringup.sh" "$target" "${3:-}" ;;
   arm)
     overlay_resolve "$target"
     overlay_require_worktrees

@@ -124,6 +124,12 @@ bounded to [-24, +24] dB. This prevents clipping without a limiter and turns hot
 engines (V2M) down. The app multiplies the user's volume by the linear gain; the
 slider still tops out at 150%.
 
+The spectrogram's `AnalyserNode` now taps the **post-gain** signal
+(`visualizerSourceNode={gainNode}`) so it reflects normalization and the volume
+slider; `sourceNode` stays `playerNode` because the piano roll's latency estimate
+needs its buffer size. Verified in the browser: at volume 0 the analyser canvas
+is completely black, at 100 it is not.
+
 Target options: Quiet (-23), Balanced (-18, default), Loud (-14). Settings:
 Off / Per song / Per folder (album).
 

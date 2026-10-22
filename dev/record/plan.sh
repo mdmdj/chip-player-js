@@ -33,7 +33,7 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$DIR/../.." && pwd)"
 id="${1:?usage: plan.sh <clip-id>}"
 BASE="${RECORD_BASE:-http://mms-1:8080}"
-NODE="$HOME/.nvm/versions/node/v24.21.0/bin/node"
+NODE="$HOME/.nvm/versions/node/v24.22.1/bin/node"
 
 mkdir -p "$DIR/.work"
 

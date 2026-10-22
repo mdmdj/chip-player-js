@@ -6,13 +6,13 @@
 #   dev/overlay.sh [<target>] status      resolved target, worktrees, ports, arm state
 #   dev/overlay.sh [<target>] plan        dev/promote.sh (plan only; no write path)
 #   dev/overlay.sh [<target>] promote     dev/promote-apply.sh (requires the arm key)
-#   dev/overlay.sh [<target>] refresh     kit sync + dev/rebase.sh
+#   dev/overlay.sh [<target>] refresh [--dry-run]  kit sync + rebase; `all` = every target
 #   dev/overlay.sh [<target>] rebase      dev/rebase.sh (the legacy rebase model)
 #   dev/overlay.sh [<target>] push        dev/push-overlay.sh (force-with-lease)
 #   dev/overlay.sh [<target>] dev         npm run dev in the overlay worktree, on its ports
 #   dev/overlay.sh [<target>] arm         print the arm-key path to touch (does not touch it)
-#   dev/overlay.sh <name> bringup     one command: branches, worktrees, ports, engines, deps, run-ready
-#   dev/overlay.sh new <name> [<feature>] dev/overlay-new.sh
+#   dev/overlay.sh [<target>] bringup [<feature-branch>]  one command: branches, worktrees, ports, engines, deps, run-ready
+#   dev/overlay.sh new [<name>] [<feature-branch>]   dev/overlay-new.sh
 #
 # <target> is a name, feature branch or overlay branch from dev/overlay.conf; with
 # none, the current branch's target (or the manifest default). Promotion is still
@@ -42,6 +42,8 @@ if [ -z "${1:-}" ]; then
   exit 0
 fi
 if is_cmd "$1"; then cmd="$1"; target="${2:-}"; else target="$1"; cmd="${2:-status}"; fi
+# An optional third argument: the feature branch, for `new` and `bringup`.
+extra="${3:-}"
 
 die() { echo "overlay: $*" >&2; exit 1; }
 
@@ -71,8 +73,8 @@ case "$cmd" in
   promote) exec "$DIR/promote-apply.sh" "$target" ;;
   rebase)  exec "$DIR/rebase.sh" "$target" ;;
   push)    exec "$DIR/push-overlay.sh" "$target" ;;
-  new)     exec "$DIR/overlay-new.sh" "$target" "${3:-}" ;;
-  bringup) exec "$DIR/bringup.sh" "$target" "${3:-}" ;;
+  new)     exec "$DIR/overlay-new.sh" "$target" ${extra:+"$extra"} ;;
+  bringup) exec "$DIR/bringup.sh" "$target" ${extra:+"$extra"} ;;
   arm)
     overlay_resolve "$target"
     overlay_require_worktrees
@@ -81,14 +83,7 @@ case "$cmd" in
 
   help) usage ;;
 
-  refresh)
-    overlay_resolve "$target"
-    overlay_require_worktrees
-    # Sync the overlay-only content from the kit (a commit, not a rewrite), then
-    # put the overlay back on top of the feature branch.
-    git show-ref --verify --quiet refs/heads/dev/kit && "$DIR/kit.sh" pull "$OV_OVERLAY"
-    exec "$DIR/rebase.sh" "$target"
-    ;;
+  refresh) exec "$DIR/refresh.sh" ${target:+"$target"} ${extra:+"$extra"} ;;
 
   dev)
     overlay_resolve "$target"

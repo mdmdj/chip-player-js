@@ -1,15 +1,175 @@
-# Dev shims
+# The dev overlay — how to use it
 
-This directory exists so the app can run locally without a full chip-core
-WebAssembly build, Firebase credentials, or a real music catalog. **It is all
-removable.** Before opening a PR, run:
+The app runs from a **dev overlay**: a reusable dev layer plus one working branch
+per feature. Two pieces are shared and maintained once; everything else is a
+per-target binding.
+
+| Piece | What it is |
+| --- | --- |
+| `dev/kit` | the dev layer as its own branch — `dev/**`, the engine layout and inventory, the test registry and runner, and the `AGENTS.md` **template** |
+| `feature/<name>` | the reviewable PR branch for one feature. Never carries `dev/` |
+| `dev/overlay-<name>` | the branch you work on: `feature/<name>` + the kit + feature work |
+| `dev/overlay.conf` | the manifest — one line per target: name, feature branch, overlay branch, ports |
+| `.git/dev-targets` | the live registry, shared by every worktree: which targets exist and the ports they claimed |
+
+A worktree *is* one target's dev tree. You commit normally on the overlay;
+publishing is deliberate, and has two paths — **feature → promote**, **dev files →
+capture/pull** (see "Where your work goes" below).
+
+## Start here
 
 ```sh
-./dev/remove.sh
+./dev/overlay.sh                 # every command, with the target syntax
+./dev/overlay.sh list            # the targets and their ports
+./dev/overlay.sh <name> bringup  # make THIS worktree runnable (~20 s, idempotent)
+./dev/overlay.sh <name> dev      # run it, on its claimed ports
+./dev/run-tests.sh               # the registered tests
 ```
 
-That undoes every change `dev/apply.sh` made. Then delete this directory (or
-keep it out of the PR).
+`bringup` is the whole setup in one command: branches and worktrees if they are
+missing, a port pair claimed from the registry, the engine farm, `node_modules`
+from the main checkout, `dev/apply.sh`, the sample catalog, and a chip-core. A
+worktree created from `dev/kit` (or from another overlay) needs nothing else first.
+
+## The five rules it is built on
+
+1. **`dev/kit` is a template, not a snapshot.** `AGENTS.md` is *seeded*: a new
+   worktree gets the template, and `pull` never overwrites a worktree's own notes.
+   A feature's history belongs in `dev/features/<name>.md`, which is never captured
+   into the kit and never promoted.
+2. **Tests are source-coupled.** `dev/tests.manifest` is the registry: the kit ships
+   the *infrastructure* tests, and a branch's own tests travel with it. Derive from
+   a branch that has the code and its tests run (and are expected to pass); derive
+   from one with none and the feature tests are **skipped with the reason**.
+3. **The chip-core is source-coupled.** `dev/core.sh` treats a core as a build of
+   the *engine sources*, so you choose its base — `CORE_REF` (default `master`) for
+   a fresh feature, or the branch it extends.
+4. **The catalog sample is cheap.** 16 files, one per engine family plus the
+   harness fixtures (`dev/sample.manifest`), placed by symlink → hardlink → copy.
+   Large collections are never copied automatically; take one deliberately.
+5. **Promotion is your act.** `dev/overlay-subtunes` (or any overlay) and the
+   reviewable branch are different things: the arm key is the decision, and nothing
+   else promotes.
+
+## Workflows
+
+| Task | Command |
+| --- | --- |
+| New target on master | `./dev/overlay.sh <name> bringup` |
+| New target stacked on an existing one | `./dev/overlay.sh <name> bringup <feature-branch>` on a worktree cut from that overlay |
+| See what a worktree is | `./dev/overlay.sh <name> status` |
+| Run the app | `./dev/overlay.sh <name> dev` (background it; one log per target) |
+| Run the tests | `./dev/run-tests.sh` (`VERBOSE=1` for full output) |
+| Add a test | one `infra`/`feature` line in `dev/tests.manifest` (+ a `group` line naming the feature's marker files) |
+| Choose the chip-core's base | `./dev/core.sh list`, then `use <ref>`; or `CORE_REF=<ref> bringup`; `build` builds from this tree's sources |
+| Give a worktree a bigger catalog | `./dev/sample.sh steal <other-worktree>` (or `node dev/fetch-seo-fixtures.mjs`) |
+| Publish feature work | `./dev/overlay.sh <t> plan` (works with the dev patches applied) → arm → `./dev/overlay.sh <t> promote` |
+| Back up before a promote | `./dev/backup.sh <t>` — tags both branches and tars the gitignored dev artifacts |
+| Publish dev tooling | `./dev/kit.sh capture` (to the kit), then `./dev/kit.sh pull <target>` on each target |
+| Refresh an overlay | `./dev/overlay.sh <t> refresh [--dry-run]` — kit sync + rebase, **verified**; `all` refreshes every target, skipping the ones it cannot |
+| Publish the overlay / the kit | `./dev/push-overlay.sh`, `git push origin dev/kit` |
+| Stage/undo the dev environment | `./dev/apply.sh`, `./dev/remove.sh` |
+
+Details for each are in the sections below: "The tools", "Promoting feature work",
+"More than one target", "Spinning up a new target", "The registry", "Engines and
+modules", "Where your work goes", "Tests".
+
+## The tools
+
+One entry point (`overlay.sh`) and the tools it and the workflows call. All of it
+lives under `dev/`, is carried to every target by the kit, and never reaches the PR.
+
+| Tool | What it is for |
+| --- | --- |
+| `overlay.sh` | the front end: `list`, `status`, `plan`, `promote`, `refresh`, `rebase`, `push`, `dev`, `arm`, `new`, `bringup`, `help` |
+| `bringup.sh` | one-command setup of a worktree (branches, port, engines, modules, apply, sample, core) |
+| `overlay-new.sh` | create `feature/<name>` + `dev/overlay-<name>` and their worktrees, from the kit |
+| `refresh.sh` | bring an overlay (or `all`) up to date: kit sync + rebase, verified; `--dry-run` |
+| `backup.sh` | before a promote: tag the overlay + feature branches and tar the gitignored dev artifacts (`dev/.backups/`) |
+| `registry.sh` | the shared target/port registry, in the common git dir |
+| `kit.sh` | the dev layer itself: `capture` (to the kit), `pull` (into a target), `list`, `owned`, `never` |
+| `engines.sh` | the engine inventory: `check` (flags a decoy), `link` (farms the siblings) |
+| `core.sh` | choose the chip-core's base: `list`, `use`, `steal`, `from`, `build` |
+| `sample.sh` | the cheap catalog sample: `seed`, `steal`, `list` |
+| `apply.sh` / `remove.sh` | stage / undo the dev environment (shims, DBs, the in-place patches) |
+| `patch-server.js` / `patch-client.js` | those in-place deltas: idempotent and reversible, applied by `apply.sh`, undone by `remove.sh` |
+| `run-tests.sh` | the registered harnesses, driven by `tests.manifest` |
+| `promote.sh` → `promote-plan.sh` → `promote-apply.sh` | publish feature work to the reviewable branch (the plan is read-only; `promote-apply.sh` needs the arm key) |
+| `rebase.sh` / `push-overlay.sh` | put the overlay back on top and verify the tree / publish it `--force-with-lease` |
+| `check-promotable-refs.js` | the gate: nothing that can reach the PR may name overlay-only material |
+| `record/` | the clip recorder and page builder for the PR changelog (its own `record/README.md`) |
+| `overlaylib.sh`, `patch-lib.js` | internal libraries for the tools above, documented in their own headers |
+| `fixtures.js`, `make-loop-pedal-midi.js`, `seed-dbs.js`, `import-songlengths.js`, `fetch-seo-fixtures.mjs` | the harness and catalog helpers: synthetic parser fixtures, a built loop-pedal MIDI, `apply.sh`'s DB seeding, song lengths, SEO fixtures |
+
+What it all reads:
+
+| File | What it holds |
+| --- | --- |
+| `overlay.conf` | the manifest: `name feature-branch overlay-branch [wds api]` per target |
+| `promote-paths.txt` | the paths that are overlay-only **areas** — whole trees that never promote |
+| `tests.manifest` | the test registry: a `group` line per feature, one `infra`/`feature` line per harness |
+| `sample.manifest` | the files the cheap catalog sample fetches |
+| `.promote-armed` | the arm key (gitignored, per-worktree): the one act that lets a promotion write |
+
+The other two mechanisms are not files: a `DEV-BEGIN … DEV-END` region inside a
+feature file (a chunk that strips to prod behaviour exactly) and the single
+hand-carry list, `server/index.js`. Both are explained under "Where your work goes".
+
+## Adding a dependency
+
+A feature that adds a package commits `package.json` **and** the lockfile, and
+touches nothing else:
+
+```sh
+npm install --save-exact <pkg>@<version>          # --save-exact matches the repo's pins
+git diff --stat package.json package-lock.json    # exactly those two files
+```
+
+The plan validates both: `*.json` goes through `JSON.parse` and `*.css` through
+postcss, so a dependency or a stylesheet promotes with the same protection as JS
+and C rather than as an unvalidated blank.
+
+**Never `npm install --no-save`.** It resolves the whole tree against
+`package.json`, so it prunes what a previous `--no-save` added *and* upgrades
+existing deps as a side effect (it moved webpack 5.106 → 5.112 once, which removed
+`webpack/hot/log.js` and broke the dev build). A killed reify can leave
+`node_modules` half-written, so repair a drifted tree with a clean install rather
+than re-running the same command:
+
+```sh
+rm -rf node_modules && npm ci --ignore-scripts && npm rebuild better-sqlite3
+```
+
+`--ignore-scripts` is not optional under Node 24 (the unused `sqlite3`
+devDependency cannot build there); `better-sqlite3` is then rebuilt for the pinned
+Node — `nvm use`, or the PATH export in a non-interactive shell.
+
+A worktree whose `node_modules` `bringup` hardlinked does **not** see a new
+dependency automatically: the install replaces directory entries in the tree that
+ran it, so run the sequence above in each tree that needs the package.
+
+## Housekeeping
+
+- **The kit's currency is asserted.** `dev/test-overlay-discovery.sh` fails if a
+  tool or doc changed on the overlay but was not captured, so "documented" and
+  "delivered to a new worktree" cannot drift apart.
+- **A refresh is verified, and can be looked at first.** `./dev/overlay.sh <t>
+  refresh --dry-run` prints what the kit would change in that worktree (the files
+  the kit *supplies*, so nothing is listed that a pull would not touch) and whether
+  the rebase would do anything, and touches nothing. A real refresh then syncs the
+  kit, rebases, and **asserts that nothing outside the paths the kit owns moved** —
+  a refresh that touched feature code is a bug, and it says so and names the
+  pre-refresh tip to restore from. `./dev/overlay.sh all refresh` does every
+  registered target and prints one verdict each.
+- **If a `pull`/`refresh` refuses naming `dev/features/`** (or any of the tests the
+  kit does not carry), that worktree predates the guard learning to ignore
+  never-carried paths: move the note aside once, pull, and put it back. Only
+  *tracked* modifications to a kit path genuinely block a sync.
+- **Ports:** 3000/8080 belong to the long-lived target; a target claims a pair from
+  WDS 3300-3399 / API 8300-8399 (`dev/registry.sh list` shows what is taken).
+- **Never push to `upstream`** — everything stays in the fork (`origin`).
+- **Before a PR:** `./dev/remove.sh` (it reverts the in-place patches), then delete
+  or exclude this directory; nothing here is part of the PR.
 
 ## Prerequisites
 
@@ -18,7 +178,7 @@ keep it out of the PR).
 
 In a non-interactive shell `nvm` is not on `PATH`, so export the pinned version
 directly (it is ABI-matched to `better-sqlite3`):
-`export PATH="$HOME/.nvm/versions/node/v24.21.0/bin:$PATH"`.
+`export PATH="$HOME/.nvm/versions/node/v24.22.1/bin:$PATH"`.
 
 ## Usage
 
@@ -55,7 +215,7 @@ It needs two things the normal setup does not:
   install also rebuilds `better-sqlite3` against whatever `node` is on PATH (the
   host default is 26.x, so it ends up compiled for the wrong ABI). If
   `dev/run-tests.sh` starts failing with `NODE_MODULE_VERSION`, run
-  `PATH="$HOME/.nvm/versions/node/v24.21.0/bin:$PATH" npm rebuild better-sqlite3`.
+  `PATH="$HOME/.nvm/versions/node/v24.22.1/bin:$PATH" npm rebuild better-sqlite3`.
   Full list of the ways this bites: AGENTS.md §Dev environment.
 - **Chromium**, already fetched into `~/.cache/ms-playwright`.
 
@@ -236,6 +396,12 @@ note — `dev/features/<name>.md` — and keep `AGENTS.md` to what is true for *
 feature. `dev/features/**` is never captured into the kit, so one feature's
 notes cannot follow the next feature around, and it sits inside `dev/**`, so it
 never reaches the PR either.
+
+The older, pre-`dev/features/` notes are still on the overlay that wrote them (they
+are tracked on its branch, so they are never lost) but the kit deliberately does not
+carry them — they are one feature's record rather than the kit's tooling, and a new
+worktree should not inherit them. `ENGINE_BUILD_MIGRATION.md` *is* tooling, and is
+carried.
 
 To revert:
 

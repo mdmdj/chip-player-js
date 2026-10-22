@@ -160,6 +160,79 @@ expect_contains "reject: carries the compiler message" "$ERR" "expected"
 expect_contains "reject: unknown language refused, not silently accepted" "$ERR" "no syntax check for delta.txt"
 expect_contains "reject: reports the unsound list" "$OUT" "ERROR (stripping DEV regions does not produce a valid file)"
 
+# --- accept: JSON and CSS, the shapes a feature dependency/stylesheet adds ----
+# These used to hit "no syntax check", which refused the plan and blocked a
+# feature that legitimately adds a dependency or a stylesheet. JSON.parse and
+# postcss are the tools the app already ships; postcss' parse is brace-aware,
+# which is the damage stripping does. data.json carries no region on purpose:
+# a dependency file is not a dev-only file, and the checker must still run.
+rm -f delta.txt
+cat > beta.c <<'EOF'
+int beta_value(void)
+{
+  return 0;
+}
+EOF
+cat > data.json <<'EOF'
+{ "feature": true }
+EOF
+cat > style.css <<'EOF'
+.slider { --track: 1px; }
+.slider:hover { color: red; }
+
+/* DEV-BEGIN (stripped for promotion; dev-only style) */
+.slider-dev { color: blue; }
+/* DEV-END */
+EOF
+git add -A && git commit -qm "json/css: valid shapes"
+
+run_plan
+PLAN_LIST="$(section "$OUT" 'Will promote')"
+expect_eq       "json/css: planner exits 0" "$RC" "0"
+expect_contains "json/css: valid JSON is planned" "$PLAN_LIST" "  data.json"
+expect_contains "json/css: valid CSS is planned" "$PLAN_LIST" "  style.css"
+
+# --- gate: the applied dev patches do not block a plan -----------------------
+# server/index.js and src/components/UserProvider.js are dirty by design (the
+# applied dev patches), and untracked files are invisible to a plan that diffs
+# committed trees. Both must be tolerated; real uncommitted work must still be
+# refused.
+mkdir -p server src/components
+printf '// prod form\n' > server/index.js
+printf 'export const U = 1;\n' > src/components/UserProvider.js
+git add -A && git commit -qm "patch targets in prod form"
+printf '// dev patch\n' >> server/index.js
+printf '// dev patch\n' >> src/components/UserProvider.js
+printf 'a feature note\n' > dev/features-note.md
+run_plan
+expect_eq       "gate: applied dev patches and an untracked note do not block the plan" "$RC" "0"
+printf '\n.unrelated { color: red; }\n' >> style.css
+run_plan
+expect_eq       "gate: real uncommitted work still refuses the plan" "$RC" "1"
+expect_contains "gate: refusal says uncommitted changes" "$ERR" "uncommitted changes"
+git checkout -- style.css
+
+# --- reject: broken JSON and CSS, each named with its reason -----------------
+cat > data.json <<'EOF'
+{ "feature": true,
+EOF
+cat > style.css <<'EOF'
+.slider { color: red;
+
+/* DEV-BEGIN (stripped for promotion; dev-only style) */
+.slider-dev { color: blue; }
+/* DEV-END */
+EOF
+git commit -qam "json/css: unbalanced"
+
+run_plan
+UNSOUND_LIST="$(section "$OUT" 'ERROR (stripping')"
+expect_eq       "json/css reject: planner exits non-zero" "$RC" "1"
+expect_contains "json/css reject: broken JSON is unsound" "$UNSOUND_LIST" "  data.json"
+expect_contains "json/css reject: broken CSS is unsound" "$UNSOUND_LIST" "  style.css"
+expect_contains "json/css reject: names the JSON failure" "$ERR" "is not valid JSON"
+expect_contains "json/css reject: names the CSS failure" "$ERR" "does not parse as CSS"
+
 echo
 echo "promote-syntax: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

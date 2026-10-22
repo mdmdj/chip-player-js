@@ -82,14 +82,23 @@ for (const ref of ['master', 'feature/subtunes-as-first-class']) {
 {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cseams-'));
   const tmp = path.join(dir, 'UserProvider.js');
-  const overlayCopy = cp.execFileSync('git', ['show', 'dev/overlay-subtunes:' + REL], { cwd: ROOT, encoding: 'utf8' });
-  fs.writeFileSync(tmp, overlayCopy);
-  const r = run(tmp);
-  check('a file that already has a dev user is left alone', () => {
-    assert.strictEqual(r.status, 0);
-    assert.strictEqual(r.text, overlayCopy);
-    assert.match(r.out, /already delivers a dev user/);
-  });
+  // The overlay branch must be reachable: the local ref, else the remote-tracking
+  // one. A clone that has neither skips this case rather than failing it.
+  let overlayCopy = null;
+  for (const ref of ['dev/overlay-subtunes', 'origin/dev/overlay-subtunes']) {
+    try { overlayCopy = cp.execFileSync('git', ['show', `${ref}:${REL}`], { cwd: ROOT, encoding: 'utf8' }); break; } catch (e) { /* try the next ref */ }
+  }
+  if (!overlayCopy) {
+    console.log('skip  a file that already has a dev user is left alone\n      (no dev/overlay-subtunes ref here)');
+  } else {
+    fs.writeFileSync(tmp, overlayCopy);
+    const r = run(tmp);
+    check('a file that already has a dev user is left alone', () => {
+      assert.strictEqual(r.status, 0);
+      assert.strictEqual(r.text, overlayCopy);
+      assert.match(r.out, /already delivers a dev user/);
+    });
+  }
   fs.rmSync(dir, { recursive: true, force: true });
 }
 

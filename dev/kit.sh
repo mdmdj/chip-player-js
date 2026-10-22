@@ -59,7 +59,7 @@ KIT_BASE="${KIT_BASE:-master}"
 # baggage carried into every other feature's worktree. (The build script's
 # source-coupled parts are handled in the script itself: its export list drops a
 # symbol the tree's engine sources do not define, so one script serves any base.)
-KIT_NEVER="${KIT_NEVER:-dev/features}"
+KIT_NEVER="${KIT_NEVER:-dev/features dev/MIDI_LOOP_TEST_GAPS.md dev/UPSTREAM_PR_PLAN.md dev/pr-body.md dev/pr-body.suggested.md dev/prod-midi-collections.md}"
 # The seam file: its dev delta is not a whole-file copy, so it is not in the kit
 # either (dev/apply.sh patches it in place instead).
 KIT_EXCLUDE="${KIT_EXCLUDE:-server/index.js}"
@@ -136,10 +136,11 @@ populate_from() { # src dest path...
     bare="$(kit_bare "$p")"
     if git -C "$dest" cat-file -e "$src:$bare" 2>/dev/null; then
       git -C "$dest" checkout "$src" -- "$bare"
+      printf '%s\n' "$bare"
     elif git -C "$dest" cat-file -e "HEAD:$bare" 2>/dev/null; then
       git -C "$dest" rm -r -q --ignore-unmatch -- "$bare"
+      printf '%s\n' "$bare"
     fi
-    printf '%s\n' "$bare"
   done
 }
 
@@ -216,17 +217,25 @@ cmd_pull() { # write dev/kit onto the target's overlay worktree
   paths=("${deliver[@]}")
   [ ${#paths[@]} -gt 0 ] || { echo "kit: $ov already current with $KIT_BRANCH"; return 0; }
 
-  # Refuse to clobber pending work in the paths the kit owns.
-  if [ -n "$(git -C "$wt" status --porcelain -- "${paths[@]}")" ]; then
+  # Refuse to clobber pending work in the paths the kit owns -- but a worktree's own
+  # feature notes (dev/features/**) and the tests it carries are EXPECTED to sit
+  # there untracked, and they live under `dev/**`, so counting them as pending work
+  # in a kit path would mean a refresh could never run.
+  local -a excl=()
+  local n
+  while IFS= read -r n; do [ -n "$n" ] && excl+=(":(exclude)$n"); done < <(kit_never_paths "$KIT_BRANCH")
+  if [ -n "$(git -C "$wt" status --porcelain -- "${paths[@]}" "${excl[@]}")" ]; then
     die "$ov has uncommitted changes in kit paths; commit or stash first"
   fi
 
-  populate_from "$KIT_BRANCH" "$wt" "${paths[@]}" >/dev/null
-  # populate_from already staged (checkout updates the index; rm stages the
-  # deletion), so there is nothing to add -- and `git add -A -- <gone path>`
-  # would fail on the deleted vendored tree.
-  if [ -n "$(git -C "$wt" status --porcelain -- "${paths[@]}")" ]; then
-    git -C "$wt" commit -q -m "kit: sync overlay-only content from $KIT_BRANCH" -- "${paths[@]}"
+  local -a touched=()
+  mapfile -t touched < <(populate_from "$KIT_BRANCH" "$wt" "${paths[@]}")
+  # Commit only what populate_from touched: the full path list includes the vendored
+  # trees, which exist in neither the kit nor HEAD in a master-based overlay after its
+  # first sync, and `git commit -- <pathspec>` is fatal when a pathspec matches
+  # nothing -- so a second sync used to abort after staging everything.
+  if [ ${#touched[@]} -gt 0 ] && [ -n "$(git -C "$wt" status --porcelain -- "${touched[@]}" "${excl[@]}")" ]; then
+    git -C "$wt" commit -q -m "kit: sync overlay-only content from $KIT_BRANCH" -- "${touched[@]}" "${excl[@]}"
     echo "kit: $ov updated from $KIT_BRANCH ($(git -C "$wt" rev-parse --short HEAD))"
   else
     echo "kit: $ov already current with $KIT_BRANCH"
@@ -250,6 +259,8 @@ case "${1:-}" in
   pull)    [ -n "${2:-}" ] || die "usage: dev/kit.sh pull <target>"; cmd_pull "$2" ;;
   list)    cmd_list ;;
   never)   kit_never_paths "$(kit_exists && echo "$KIT_BRANCH" || echo "$(kit_source)")" ;;
+  owned)   kit_paths "$(kit_exists && echo "$KIT_BRANCH" || echo "$(kit_source)")" ;;
+  carried) kit_paths "$(kit_exists && echo "$KIT_BRANCH" || echo "$(kit_source)")" --no-seed ;;
   "")      sed -n '2,29p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' ;;
   *)       die "unknown command '$1' (capture|pull|list)" ;;
 esac

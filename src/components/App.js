@@ -108,10 +108,10 @@ class App extends React.Component {
 
 
     // Initialize audio graph
-    // ┌────────────┐   ┌──────────────────┐   ┌────────────┐   ┌─────────────┐
-    // │ playerNode ├──>│ normalizationGain ├──>│  gainNode  ├──>│ destination │
-    // └────────────┘   └────────┬─────────┘   └────────────┘   └─────────────┘
-    //                           └────────────> visualizer analyser
+    // ┌────────────┐      ┌────────────┐      ┌─────────────┐
+    // │ playerNode ├─────>│  gainNode  ├─────>│ destination │
+    // └────────────┘      └──────┬─────┘      └─────────────┘
+    //                            └──────────> visualizer analyser
 
     // Smaller buffer for mobile devices. 'interactive' yields 128 samples on iOS/Android.
     const latencyHint = isMobile.any ? 'interactive' : 'playback';
@@ -1231,7 +1231,7 @@ class App extends React.Component {
             {!isMobile.phone && !this.state.loading && !!this.chipCore &&
               <Visualizer audioCtx={this.audioCtx}
                           sourceNode={this.playerNode}
-                          visualizerSourceNode={this.normalizationGainNode}
+                          visualizerSourceNode={this.gainNode}
                           chipCore={this.chipCore}
                           paused={this.state.paused}
                           songPath={this.state.songPath}

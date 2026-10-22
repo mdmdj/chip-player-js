@@ -434,7 +434,7 @@ catalogCheck(DOOM, 'piano roll unchanged for files without loops (DOOM)', () => 
 
 const GYRO = 'Nintendo 64 (SoundFont MIDI)/Pilotwings 64/13 - Gyrocopter.mid';
 
-check('Gyrocopter: padded END_OF_TRACK does not inflate duration', () => {
+catalogCheck(GYRO, 'Gyrocopter: padded END_OF_TRACK does not inflate duration', () => {
   const mf = loadMidi(GYRO);
   const { events, loopStartMs, loopEndMs } = mf.getPlaybackEvents(true);
   const dur = events[events.length - 1].playTime;

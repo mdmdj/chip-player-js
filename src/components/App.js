@@ -108,10 +108,10 @@ class App extends React.Component {
 
 
     // Initialize audio graph
-    // ┌────────────┐      ┌────────────┐      ┌─────────────┐
-    // │ playerNode ├─────>│  gainNode  ├─────>│ destination │
-    // └────────────┘      └──────┬─────┘      └─────────────┘
-    //                            └──────────> visualizer analyser
+    // ┌────────────┐   ┌──────────────────┐   ┌────────────┐   ┌─────────────┐
+    // │ playerNode ├──>│ normalizationGain ├──>│  gainNode  ├──>│ destination │
+    // └────────────┘   └────────┬─────────┘   └────────────┘   └─────────────┘
+    //                           └────────────> visualizer analyser
 
     // Smaller buffer for mobile devices. 'interactive' yields 128 samples on iOS/Android.
     const latencyHint = isMobile.any ? 'interactive' : 'playback';
@@ -759,12 +759,12 @@ class App extends React.Component {
   }
 
   applyOutputGain() {
-    if (!this.gainNode) return;
+    if (!this.gainNode || !this.normalizationGainNode) return;
     const volume = Math.max(0, Math.min(2, this.state.volume * 0.01));
-    // The normalization multiplier is a replay gain; the user's volume is still
-    // theirs. Cap the product so a bad scan cannot blow the output up.
-    const target = Math.max(0, Math.min(8, volume * (this.normalizationGain || 1)));
-    this.gainNode.gain.setTargetAtTime(target, this.audioCtx.currentTime, 0.06);
+    const normalization = Math.max(0, Math.min(8, this.normalizationGain || 1));
+    const now = this.audioCtx.currentTime;
+    this.normalizationGainNode.gain.setTargetAtTime(normalization, now, 0.06);
+    this.gainNode.gain.setTargetAtTime(volume, now, 0.06);
   }
 
   startReplayGain(song) {
@@ -1231,7 +1231,7 @@ class App extends React.Component {
             {!isMobile.phone && !this.state.loading && !!this.chipCore &&
               <Visualizer audioCtx={this.audioCtx}
                           sourceNode={this.playerNode}
-                          visualizerSourceNode={this.gainNode}
+                          visualizerSourceNode={this.normalizationGainNode}
                           chipCore={this.chipCore}
                           paused={this.state.paused}
                           songPath={this.state.songPath}

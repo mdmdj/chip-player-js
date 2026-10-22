@@ -12,8 +12,11 @@
  *   album - for a catalog folder, the folder's aggregate; for a multi-song file
  *           (catalog or local), the file's sub-tunes aggregated. A single-song
  *           local file is simply its track gain.
+ *   auto  - album when the playback context is one album, song when it spans
+ *           several. See resolveAutoMode().
  * Off leaves the output exactly as it was.
  */
+import pathe from 'pathe';
 import {
   albumFromTracks,
   gainFromMeasurement,
@@ -52,6 +55,32 @@ function finite(value) {
   return Number.isFinite(value);
 }
 
+/**
+ * Decide what "album" means for a playback context.
+ *
+ * A SongRef is `{ path, subtune }`. A path that appears more than once is a
+ * multi-song file (a song folder), so the file is the album; a path that appears
+ * once is a normal file, so its containing directory is the album. One distinct
+ * album key means album mode; more than one means the context is a mixed list
+ * and song mode is the honest choice. A one-song context is song mode: there is
+ * no album sequence to preserve.
+ */
+export function resolveAutoMode(context) {
+  if (!Array.isArray(context) || context.length <= 1) return 'song';
+  const counts = new Map();
+  for (const item of context) {
+    const filepath = typeof item === 'string' ? item : item?.path;
+    if (!filepath) continue;
+    counts.set(filepath, (counts.get(filepath) || 0) + 1);
+  }
+  const keys = new Set();
+  for (const [filepath, count] of counts) {
+    keys.add(count > 1 ? `file:${filepath}` : `dir:${pathe.dirname(filepath)}`);
+    if (keys.size > 1) return 'song';
+  }
+  return keys.size === 1 ? 'album' : 'song';
+}
+
 export default class ReplayGain {
   constructor({ sampleRate, getSettings, onChange, fetchServer, analysisTimeoutMs }) {
     this.sampleRate = sampleRate;
@@ -69,13 +98,19 @@ export default class ReplayGain {
     this.remote = null;
     this.local = null;
     this.lastEmitted = null;
+    this.autoMode = 'song';
 
     this.remoteCache = new Map(); // `${path}\0${subtune}` -> server response
     this.localCache = new Map();  // filepath -> local cache entry
   }
 
+  get requestedMode() {
+    return this.getSettings()?.volumeNormalization || 'auto';
+  }
+
   get mode() {
-    return this.getSettings()?.volumeNormalization || 'song';
+    const requested = this.requestedMode;
+    return requested === 'auto' ? (this.autoMode || 'song') : requested;
   }
 
   get targetLufs() {
@@ -122,6 +157,7 @@ export default class ReplayGain {
    * @param {number} [song.subtune]
    * @param {ArrayBuffer|Uint8Array} [song.buffer] - local files only
    * @param {boolean} [song.isLocal]
+   * @param {Array} [song.context] - the playback context (SongRefs)
    */
   setSong(song) {
     this.song = {
@@ -129,7 +165,9 @@ export default class ReplayGain {
       subtune: Number.isInteger(song.subtune) ? song.subtune : 0,
       buffer: song.buffer,
       isLocal: !!song.isLocal || song.filepath.startsWith('local/'),
+      context: song.context,
     };
+    this.autoMode = resolveAutoMode(song.context);
     this.remote = null;
     this.local = null;
     this.startSong(this.song);

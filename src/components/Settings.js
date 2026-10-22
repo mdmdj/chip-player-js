@@ -24,6 +24,7 @@ const silenceOptions = [
 
 const normalizationOptions = [
   { value: 'off', label: 'Off' },
+  { value: 'auto', label: 'Auto (by context)' },
   { value: 'song', label: 'Per song' },
   { value: 'album', label: 'Per folder (album)' },
 ];
@@ -121,7 +122,7 @@ function Settings(props) {
   const theme = settings?.theme;
   const silenceDuration = settings?.silenceDuration ?? -1;
   const showLoopArea = settings?.showLoopArea ?? true;
-  const volumeNormalization = settings?.volumeNormalization ?? 'song';
+  const volumeNormalization = settings?.volumeNormalization ?? 'auto';
   const normalizationTarget = Number(settings?.normalizationTarget ?? -18);
 
   const handleThemeChange = useCallback((e) => {
@@ -151,12 +152,13 @@ function Settings(props) {
   const normalizationStatus = (() => {
     if (volumeNormalization === 'off') return null;
     if (replayGainSource === 'pending') return 'Analyzing...';
+    const prefix = volumeNormalization === 'auto' ? 'Auto · ' : '';
     if (replayGainSource === 'album') {
       const progress = replayGainAlbumProgress;
       const suffix = progress ? ` (${progress.analyzed}/${progress.total} tracks)` : '';
-      return `Album ${formatGain(replayGainDb)}${suffix}`;
+      return `${prefix}Album ${formatGain(replayGainDb)}${suffix}`;
     }
-    if (replayGainSource === 'song') return `Song ${formatGain(replayGainDb)}`;
+    if (replayGainSource === 'song') return `${prefix}Song ${formatGain(replayGainDb)}`;
     return null;
   })();
 

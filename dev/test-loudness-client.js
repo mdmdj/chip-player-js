@@ -72,7 +72,9 @@ class FakeWorker {
 }
 global.Worker = FakeWorker;
 
-const ReplayGain = require('../src/ReplayGain').default;
+const ReplayGainModule = require('../src/ReplayGain');
+const ReplayGain = ReplayGainModule.default;
+const { resolveAutoMode } = ReplayGainModule;
 
 function manager(settings, fetchServer = async () => null) {
   const changes = [];
@@ -178,7 +180,66 @@ async function main() {
     assert.strictEqual(rg.local.allSubtunes, true, 'album scan records all sub-tunes');
   }
 
-  console.log('ok    loudness client: catalog lookup, missing row, album, watchdog, local album');
+  // 6. Auto mode: one album in the context -> album, mixed -> song. A song
+  // folder (one path, several sub-tunes) is one album; a directory of several
+  // song folders is several albums.
+  {
+    assert.strictEqual(resolveAutoMode([{ path: 'spc/A/01.spc', subtune: 0 }]), 'song', 'one song -> song');
+    assert.strictEqual(resolveAutoMode([
+      { path: 'spc/Album/01.spc', subtune: 0 },
+      { path: 'spc/Album/02.spc', subtune: 0 },
+    ]), 'album', 'one directory -> album');
+    assert.strictEqual(resolveAutoMode([
+      { path: 'nsfe/a.nsfe', subtune: 0 },
+      { path: 'nsfe/a.nsfe', subtune: 1 },
+    ]), 'album', 'one song folder -> album');
+    assert.strictEqual(resolveAutoMode([
+      { path: 'spc/A/01.spc', subtune: 0 },
+      { path: 'spc/B/01.spc', subtune: 0 },
+    ]), 'song', 'two directories -> song');
+    assert.strictEqual(resolveAutoMode([
+      { path: 'nsfe/a.nsfe', subtune: 0 },
+      { path: 'nsfe/a.nsfe', subtune: 1 },
+      { path: 'nsfe/b.nsfe', subtune: 0 },
+      { path: 'nsfe/b.nsfe', subtune: 1 },
+    ]), 'song', 'two song folders -> song');
+
+    const response = {
+      track: { lufs: -30, peakDb: -12, status: 'ok' },
+      album: { kind: 'directory', status: 'complete', lufs: -22, peakDb: -5 },
+      subtuneCount: 1,
+    };
+    const settings = { volumeNormalization: 'auto', normalizationTarget: -18 };
+    const oneAlbum = manager(settings, async () => response);
+    oneAlbum.rg.setSong({
+      filepath: 'spc/Album/01.spc',
+      subtune: 0,
+      buffer: new Uint8Array(100),
+      context: [
+        { path: 'spc/Album/01.spc', subtune: 0 },
+        { path: 'spc/Album/02.spc', subtune: 0 },
+      ],
+    });
+    await sleep(20);
+    const autoAlbum = oneAlbum.changes.filter(c => c.source === 'album').pop();
+    assert.ok(autoAlbum, 'auto chose album for one album context');
+
+    const mixed = manager(settings, async () => response);
+    mixed.rg.setSong({
+      filepath: 'spc/A/01.spc',
+      subtune: 0,
+      buffer: new Uint8Array(100),
+      context: [
+        { path: 'spc/A/01.spc', subtune: 0 },
+        { path: 'spc/B/01.spc', subtune: 0 },
+      ],
+    });
+    await sleep(20);
+    const autoSong = mixed.changes.filter(c => c.source === 'song').pop();
+    assert.ok(autoSong, 'auto chose song for a mixed context');
+  }
+
+  console.log('ok    loudness client: catalog lookup, missing row, album, auto, watchdog, local album');
 }
 
 main().catch((e) => {

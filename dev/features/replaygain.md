@@ -134,7 +134,25 @@ the normalized signal, and the two gain values stay independent
 (`norm=3.84`, `vol=0`).
 
 Target options: Quiet (-23), Balanced (-18, default), Loud (-14). Settings:
-Off / Per song / Per folder (album).
+Off / Auto / Per song / Per folder (album).
+
+**Auto** (`resolveAutoMode` in `src/ReplayGain.js`) chooses the effective mode
+from the playback context:
+
+- A path appearing more than once is a multi-song file (a song folder), so the
+  file is the album.
+- A path appearing once is a normal file, so its containing directory is the
+  album.
+- One distinct album key -> album mode; more than one -> song mode.
+- A one-song context is song mode (there is no album sequence to preserve).
+
+Examples: one directory of single-file songs -> album; one NSFE song folder ->
+album; a directory containing several song folders -> song; a search/favorites
+context spanning directories -> song. The multi-song-file inference relies on
+the context carrying more than one sub-tune for that path; a context with a
+single sub-tune from each of several multi-song files in the same directory is a
+known edge (it looks like one directory). Auto is the default for new settings;
+existing saved settings are left alone.
 
 ## Catalog refresh and format coverage (2026-10-22)
 

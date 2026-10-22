@@ -104,6 +104,7 @@ class App extends React.Component {
     this.normalizationGain = 1;
     this.replayGainSong = null;
     this.replayGainSongKey = null;
+    this.replayGainContext = null;
     window.ChipPlayer = this;
 
 
@@ -473,6 +474,7 @@ class App extends React.Component {
     if (ejected) {
       this.replayGainSong = null;
       this.replayGainSongKey = null;
+      this.replayGainContext = null;
       this.replayGain?.clear();
       clearTimeout(this.playbackTimer);
       this.playbackKey = null;
@@ -496,12 +498,16 @@ class App extends React.Component {
       const songTitleKey = songRefKey(currSongRef);
       const songBuffer = this.sequencer.getCurrSongBuffer();
       const replayGainKey = songRefKey(currSongRef);
-      if (songPath && songBuffer && replayGainKey !== this.replayGainSongKey) {
+      const context = this.sequencer.getCurrContext();
+      const contextChanged = context !== this.replayGainContext;
+      if (songPath && songBuffer && (replayGainKey !== this.replayGainSongKey || contextChanged)) {
         this.replayGainSongKey = replayGainKey;
+        this.replayGainContext = context;
         this.replayGainSong = {
           filepath: songPath,
           buffer: songBuffer,
           subtune: currSongRef?.subtune || 0,
+          context,
         };
         this.startReplayGain(this.replayGainSong);
       }
@@ -774,6 +780,7 @@ class App extends React.Component {
       buffer: song.buffer,
       subtune: song.subtune || 0,
       isLocal: song.filepath.startsWith('local/'),
+      context: song.context,
     });
   }
 

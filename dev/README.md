@@ -143,7 +143,7 @@ hand-carry list, `server/index.js`. Both are explained under "Where your work go
 
 In a non-interactive shell `nvm` is not on `PATH`, so export the pinned version
 directly (it is ABI-matched to `better-sqlite3`):
-`export PATH="$HOME/.nvm/versions/node/v24.21.0/bin:$PATH"`.
+`export PATH="$HOME/.nvm/versions/node/v24.22.1/bin:$PATH"`.
 
 ## Usage
 
@@ -180,7 +180,7 @@ It needs two things the normal setup does not:
   install also rebuilds `better-sqlite3` against whatever `node` is on PATH (the
   host default is 26.x, so it ends up compiled for the wrong ABI). If
   `dev/run-tests.sh` starts failing with `NODE_MODULE_VERSION`, run
-  `PATH="$HOME/.nvm/versions/node/v24.21.0/bin:$PATH" npm rebuild better-sqlite3`.
+  `PATH="$HOME/.nvm/versions/node/v24.22.1/bin:$PATH" npm rebuild better-sqlite3`.
   Full list of the ways this bites: AGENTS.md §Dev environment.
 - **Chromium**, already fetched into `~/.cache/ms-playwright`.
 

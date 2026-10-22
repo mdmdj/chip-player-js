@@ -5,7 +5,7 @@ This file documents a feature branch and its development setup for AI agents
 
 ## Session start
 
-Begin every session with `nvm use` (repo `.nvmrc` pins **Node 24.21.0**), then
+Begin every session with `nvm use` (repo `.nvmrc` pins **Node 24.22.1**), then
 confirm with `node -v` / `nvm current`. The host default `node` is newer (26.x)
 and `better-sqlite3` is compiled per Node ABI, so running `npm`/`node` under the
 wrong version fails with `NODE_MODULE_VERSION` mismatches. Also check whether an
@@ -38,8 +38,8 @@ more than once, so treat them as habits, not as things to remember.
 | `pkill -f some-pattern` | kill explicit PIDs from `ps` | matches the shell running it |
 
 And the Node rule outranks all of it: export
-`PATH="$HOME/.nvm/versions/node/v24.21.0/bin:$PATH"` for any `node`/`npm`, since
-`better-sqlite3` is ABI-matched to 24.21.0 (`nvm use` alone does not fix PATH in
+`PATH="$HOME/.nvm/versions/node/v24.22.1/bin:$PATH"` for any `node`/`npm`, since
+`better-sqlite3` is ABI-matched to 24.22.1 (`nvm use` alone does not fix PATH in
 a non-interactive shell).
 
 **Never grep or print a built/minified file.** `src/chip-core.js` is Emscripten
@@ -543,7 +543,7 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
 
 ## Dev environment
 
-- Node is pinned via **`.nvmrc`** (`24.21.0`, LTS). Use `nvm use` before any
+- Node is pinned via **`.nvmrc`** (`24.22.1`, LTS). Use `nvm use` before any
   Node/npm command. (`better-sqlite3@12.5.0` supports 20–25, not 26.)
 - Root install: `npm install --ignore-scripts` then `npm rebuild better-sqlite3`.
   (The unused `sqlite3` devDependency cannot build on Node 24; `--ignore-scripts`
@@ -564,7 +564,7 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
     host default is 26.x, so `better-sqlite3` ended up compiled for the wrong ABI
     and every `node scripts/build-music.js` (and therefore `dev/run-tests.sh`)
     died with `NODE_MODULE_VERSION`. Repair with
-    `PATH="$HOME/.nvm/versions/node/v24.21.0/bin:$PATH" npm rebuild better-sqlite3`
+    `PATH="$HOME/.nvm/versions/node/v24.22.1/bin:$PATH" npm rebuild better-sqlite3`
     — note `nvm use` alone does **not** fix PATH in a non-interactive shell.
   - Invariant: **`package.json` must stay unmodified** and the lockfile too (hence
     `--no-package-lock`); `node_modules` is gitignored. Verify with
@@ -741,7 +741,7 @@ favorited, looped, shuffled, shared, and (in future) playlisted.
   `scripts/start.js`): the config is read once at startup, so a live rebuild
   keeps serving the old one — e.g. a new `DefinePlugin` silently ships an
   unsubstituted `__BUILD_INFO__` identifier into the bundle.
-  Run it with `PATH="$HOME/.nvm/versions/node/v24.21.0/bin:$PATH"` (see
+  Run it with `PATH="$HOME/.nvm/versions/node/v24.22.1/bin:$PATH"` (see
   "Session start"); `nvm use` alone does not fix PATH in a non-interactive
   shell.
 - **`node --watch` does not reload the API server reliably here — restart it by

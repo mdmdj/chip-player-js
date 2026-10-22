@@ -41,7 +41,7 @@ linked depends on what happens to exist in `../`. This is the contradiction.
 - Worktree: `/home/mdm/.t3/worktrees/chip-player-js/t3-813b0752`
   (branch `t3/813b0752`, off `dev/overlay`), safety tag
   `pre-vendoring-experiment`.
-- Node via `.nvmrc` = 24.21.0 (host default is 26.x → better-sqlite3 ABI trap).
+- Node via `.nvmrc` = 24.22.1 (host default is 26.x → better-sqlite3 ABI trap).
 - Emscripten at `/usr/lib/emscripten` (Arch package), `cmake`, `xa` present.
 
 ## Reconnaissance findings (2026-10-08)

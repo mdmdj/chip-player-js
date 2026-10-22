@@ -129,11 +129,12 @@ Off / Per song / Per folder (album).
 
 ## Catalog refresh and format coverage (2026-10-22)
 
-The worktree catalog was refreshed to **383 files / 79 sub-tunes**, and the
-scanner was run over all of them (`--force`, 6 workers, 60 s cap):
+The worktree catalog was refreshed to **386 files / 79 sub-tunes**, and the
+scanner was run over all of them (`--force`, 6 workers, 60 s cap), then the MIDI
+and N64 retries:
 
-- **347 files measured, 36 N64 timeouts, 0 errors, 0 skipped.**
-- **421 sub-tune rows**; 25 complete directory albums, 5 partial.
+- **350 files measured, 36 N64 timeouts, 0 errors, 0 skipped.**
+- **424 sub-tune rows**; 25 complete directory albums, 5 partial.
 - All formats present in the catalog measured: `ay`, `gbs`, `it`, `mdx`, `mid`,
   `midi`, `minigsf`, `miniusf`, `mod`, `nsf`, `nsfe`, `s3m`, `sid`, `smf`, `spc`,
   `v2m`, `vgm`, `vgz`, `xm` (**19 extensions**).

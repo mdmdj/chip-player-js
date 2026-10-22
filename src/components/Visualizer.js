@@ -1,10 +1,16 @@
 import pianoKeys from '../images/piano-keys.png';
 import Spectrogram from '../Spectrogram';
 import PianoRollVisualizer from '../piano-roll/PianoRollVisualizer';
+import ButterchurnVisualizer from '../butterchurn/ButterchurnVisualizer';
 import { isMidiData } from '../piano-roll/midi-parser';
 import { usesTrackLoops } from '../players/midi/midi-helpers';
+import { UserContext } from './UserProvider';
 import React, { Fragment, PureComponent } from 'react';
 
+const RENDERER_MODES = [
+  { label: 'Spectrogram', value: 'spectrogram' },
+  { label: 'MilkDrop', value: 'milkdrop' },
+];
 const SPECTROGRAM_MODES = [
   'Linear FFT', 'Log FFT', 'Constant Q'
 ];
@@ -27,6 +33,8 @@ const SPEED_LABELS = [
 const VIS_WIDTH = 448;
 
 export default class Visualizer extends PureComponent {
+  static contextType = UserContext;
+
   constructor(props) {
     super(props);
 
@@ -35,11 +43,17 @@ export default class Visualizer extends PureComponent {
       weightingMode: 1,
       fftSize: 2048,
       speed: 2,
+      presetName: '',
+      presetIndex: 0,
+      presetCount: 0,
+      autoCycle: true,
+      blendSeconds: 2,
     };
 
     this.freqCanvasRef = React.createRef();
     this.specCanvasRef = React.createRef();
     this.pianoKeysRef = React.createRef();
+    this.milkdropRef = React.createRef();
   }
 
   componentDidMount() {
@@ -69,15 +83,48 @@ export default class Visualizer extends PureComponent {
     );
   }
 
-  componentDidUpdate(prevProps) {
-    const isMidi = this.isCurrentSongMidi();
-
-    if (!isMidi) {
-      this.spectrogram.setPaused(this.props.visible ? this.props.paused : true);
-    } else {
-      this.spectrogram.setPaused(true);
-    }
+  getRenderer() {
+    return this.context?.settings?.visualizerRenderer || 'spectrogram';
   }
+
+  componentDidUpdate() {
+    const isMidi = this.isCurrentSongMidi();
+    const showMilkDrop = !isMidi && this.getRenderer() === 'milkdrop';
+
+    // The spectrogram owns a rAF loop, so pause it whenever another renderer
+    // is on screen or the visualizer is hidden.
+    this.spectrogram.setPaused(
+      isMidi || showMilkDrop || !this.props.visible || this.props.paused
+    );
+  }
+
+  handleRendererClick = (e) => {
+    this.context.updateSettings({ visualizerRenderer: e.target.value });
+  };
+
+  handlePresetNext = () => {
+    this.milkdropRef.current?.nextPreset();
+  };
+
+  handlePresetPrev = () => {
+    this.milkdropRef.current?.prevPreset();
+  };
+
+  handlePresetRandom = () => {
+    this.milkdropRef.current?.randomPreset();
+  };
+
+  handlePresetChange = (presetName, presetIndex, presetCount) => {
+    this.setState({ presetName, presetIndex, presetCount });
+  };
+
+  handleAutoCycleChange = (e) => {
+    this.setState({ autoCycle: e.target.checked });
+  };
+
+  handleBlendChange = (e) => {
+    this.setState({ blendSeconds: parseFloat(e.target.value) });
+  };
 
   handleModeClick = (e) => {
     const mode = parseInt(e.target.value, 10);
@@ -115,9 +162,13 @@ export default class Visualizer extends PureComponent {
 
   render() {
     const isMidi = this.isCurrentSongMidi();
+    const renderer = this.getRenderer();
+    const settings = this.context?.settings || {};
+    const showMilkDrop = !isMidi && renderer === 'milkdrop';
+    const [meshWidth, meshHeight] = (settings.milkdropMesh || '48x36').split('x').map(Number);
 
     const specStyle = {
-      display: !isMidi ? 'block' : 'none',
+      display: !isMidi && !showMilkDrop ? 'block' : 'none',
       width: VIS_WIDTH,
       boxSizing: 'border-box',
     };
@@ -127,69 +178,123 @@ export default class Visualizer extends PureComponent {
         {!isMidi && (
           <div className='Visualizer-options' style={{ width: VIS_WIDTH, boxSizing: 'border-box' }}>
             <div>
-              <span className='VisualizerParams-label'>Mode:</span>
+              <span className='VisualizerParams-label'>Renderer:</span>
               {
-                SPECTROGRAM_MODES.map((mode, i) =>
-                  <label key={'m_'+i} className='inline'><input onClick={this.handleModeClick}
+                RENDERER_MODES.map((mode, i) =>
+                  <label key={'r_'+i} className='inline'><input onChange={this.handleRendererClick}
                                         type='radio'
-                                        name='spectrogram-mode'
-                                        defaultChecked={this.state.vizMode === i}
-                                        value={i}/>{mode}</label>
+                                        name='visualizer-renderer'
+                                        checked={renderer === mode.value}
+                                        value={mode.value}/>{mode.label}</label>
                 )
               }
             </div>
-            {this.state.vizMode === 2 ?
-              <div>
-                <span className='VisualizerParams-label'>Weighting:</span>
-                {
-                  WEIGHTING_MODES.map((mode, i) =>
-                    <Fragment key={'w_'+i}>
-                      <input onClick={this.handleWeightingModeClick}
-                             type='radio'
-                             id={'w_'+i}
-                             name='weighting-mode'
-                             defaultChecked={this.state.weightingMode === i}
-                             value={i}/>
-                      <label htmlFor={'w_'+i} title={mode.description} className='inline'>
-                      {mode.label}</label>
-                    </Fragment>
-                  )
+            {renderer === 'milkdrop' && (
+              <Fragment>
+                <div>
+                  <span className='VisualizerParams-label'>Preset:</span>
+                  <button className='box-button' onClick={this.handlePresetPrev}
+                          title='Previous preset'>
+                    <span className='inline-icon icon-prev'/>
+                  </button>
+                  <button className='box-button' onClick={this.handlePresetNext}
+                          title='Next preset'>
+                    <span className='inline-icon icon-next'/>
+                  </button>
+                  <button className='box-button' onClick={this.handlePresetRandom}
+                          title='Random preset'>
+                    <span className='inline-icon icon-shuffle'/> Random
+                  </button>
+                </div>
+                <div className='Visualizer-preset-name'>
+                  {this.state.presetName || '\u2014'}
+                  {this.state.presetCount > 0 &&
+                    <span> ({this.state.presetIndex + 1}/{this.state.presetCount})</span>}
+                </div>
+                <div>
+                  <label className='inline'>
+                    <input type='checkbox'
+                           checked={this.state.autoCycle}
+                           onChange={this.handleAutoCycleChange}/> Auto
+                  </label>
+                </div>
+                <div>
+                  <span className='VisualizerParams-label'>Blend:</span>
+                  <input type='range' min='0' max='5' step='0.5'
+                         value={this.state.blendSeconds}
+                         onChange={this.handleBlendChange}/>
+                  {' '}{this.state.blendSeconds.toFixed(1)}s
+                </div>
+              </Fragment>
+            )}
+            {renderer === 'spectrogram' && (
+              <Fragment>
+                <div>
+                  <span className='VisualizerParams-label'>Mode:</span>
+                  {
+                    SPECTROGRAM_MODES.map((mode, i) =>
+                      <label key={'m_'+i} className='inline'><input onClick={this.handleModeClick}
+                                            type='radio'
+                                            name='spectrogram-mode'
+                                            defaultChecked={this.state.vizMode === i}
+                                            value={i}/>{mode}</label>
+                    )
+                  }
+                </div>
+                {this.state.vizMode === 2 ?
+                  <div>
+                    <span className='VisualizerParams-label'>Weighting:</span>
+                    {
+                      WEIGHTING_MODES.map((mode, i) =>
+                        <Fragment key={'w_'+i}>
+                          <input onClick={this.handleWeightingModeClick}
+                                 type='radio'
+                                 id={'w_'+i}
+                                 name='weighting-mode'
+                                 defaultChecked={this.state.weightingMode === i}
+                                 value={i}/>
+                          <label htmlFor={'w_'+i} title={mode.description} className='inline'>
+                          {mode.label}</label>
+                        </Fragment>
+                      )
+                    }
+                  </div>
+                  :
+                  <div>
+                    <span className='VisualizerParams-label'>FFT Size:</span>
+                    {
+                      FFT_SIZES.map((size, i) =>
+                        <Fragment key={'f_'+i}>
+                          <input onClick={this.handleFFTSizeClick}
+                                 type='radio'
+                                 id={'f_'+i}
+                                 name='fft-size'
+                                 defaultChecked={this.state.fftSize === size}
+                                 value={size}/>
+                          <label htmlFor={'f_'+i} className='inline'>{FFT_LABELS[i]}</label>
+                        </Fragment>
+                      )
+                    }
+                  </div>
                 }
-              </div>
-              :
-              <div>
-                <span className='VisualizerParams-label'>FFT Size:</span>
-                {
-                  FFT_SIZES.map((size, i) =>
-                    <Fragment key={'f_'+i}>
-                      <input onClick={this.handleFFTSizeClick}
-                             type='radio'
-                             id={'f_'+i}
-                             name='fft-size'
-                             defaultChecked={this.state.fftSize === size}
-                             value={size}/>
-                      <label htmlFor={'f_'+i} className='inline'>{FFT_LABELS[i]}</label>
-                    </Fragment>
-                  )
-                }
-              </div>
-            }
-            <div title="Vertical scrolling speed (pixels per frame)">
-              <span className='VisualizerParams-label'>Speed:</span>
-              {
-                SPEEDS.map((speed, i) =>
-                  <Fragment key={'s_'+i}>
-                    <input onClick={this.handleSpeedClick}
-                           type='radio'
-                           id={'s_'+i}
-                           name='speed'
-                           defaultChecked={this.state.speed === speed}
-                           value={speed}/>
-                    <label htmlFor={'s_'+i} className='inline'>{SPEED_LABELS[i]}</label>
-                  </Fragment>
-                )
-              }
-            </div>
+                <div title="Vertical scrolling speed (pixels per frame)">
+                  <span className='VisualizerParams-label'>Speed:</span>
+                  {
+                    SPEEDS.map((speed, i) =>
+                      <Fragment key={'s_'+i}>
+                        <input onClick={this.handleSpeedClick}
+                               type='radio'
+                               id={'s_'+i}
+                               name='speed'
+                               defaultChecked={this.state.speed === speed}
+                               value={speed}/>
+                        <label htmlFor={'s_'+i} className='inline'>{SPEED_LABELS[i]}</label>
+                      </Fragment>
+                    )
+                  }
+                </div>
+              </Fragment>
+            )}
           </div>
         )}
 
@@ -219,6 +324,24 @@ export default class Visualizer extends PureComponent {
           />
         )}
 
+        {/* MilkDrop visualizer (Butterchurn) */}
+        {showMilkDrop && (
+          <ButterchurnVisualizer
+            ref={this.milkdropRef}
+            audioCtx={this.props.audioCtx}
+            sourceNode={this.props.sourceNode}
+            width={VIS_WIDTH}
+            height={800}
+            paused={!this.props.visible || this.props.paused}
+            autoCycle={this.state.autoCycle}
+            blendSeconds={this.state.blendSeconds}
+            meshWidth={meshWidth}
+            meshHeight={meshHeight}
+            resolutionScale={settings.milkdropResolution || 1}
+            onPresetChange={this.handlePresetChange}
+          />
+        )}
+
         {/* Spectrogram visualizer */}
         <canvas style={specStyle} className='Visualizer-analyzer' width={VIS_WIDTH} height={60}
                 ref={this.freqCanvasRef}/>
@@ -229,7 +352,7 @@ export default class Visualizer extends PureComponent {
              ref={this.pianoKeysRef}
              alt='Piano keys'
              style={{
-               display: (!isMidi && this.state.vizMode === 2) ? 'block' : 'none',
+               display: (!isMidi && !showMilkDrop && this.state.vizMode === 2) ? 'block' : 'none',
                width: VIS_WIDTH,
              }}/>
       </div>

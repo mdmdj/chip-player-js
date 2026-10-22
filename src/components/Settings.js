@@ -22,6 +22,20 @@ const silenceOptions = [
   { value: 5, label: '5 seconds' },
 ];
 
+const milkdropMeshOptions = [
+  { value: '32x24', label: 'Low (32 x 24)' },
+  { value: '48x36', label: 'Balanced (48 x 36)' },
+  { value: '64x48', label: 'High (64 x 48)' },
+  { value: '96x72', label: 'Ultra (96 x 72)' },
+];
+
+const milkdropResolutionOptions = [
+  { value: 0.5, label: '50%' },
+  { value: 1, label: '100%' },
+  { value: 1.5, label: '150%' },
+  { value: 2, label: '200%' },
+];
+
 // DEV-BEGIN (stripped for promotion; dev-only end-detector tuning panel. A
 // player that uses EndDetector exposes it as `player.endDetector`; this
 // component and its usage below strip together, leaving production untouched.)
@@ -107,6 +121,22 @@ function Settings(props) {
   const theme = settings?.theme;
   const silenceDuration = settings?.silenceDuration ?? -1;
   const showLoopArea = settings?.showLoopArea ?? true;
+  const visualizerRenderer = settings?.visualizerRenderer || 'spectrogram';
+  const showVisualizer = settings?.showVisualizer;
+  const milkdropMesh = settings?.milkdropMesh || '48x36';
+  const milkdropResolution = settings?.milkdropResolution ?? 1;
+  const player = sequencer?.getPlayer?.();
+  const isMidi = /\.(mid|midi|smf)$/i.test(sequencer?.getCurrSongPath?.() || '') ||
+    Boolean(player?.fileExtensions?.includes('mid'));
+  const milkdropActive = Boolean(showVisualizer && visualizerRenderer === 'milkdrop' && !isMidi);
+
+  const handleMilkdropMeshChange = useCallback((e) => {
+    updateSettings({ milkdropMesh: e.target.value });
+  }, [updateSettings]);
+
+  const handleMilkdropResolutionChange = useCallback((e) => {
+    updateSettings({ milkdropResolution: Number(e.target.value) });
+  }, [updateSettings]);
 
   const handleThemeChange = useCallback((e) => {
     updateSettings({ theme: e.target.value });
@@ -177,6 +207,37 @@ function Settings(props) {
           Show Loop Area
         </label>
       </span>
+      {milkdropActive &&
+        <React.Fragment>
+          <h3>MilkDrop</h3>
+          <span className='PlayerParams-param'>
+            <label htmlFor='milkdropMesh' title='Simulation mesh resolution. Lower is faster.' className="PlayerParams-label-wide">
+              Mesh:{' '}
+            </label>
+            <select
+              id='milkdropMesh'
+              onChange={handleMilkdropMeshChange}
+              value={milkdropMesh}>
+              {milkdropMeshOptions.map(option =>
+                <option key={option.value} value={option.value}>{option.label}</option>
+              )}
+            </select>
+          </span>
+          <span className='PlayerParams-param'>
+            <label htmlFor='milkdropResolution' title='Render resolution. Lower is faster.' className="PlayerParams-label-wide">
+              Resolution:{' '}
+            </label>
+            <select
+              id='milkdropResolution'
+              onChange={handleMilkdropResolutionChange}
+              value={milkdropResolution}>
+              {milkdropResolutionOptions.map(option =>
+                <option key={option.value} value={option.value}>{option.label}</option>
+              )}
+            </select>
+          </span>
+        </React.Fragment>
+      }
       {/* DEV-BEGIN (stripped for promotion; dev-only end-detector tuning) */}
       <EndDetectorTuning sequencer={sequencer} />
       {/* DEV-END */}

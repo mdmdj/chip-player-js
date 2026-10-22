@@ -68,3 +68,11 @@ server/index.js
 # block is a DEV region and the file promotes. MIDIPlayer (2 ADLMIDI guards) and
 # XMPPlayer (1 seek_time_frame fallback) needed no regions -- both hunks are
 # portable compat that behaves identically against upstream cores.
+#
+# 2026-10-22: the de-listing above assumes a DEV-BEGIN region that is NOT in this
+# overlay's copy (nor the canonical one). The dev block REPLACES the feature
+# branch's localhost block, and a strip-only region cannot express "replace"; so
+# promoting it leaks the LAN/per-target-port block. Keep it listed here until the
+# canonical overlay makes the override additive (a second, regioned block after
+# the localhost one). Reported by the visualizer thread.
+src/config/index.js

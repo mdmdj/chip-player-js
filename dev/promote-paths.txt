@@ -62,17 +62,16 @@ libADLMIDI/**
 # Feature work here must still be hand-carried: repeat that step every time.
 server/index.js
 
-# Engine feature-detection + remote-dev tweaks on shared files. src/config/index.js
-# used to be listed because its only delta was the dev overlay's LAN hostname; it
-# now carries a feature override for the offline loudness scanner too, so the dev
-# block is a DEV region and the file promotes. MIDIPlayer (2 ADLMIDI guards) and
+# Engine feature-detection on shared files. MIDIPlayer (2 ADLMIDI guards) and
 # XMPPlayer (1 seek_time_frame fallback) needed no regions -- both hunks are
 # portable compat that behaves identically against upstream cores.
 #
-# 2026-10-22: the de-listing above assumes a DEV-BEGIN region that is NOT in this
-# overlay's copy (nor the canonical one). The dev block REPLACES the feature
-# branch's localhost block, and a strip-only region cannot express "replace"; so
-# promoting it leaks the LAN/per-target-port block. Keep it listed here until the
-# canonical overlay makes the override additive (a second, regioned block after
-# the localhost one). Reported by the visualizer thread.
+# src/config/index.js stays listed: its only delta is the dev overlay's LAN host /
+# window.__devApiPort block, and that block REPLACES the feature branch's localhost
+# block. A strip-only region can only ADD lines, so it cannot express that, and the
+# file has no feature content of its own to promote. It was de-listed once on the
+# claim that its dev block was a DEV region -- it was not, and the plan carried the
+# LAN block toward the PR. Before de-listing anything, `grep DEV-BEGIN` it.
+# This entry is also the safety net that reaches every overlay: the file is
+# feature-owned, so the kit cannot carry a fix to it.
 src/config/index.js

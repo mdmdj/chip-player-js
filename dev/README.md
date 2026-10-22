@@ -496,6 +496,12 @@ travels with the branch):
 - derived from one with none (current master) → you get the bare infrastructure and
   the feature tests are **skipped with the reason**, not failed.
 
+One consequence to know: **a harness fix does not travel.** Because feature tests
+are pruned from the kit, an overlay cut before the fix keeps running the old check
+— a stale `test-midi-loops.js` reported a failure for a file its source overlay had
+already learned to skip. Copy the file from the source overlay and commit it on that
+overlay; the copy is deliberate, because the branch owns its tests.
+
 `run-tests.sh` is driven by that file and nothing is hard-coded in it; the kit
 derives its never-carried list from the same file, so a feature's tests are pruned
 automatically. Add a feature with one `group` line plus a `test feature` line per

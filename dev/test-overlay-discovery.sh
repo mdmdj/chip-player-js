@@ -64,20 +64,32 @@ if [ ${#KPATHS[@]} -gt 0 ]; then ok "kit path list is readable (${#KPATHS[@]} pa
 else bad "kit path list is readable"; fi
 EXCL=()
 for n in "${NEVER[@]}"; do [ -n "$n" ] && EXCL+=(":(exclude)$n"); done
-DRIFT="$(git diff --name-only dev/kit dev/overlay-subtunes -- "${KPATHS[@]}" "${EXCL[@]}" 2>/dev/null || true)"
+SOURCE_OVERLAY="$(awk 'NF >= 3 && $1 !~ /^#/ { print $3; exit }' dev/overlay.conf 2>/dev/null || true)"
+[ -n "$SOURCE_OVERLAY" ] || SOURCE_OVERLAY=dev/overlay-subtunes
+DRIFT="$(git diff --name-only dev/kit "$SOURCE_OVERLAY" -- "${KPATHS[@]}" "${EXCL[@]}" 2>/dev/null || true)"
 if [ -z "$DRIFT" ]; then
-  ok "the kit matches dev/overlay-subtunes for everything it carries"
+  ok "the kit matches $SOURCE_OVERLAY for everything it carries"
 else
   # A hard failure belongs where capture is the only right next step: the source
   # overlay. Every OTHER tree is "stale" by definition until it refreshes, and a
   # red suite there reads as a broken tree rather than "pull the kit" -- so it is
   # a reported skip with the exact command.
-  SOURCE_OVERLAY="$(awk 'NF >= 3 && $1 !~ /^#/ { print $3; exit }' dev/overlay.conf 2>/dev/null || true)"
   if [ "$(git rev-parse --abbrev-ref HEAD)" = "$SOURCE_OVERLAY" ]; then
     bad "the kit is stale for: $(tr '\n' ' ' <<< "$DRIFT") -- run ./dev/kit.sh capture"
   else
     skip "this tree's kit is behind (run ./dev/overlay.sh <target> refresh): $(tr '\n' ' ' <<< "$DRIFT")"
   fi
+fi
+
+# 5b. A de-listing needs its region to exist. src/config/index.js was de-listed with
+#     a comment claiming its dev block was a DEV region; it was not -- the block
+#     REPLACES the feature branch's localhost block, and the plan carried the LAN
+#     host / port override toward the PR. Pinned so a tidier-looking comment cannot
+#     repeat it (and the entry is what protects overlays that predate any fix).
+if grep -qx 'src/config/index.js' dev/promote-paths.txt; then
+  ok "src/config/index.js stays path-listed (its dev block replaces; it cannot strip)"
+else
+  bad "src/config/index.js is not path-listed -- its dev block replaces the feature branch's localhost block, so it cannot be a DEV region (see promote-paths.txt)"
 fi
 
 # 6. AGENTS.md is a SEED: the template a new worktree gets, never captured up, and

@@ -63,7 +63,8 @@ worktree created from `dev/kit` (or from another overlay) needs nothing else fir
 | Add a test | one `infra`/`feature` line in `dev/tests.manifest` (+ a `group` line naming the feature's marker files) |
 | Choose the chip-core's base | `./dev/core.sh list`, then `use <ref>`; or `CORE_REF=<ref> bringup`; `build` builds from this tree's sources |
 | Give a worktree a bigger catalog | `./dev/sample.sh steal <other-worktree>` (or `node dev/fetch-seo-fixtures.mjs`) |
-| Publish feature work | `./dev/overlay.sh <t> plan` → arm → `./dev/overlay.sh <t> promote` |
+| Publish feature work | `./dev/overlay.sh <t> plan` (works with the dev patches applied) → arm → `./dev/overlay.sh <t> promote` |
+| Back up before a promote | `./dev/backup.sh <t>` — tags both branches and tars the gitignored dev artifacts |
 | Publish dev tooling | `./dev/kit.sh capture` (to the kit), then `./dev/kit.sh pull <target>` on each target |
 | Refresh an overlay | `./dev/overlay.sh <t> refresh [--dry-run]` — kit sync + rebase, **verified**; `all` refreshes every target, skipping the ones it cannot |
 | Publish the overlay / the kit | `./dev/push-overlay.sh`, `git push origin dev/kit` |
@@ -84,6 +85,7 @@ lives under `dev/`, is carried to every target by the kit, and never reaches the
 | `bringup.sh` | one-command setup of a worktree (branches, port, engines, modules, apply, sample, core) |
 | `overlay-new.sh` | create `feature/<name>` + `dev/overlay-<name>` and their worktrees, from the kit |
 | `refresh.sh` | bring an overlay (or `all`) up to date: kit sync + rebase, verified; `--dry-run` |
+| `backup.sh` | before a promote: tag the overlay + feature branches and tar the gitignored dev artifacts (`dev/.backups/`) |
 | `registry.sh` | the shared target/port registry, in the common git dir |
 | `kit.sh` | the dev layer itself: `capture` (to the kit), `pull` (into a target), `list`, `owned`, `never` |
 | `engines.sh` | the engine inventory: `check` (flags a decoy), `link` (farms the siblings) |
@@ -112,6 +114,39 @@ What it all reads:
 The other two mechanisms are not files: a `DEV-BEGIN … DEV-END` region inside a
 feature file (a chunk that strips to prod behaviour exactly) and the single
 hand-carry list, `server/index.js`. Both are explained under "Where your work goes".
+
+## Adding a dependency
+
+A feature that adds a package commits `package.json` **and** the lockfile, and
+touches nothing else:
+
+```sh
+npm install --save-exact <pkg>@<version>          # --save-exact matches the repo's pins
+git diff --stat package.json package-lock.json    # exactly those two files
+```
+
+The plan validates both: `*.json` goes through `JSON.parse` and `*.css` through
+postcss, so a dependency or a stylesheet promotes with the same protection as JS
+and C rather than as an unvalidated blank.
+
+**Never `npm install --no-save`.** It resolves the whole tree against
+`package.json`, so it prunes what a previous `--no-save` added *and* upgrades
+existing deps as a side effect (it moved webpack 5.106 → 5.112 once, which removed
+`webpack/hot/log.js` and broke the dev build). A killed reify can leave
+`node_modules` half-written, so repair a drifted tree with a clean install rather
+than re-running the same command:
+
+```sh
+rm -rf node_modules && npm ci --ignore-scripts && npm rebuild better-sqlite3
+```
+
+`--ignore-scripts` is not optional under Node 24 (the unused `sqlite3`
+devDependency cannot build there); `better-sqlite3` is then rebuilt for the pinned
+Node — `nvm use`, or the PATH export in a non-interactive shell.
+
+A worktree whose `node_modules` `bringup` hardlinked does **not** see a new
+dependency automatically: the install replaces directory entries in the tree that
+ran it, so run the sequence above in each tree that needs the package.
 
 ## Housekeeping
 

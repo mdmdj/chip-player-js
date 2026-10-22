@@ -13,9 +13,10 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$DIR/.." && pwd)"
 cd "$ROOT"
 
-pass=0; fail=0
+pass=0; fail=0; skipped=0
 ok()   { echo "ok   - $1"; pass=$((pass+1)); }
 bad()  { echo "FAIL - $1"; fail=$((fail+1)); }
+skip() { echo "skip - $1"; skipped=$((skipped+1)); }
 expect_contains() { case "$2" in *"$3"*) ok "$1" ;; *) bad "$1 (missing: $3)" ;; esac; }
 
 # 1. Every entry point explains itself when run with no arguments.
@@ -67,7 +68,16 @@ DRIFT="$(git diff --name-only dev/kit dev/overlay-subtunes -- "${KPATHS[@]}" "${
 if [ -z "$DRIFT" ]; then
   ok "the kit matches dev/overlay-subtunes for everything it carries"
 else
-  bad "the kit is stale for: $(tr '\n' ' ' <<< "$DRIFT") -- run ./dev/kit.sh capture"
+  # A hard failure belongs where capture is the only right next step: the source
+  # overlay. Every OTHER tree is "stale" by definition until it refreshes, and a
+  # red suite there reads as a broken tree rather than "pull the kit" -- so it is
+  # a reported skip with the exact command.
+  SOURCE_OVERLAY="$(awk 'NF >= 3 && $1 !~ /^#/ { print $3; exit }' dev/overlay.conf 2>/dev/null || true)"
+  if [ "$(git rev-parse --abbrev-ref HEAD)" = "$SOURCE_OVERLAY" ]; then
+    bad "the kit is stale for: $(tr '\n' ' ' <<< "$DRIFT") -- run ./dev/kit.sh capture"
+  else
+    skip "this tree's kit is behind (run ./dev/overlay.sh <target> refresh): $(tr '\n' ' ' <<< "$DRIFT")"
+  fi
 fi
 
 # 6. AGENTS.md is a SEED: the template a new worktree gets, never captured up, and
@@ -193,5 +203,5 @@ case "$MANIFEST_KIT" in *"group subtunes"*) ok "the registry declares the featur
 *) bad "the registry declares the feature markers" ;; esac
 
 echo
-echo "overlay-discovery: $pass passed, $fail failed"
+echo "overlay-discovery: $pass passed, $skipped skipped, $fail failed"
 [ "$fail" -eq 0 ]

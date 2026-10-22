@@ -36,6 +36,8 @@ _ignore/
 public/sitemap*.xml
 dev/nes-audio-tests/
 dev/.promote-armed
+# dev/backup.sh's snapshots: tags cover the tracked branches, this the artifacts.
+dev/.backups/
 
 # dev/rebase.sh's scratch state: the pre-rebase tip and the merge base it is
 # checked against, both kept for the failure path (cleaned on a clean run).

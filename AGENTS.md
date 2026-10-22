@@ -6,7 +6,8 @@ This file documents a feature branch and its development setup for AI agents
 ## Session start
 
 Begin every session with `nvm use` (repo `.nvmrc` pins **Node 24.22.1**), then
-confirm with `node -v` / `nvm current`. The host default `node` is newer (26.x)
+confirm with `node -v` / `nvm current` — if `node -v` still shows 26.x, the shell
+cached the lookup: `hash -r`. The host default `node` is newer (26.x)
 and `better-sqlite3` is compiled per Node ABI, so running `npm`/`node` under the
 wrong version fails with `NODE_MODULE_VERSION` mismatches. Also check whether an
 `npm run dev` is already up before assuming the environment is correct — a

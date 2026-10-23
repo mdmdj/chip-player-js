@@ -23,8 +23,6 @@ export default class ButterchurnVisualizer extends PureComponent {
     this.visualizer = null;
     this.animFrameId = null;
     this.rotateTimer = null;
-    this.initTimer = null;
-    this.unmounted = false;
     this.resizeObserver = null;
     this.presetNames = [];
     this.presetIndex = 0;
@@ -91,8 +89,10 @@ export default class ButterchurnVisualizer extends PureComponent {
       } else {
         this.start();
       }
-      if (!this.unmounted) {
-        this.setState({ loading: false });
+
+      if (typeof ResizeObserver !== 'undefined') {
+        this.resizeObserver = new ResizeObserver(this.handleResize);
+        this.resizeObserver.observe(canvas);
       }
     } catch (e) {
       console.error('MilkDrop visualizer failed to initialize', e);
@@ -144,9 +144,6 @@ export default class ButterchurnVisualizer extends PureComponent {
     if (this.resizeObserver) {
       this.resizeObserver.disconnect();
       this.resizeObserver = null;
-    }
-    if (this.visualizer && this.props.sourceNode) {
-      this.visualizer.disconnectAudio(this.props.sourceNode);
     }
     this.visualizer = null;
   }
@@ -215,9 +212,7 @@ export default class ButterchurnVisualizer extends PureComponent {
 
   applyResolution() {
     if (!this.visualizer) return;
-    const scale = this.props.resolutionScale || 1;
-    const width = Math.round(this.baseWidth * scale);
-    const height = Math.round(this.baseHeight * scale);
+    const { width, height } = this.getTargetSize();
     this.visualizer.setRendererSize(width, height);
     // setRendererSize changes Butterchurn's render target/viewport but not the
     // canvas backing store. Without this, a scale below 1 renders into the

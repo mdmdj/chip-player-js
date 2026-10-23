@@ -87,12 +87,17 @@ is MilkDrop on a non-MIDI song:
 - **Mesh:** 32×24 / 48×36 / 64×48 / 96×72 → `setInternalMeshSize`
 - **Resolution:** 50 / 100 / 150 / 200 % → `setRendererSize(base × scale)`
 
-The canvas keeps its CSS size (448×800); the render target scales, and the
-canvas backing store is set to the scaled size too. Butterchurn's
-`setRendererSize` updates its viewport/render target but not the canvas element,
-so without that second step a scale below 1 renders into the bottom-left quadrant
-of the still-448×800 canvas. The browser then upscales the smaller buffer to the
-CSS box. Mesh is the main performance lever.
+The canvas fills the available visualizer area: 448 px wide and the remaining
+height after the options row (measured with a `ResizeObserver`; ~454 px at an
+800 px viewport, not a fixed 800). The target handed to Butterchurn is exactly
+`CSS size × resolution` — the same number is used for `createVisualizer()`, for
+`setRendererSize()`, and for the canvas backing store. 50% → 224×227 inside a
+448×454 CSS box; 150% → the reverse. Butterchurn's `setRendererSize` updates its
+viewport/render target but not the canvas element, so the backing store must be
+set too — otherwise a scale below 1 renders into the bottom-left quadrant of the
+canvas. Filling the flex area also keeps the render centred in the visible area
+instead of 800 px tall and clipped by the footer. Mesh is the main performance
+lever.
 
 ## Settings keys (`DEFAULT_SETTINGS`)
 

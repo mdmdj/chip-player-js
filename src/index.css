@@ -570,7 +570,7 @@ button.IconButton {
 .Visualizer-options { padding: var(--charH) var(--charW2) 0; text-align: right; }
 .Visualizer-controls { position: fixed; top: var(--charH); right: var(--charW2); z-index: 20; text-align: right; }
 .Visualizer-controls .Visualizer-toggle { margin: 0; line-height: var(--charH); }
-.Visualizer-renderer-toggle { display: flex; justify-content: flex-end; align-items: center; gap: 4px; height: 18px; white-space: nowrap; font-size: 11px; line-height: 18px; }
+.Visualizer-renderer-toggle { position: fixed; top: calc(3 * var(--charH) - 1px); right: var(--charW2); z-index: 20; display: flex; justify-content: flex-end; align-items: center; gap: 4px; height: 18px; white-space: nowrap; font-size: 11px; line-height: 18px; }
 .Visualizer-renderer-toggle .inline { margin-right: 0; }
 @media screen and (max-width: 600px) { .Visualizer-controls { display: none; } }
 .Visualizer-analyzer { display: block; image-rendering: pixelated; }

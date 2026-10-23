@@ -33,7 +33,7 @@ const SPEED_LABELS = [
 ];
 const VIS_WIDTH = 448;
 const PRESET_BUTTON_STYLE = {
-  width: '30.75px', // 19px * phi, the inline-icon height
+  width: '33.78px', // 19px * 16/9, matching the glyph frame
   height: '19px',
   padding: 0,
   alignSelf: 'center',

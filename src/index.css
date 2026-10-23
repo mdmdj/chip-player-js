@@ -587,7 +587,7 @@ button.IconButton {
 .Preset-glyph svg * { vector-effect: non-scaling-stroke; }
 .PresetNav { display: inline-flex; align-items: center; gap: var(--charW1); }
 button.PresetNav-button {
-  width: 30.75px; /* 19px * phi, the same height as the inline icons */
+  width: 33.78px; /* 19px * 16/9, matching the glyph frame */
   height: 19px;
   padding: 0;
   align-self: center;

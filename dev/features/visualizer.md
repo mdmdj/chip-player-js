@@ -65,7 +65,7 @@ previous / next / random, preset name + `(n/100)`, `Auto` (20 s rotation),
 `Blend` (0–5 s).
 
 The transport is styled like the footer's three-button group: pure CSS triangles
-(no bar), **30.75×19 px** (19 × φ), **8 px** gap (`var(--charW1)`), and the
+(no bar), **33.78×19 px** (16:9, matching the glyph frame), **8 px** gap (`var(--charW1)`), and the
 shuffle glyph only for Random. The "Preset:" text label is replaced by the glyph.
 
 ### Preset glyph (chosen)

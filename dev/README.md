@@ -56,7 +56,7 @@ worktree created from `dev/kit` (or from another overlay) needs nothing else fir
 | Task | Command |
 | --- | --- |
 | New target on master | `./dev/overlay.sh <name> bringup` |
-| New target stacked on an existing one | `./dev/overlay.sh <name> bringup <feature-branch>` on a worktree cut from that overlay |
+| New target stacked on an existing one | `./dev/overlay.sh <name> bringup <base-branch>` — the argument is the **base**; the target is always `feature/<name>` (`--target` overrides) |
 | See what a worktree is | `./dev/overlay.sh <name> status` |
 | Run the app | `./dev/overlay.sh <name> dev` (background it; one log per target) |
 | Run the tests | `./dev/run-tests.sh` (`VERBOSE=1` for full output) |
@@ -303,6 +303,16 @@ seconds and prints the run command:
 curl -s -o /dev/null -w '%{http_code}\n' localhost:<api>/   # the HTML route
 ```
 
+**The positional branch is the BASE, not the target.** `bringup <name> <base>`
+creates `feature/<name>` *from* `<base>` (`--base` is the explicit form) and
+registers `feature/<name>` as the promote target; `--target <branch>` overrides
+the target deliberately and loudly. This distinction is load-bearing: before it
+existed, `bringup visualizer feature/subtunes-as-first-class` meant "based on
+sub-tunes" to the caller and "promote into sub-tunes" to the tool, and a promote
+put the visualizer's files on the shared branch. A target whose name appears in
+neither branch is now refused by `registry.sh claim`, and the plan warns when the
+pair looks like two different features.
+
 `dev/apply.sh` is what makes the tree runnable: it patches the dev-only deltas
 into `server/index.js` (auth bypass, per-target ports, the dev HTML injection),
 which the kit deliberately does not carry. `dev/patch-server.js --revert` (run by
@@ -314,7 +324,18 @@ which the kit deliberately does not carry. `dev/patch-server.js --revert` (run b
 the **common git dir**: every worktree has its own copy of `dev/`, so a row in
 `dev/overlay.conf` is invisible from another worktree — which is why a target
 registered by one agent could not be reached by another, or by the main checkout.
-A row is a manifest line: `name feature overlay wds api`.
+A row is a manifest line: `name feature overlay wds api [base]`. The last field is
+the base the work sits on, for information only — nothing resolves through it, and
+`-` means "not recorded".
+
+**The slug rule.** The target name must appear in *both* branches: `visualizer` →
+`feature/visualizer` + `dev/overlay-visualizer`, and `subtunes` →
+`feature/subtunes-as-first-class` + `dev/overlay-subtunes`. `claim` refuses a pair
+that fails it, because the usual reason is a *base* branch registered as the
+target. A deliberate shared target is explicit: `claim <name> <feature> <overlay>
+--allow-mismatch`, which registers it and prints `MISMATCH ACCEPTED`. The promote
+plan also warns when the pair looks like two different features — a warning, not a
+refusal, since the override exists.
 
 Port policy (the rule):
 

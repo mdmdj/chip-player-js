@@ -61,7 +61,8 @@ git branch dev/overlay-a feature/a
 git worktree add -q "$WORK/ov-a" dev/overlay-a
 mkdir -p "$WORK/ov-a/dev"
 for f in overlaylib.sh promote.sh promote-plan.sh promote-apply.sh rebase.sh \
-         push-overlay.sh kit.sh overlay-new.sh overlay.sh refresh.sh registry.sh; do
+         push-overlay.sh kit.sh overlay-new.sh overlay.sh refresh.sh registry.sh \
+         bringup.sh; do
   cp "$SRC/dev/$f" "$WORK/ov-a/dev/$f"
 done
 chmod +x "$WORK/ov-a/dev/"*.sh
@@ -188,6 +189,38 @@ expect_contains "promote: feature/a is untouched" "$(cat "$WORK/feat-a/src/app.j
 # --- an ambiguous retarget refuses rather than guessing ---------------------
 REF="$(cd "$OVB" && bash dev/promote.sh feature/zzz 2>&1 || true)"
 expect_contains "refuse: ambiguous retarget is refused" "$REF" "is the overlay for feature/b"
+
+# --- wrong-target guard: a base is not a target ------------------------------
+# `bringup <name> <base>` used to register the BASE as the promote target, and a
+# promote then wrote this feature's commits into the shared sub-tunes branch. The
+# target's name must appear in both branches; a deliberate shared target is
+# explicit and loud.
+MIS_RC=0
+MIS="$(cd "$OVB" && WDS_BASE=3900 API_BASE=8900 bash dev/registry.sh claim visualizer feature/subtunes-as-first-class dev/overlay-visualizer 2>&1)" || MIS_RC=$?
+expect_eq       "guard: a base-as-target claim is refused" "$MIS_RC" "1"
+expect_contains "guard: the refusal names both branches" "$MIS" "does not match its branches"
+expect_contains "guard: and points at the explicit override" "$MIS" "--allow-mismatch"
+
+OVR="$(cd "$OVB" && WDS_BASE=3900 API_BASE=8900 bash dev/registry.sh claim visualizer feature/subtunes-as-first-class dev/overlay-visualizer --allow-mismatch 2>&1)"
+expect_contains "guard: --allow-mismatch registers a shared target, loudly" "$OVR" "MISMATCH ACCEPTED"
+
+OKC_RC=0
+OKC="$(cd "$OVB" && WDS_BASE=3900 API_BASE=8900 bash dev/registry.sh claim subtunes feature/subtunes-as-first-class dev/overlay-subtunes 2>&1)" || OKC_RC=$?
+expect_eq       "guard: a slug that appears in both branches passes (subtunes)" "$OKC_RC" "0"
+
+# bringup: the positional branch is the BASE; the target is feature/<name>.
+# Run it from the main checkout: bringup refuses to create a second pair while
+# standing in an overlay, and $REPO is the only non-overlay tree in the fixture.
+mkdir -p "$REPO/dev"
+cp -a "$WORK/ov-a/dev/." "$REPO/dev/"
+git -C "$REPO" checkout -q --detach
+BU="$(cd "$REPO" && BRINGUP_STOP_AFTER_REGISTER=1 bash dev/bringup.sh delta --base feature/b 2>&1 || true)"
+expect_contains "bringup: creates the target from the base" "$BU" "created feature/delta from feature/b"
+expect_contains "bringup: registers feature/delta, not the base" "$BU" "registered delta -> feature/delta / dev/overlay-delta (base feature/b)"
+expect_eq       "bringup: the new branch starts at the base" \
+                "$(git -C "$REPO" rev-parse feature/delta 2>/dev/null)" "$(git -C "$REPO" rev-parse feature/b)"
+expect_eq       "bringup: the row records the base" \
+                "$(awk '$1 == "delta" { print $6 }' "$REPO/.git/dev-targets")" "feature/b"
 
 echo
 echo "overlay-tooling: $pass passed, $fail failed"

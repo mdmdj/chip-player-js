@@ -27,11 +27,12 @@ trap cleanup EXIT
 R1="$("$reg" claim alpha)"             # -> "alpha feature/alpha dev/overlay-alpha 3900 8900"
 R1b="$("$reg" claim alpha)"
 expect_eq "claim is idempotent" "$R1" "$R1b"
-# ...but naming a different feature must CORRECT the row: re-running bringup with a
-# different base is how a target gets re-pointed, and silently keeping the old one
-# would mis-target the promote.
-R1c="$("$reg" claim alpha feature/other)"
-expect_eq "re-claiming with a new feature reconciles the row" "$(awk '{print $2}' <<< "$R1c")" "feature/other"
+# ...but naming a different TARGET branch must CORRECT the row: re-running bringup
+# with a new target is how a target gets re-pointed, and silently keeping the old one
+# would mis-target the promote. The new branch must still carry the slug (see the
+# guard below); a base is no longer expressible here.
+R1c="$("$reg" claim alpha feature/alpha-v2)"
+expect_eq "re-claiming with a new target branch reconciles the row" "$(awk '{print $2}' <<< "$R1c")" "feature/alpha-v2"
 expect_eq "a bare re-claim keeps the corrected row" "$("$reg" claim alpha)" "$R1c"
 expect_eq "first claim takes the pool base" "$(awk '{print $4, $5}' <<< "$R1")" "3900 8900"
 expect_eq "claim derives feature/overlay names" "$(awk '{print $2, $3}' <<< "$R1")" "feature/alpha dev/overlay-alpha"
@@ -39,7 +40,25 @@ expect_eq "claim derives feature/overlay names" "$(awk '{print $2, $3}' <<< "$R1
 R2="$("$reg" claim beta)"
 expect_eq "second claim takes the next pair, not the same one" "$(awk '{print $4, $5}' <<< "$R2")" "3901 8901"
 expect_eq "port subcommand reads the row back" "$("$reg" port beta)" "3901 8901"
-expect_eq "explicit names are honoured" "$("$reg" claim gamma feature/g dev/overlay-g | awk '{print $2, $3}')" "feature/g dev/overlay-g"
+expect_eq "explicit names are honoured" "$("$reg" claim gamma feature/gamma-g dev/overlay-gamma-g | awk '{print $2, $3}')" "feature/gamma-g dev/overlay-gamma-g"
+
+# The slug rule: a target whose name is in neither branch is almost always a BASE
+# registered as the target (the incident that motivated it). Refused, unless said
+# explicitly -- and then loudly. Its own registry file: the pool below is 4 ports.
+export OVERLAY_REGISTRY="$WORK/guard-targets"
+M_RC=0
+M_OUT="$("$reg" claim visualizer feature/subtunes-as-first-class dev/overlay-visualizer 2>&1)" || M_RC=$?
+expect_eq       "a base-as-target pair is refused" "$M_RC" "1"
+expect_contains "the refusal names the mismatch" "$M_OUT" "does not match its branches"
+expect_contains "an explicit shared target is allowed, loudly" \
+  "$("$reg" claim visualizer feature/subtunes-as-first-class dev/overlay-visualizer --allow-mismatch 2>&1)" "MISMATCH ACCEPTED"
+expect_eq       "the base is recorded as the last field" \
+  "$("$reg" claim theta feature/theta dev/overlay-theta feature/subtunes-as-first-class | awk '{print $6}')" \
+  "feature/subtunes-as-first-class"
+expect_eq       "a slug in both branches passes (subtunes)" \
+  "$("$reg" claim subtunes feature/subtunes-as-first-class dev/overlay-subtunes | awk '{print $1, $2}')" \
+  "subtunes feature/subtunes-as-first-class"
+export OVERLAY_REGISTRY="$WORK/dev-targets"   # back to the port-policy registry
 
 LIST="$("$reg" list)"
 expect_contains "list shows the claims" "$LIST" "alpha"

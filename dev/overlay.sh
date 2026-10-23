@@ -74,7 +74,7 @@ case "$cmd" in
   rebase)  exec "$DIR/rebase.sh" "$target" ;;
   push)    exec "$DIR/push-overlay.sh" "$target" ;;
   new)     exec "$DIR/overlay-new.sh" "$target" ${extra:+"$extra"} ;;
-  bringup) exec "$DIR/bringup.sh" "$target" ${extra:+"$extra"} ;;
+  bringup) exec "$DIR/bringup.sh" "$target" "${@:3}" ;;
   arm)
     overlay_resolve "$target"
     overlay_require_worktrees

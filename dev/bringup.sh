@@ -2,7 +2,13 @@
 #
 # DEV-ONLY: one command to make a new target's dev tree runnable.
 #
-#   dev/bringup.sh <name> [<feature-branch>]
+#   dev/bringup.sh <name> [<base-branch>] [--base <ref>] [--target <branch>]
+#
+# The positional branch (or `--base`) is the BASE the work sits on: feature/<name>
+# is created from it. The TARGET -- what a promote writes to -- is always
+# feature/<name> unless `--target` says otherwise. Keeping those two apart is the
+# point: `<name> <branch>` used to register the base AS the target, and a promote
+# then put the feature's commits on the shared branch.
 #
 # Idempotent and re-runnable, from either place:
 #   * the main checkout (which then creates the overlay), or
@@ -12,7 +18,8 @@
 #
 # It does the whole documented sequence, so a fresh agent spends its turns on the
 # feature rather than on setup:
-#   1. feature branch (FEATURE_BASE, default master) + its worktree;
+#   1. feature branch feature/<name>, created from the BASE (FEATURE_BASE,
+#      default master) + its worktree;
 #   2. overlay branch dev/overlay-<name> + its worktree, carrying dev/kit;
 #   3. a port pair claimed from the shared registry (dev/registry.sh);
 #   4. the manifest row, committed on the overlay;
@@ -33,9 +40,24 @@ source "$DIR/overlaylib.sh"
 FEATURE_BASE="${FEATURE_BASE:-master}"
 die() { echo "bringup: $*" >&2; exit 1; }
 
-name="${1:-}"
-[ -n "$name" ] || die "usage: dev/bringup.sh <name> [<feature-branch>]"
-feature="${2:-feature/$name}"
+name=""; base=""; feature=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --base)   base="${2:-}"; shift 2 ;;
+    --target) feature="${2:-}"; shift 2 ;;
+    -*)       die "unknown option '$1' (usage: bringup <name> [<base>] [--base <ref>] [--target <branch>])" ;;
+    *)
+      if [ -z "$name" ]; then name="$1"
+      elif [ -z "$base" ]; then base="$1"
+      else die "unexpected argument '$1' (usage: bringup <name> [<base>] [--base <ref>])"
+      fi
+      shift ;;
+  esac
+done
+[ -n "$name" ] || die "usage: dev/bringup.sh <name> [<base>] [--base <ref>] [--target <branch>]"
+[ -n "${base:-$FEATURE_BASE}" ] || die "--base needs a ref"
+base="${base:-$FEATURE_BASE}"
+feature="${feature:-feature/$name}"
 overlay="dev/overlay-$name"
 
 git -C "$ROOT" show-ref --verify --quiet refs/heads/dev/kit \
@@ -69,7 +91,7 @@ if [ "$cur" != "$overlay" ] && [ "${cur#dev/overlay-}" != "$cur" ]; then
   die "this worktree is on $cur, the overlay for '${cur#dev/overlay-}'.
        Run: ./dev/overlay.sh ${cur#dev/overlay-} bringup"
 fi
-ensure_branch "$feature" "$FEATURE_BASE"
+ensure_branch "$feature" "$base"
 fe_wt="$(ensure_worktree "$feature")"
 
 if [ "$cur" = "$overlay" ]; then
@@ -85,10 +107,19 @@ fi
 
 # 3-4. Register the target and claim a port pair: one shared row, so any worktree
 # (and any agent) can discover this target and its ports.
-row="$(bash "$DIR/registry.sh" claim "$name" "$feature" "$overlay")"
+row="$(bash "$DIR/registry.sh" claim "$name" "$feature" "$overlay" "$base")"
 wds="$(printf '%s\n' "$row" | awk '{print $4}')"
 api="$(printf '%s\n' "$row" | awk '{print $5}')"
-echo "bringup: registered $name -> $feature / $overlay on WDS $wds / API $api"
+base_note=""
+[ -n "$base" ] && [ "$base" != "-" ] && base_note=" (base $base)"
+echo "bringup: registered $name -> $feature / $overlay$base_note on WDS $wds / API $api"
+
+# Test seam: the branch + registration semantics are what the wrong-target incident
+# got wrong, and they can be asserted without linking engines or applying dev.
+if [ "${BRINGUP_STOP_AFTER_REGISTER:-0}" = 1 ]; then
+  echo "bringup: stopping after registration (BRINGUP_STOP_AFTER_REGISTER=1)"
+  exit 0
+fi
 
 # 5. Engines and modules.
 bash "$DIR/engines.sh" link "$ov_wt"

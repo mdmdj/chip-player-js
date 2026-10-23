@@ -5,10 +5,15 @@ import { UserContext } from './UserProvider';
 const AppHeader = ({ isMidi }) => {
   const { user, handleLogout, handleLogin, settings, updateSettings } = useContext(UserContext);
   const showVisualizer = settings?.showVisualizer;
+  const renderer = settings?.visualizerRenderer || 'spectrogram';
 
   const handleToggleVisualizer = (e) => {
     const enabled = e.target.value === 'true';
     updateSettings({ showVisualizer: enabled });
+  };
+
+  const handleRendererChange = (e) => {
+    updateSettings({ visualizerRenderer: e.target.value });
   };
 
   return (
@@ -49,6 +54,23 @@ const AppHeader = ({ isMidi }) => {
                  name="visualizer-enabled"/>
           <label htmlFor="vis-off" className="inline">Off</label>
         </h3>
+        <div className="Visualizer-renderer-toggle">
+          <span>Renderer:</span>{' '}
+          <label className="inline">
+            <input onChange={handleRendererChange}
+                   type="radio"
+                   value="spectrogram"
+                   checked={renderer === 'spectrogram'}
+                   name="visualizer-renderer"/> Spectrogram
+          </label>
+          <label className="inline">
+            <input onChange={handleRendererChange}
+                   type="radio"
+                   value="milkdrop"
+                   checked={renderer === 'milkdrop'}
+                   name="visualizer-renderer"/> MilkDrop
+          </label>
+        </div>
       </div>
     </header>
   );

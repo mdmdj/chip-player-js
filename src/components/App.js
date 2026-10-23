@@ -1059,7 +1059,7 @@ class App extends React.Component {
     const currContext = this.sequencer?.getCurrContext();
     const currIdx = this.sequencer?.getCurrIdx();
     const search = { search: window.location.search };
-    const { settings, updateSettings } = this.props.userContext;
+    const { settings } = this.props.userContext;
     const showPlayerSettings = settings?.showPlayerSettings;
     const showVisualizer = settings?.showVisualizer;
     // The buffer comes from the sequencer, not from App state: it is the live
@@ -1106,22 +1106,6 @@ class App extends React.Component {
                 {/* this.sequencer?.players?.map((p, i) => `p${i}:${p.stopped?'off':'on'}`).join(' ') */}
                 <button className={`tab tab-settings ${showPlayerSettings ? 'tab-selected' : ''}`}
                         onClick={this.handleToggleSettings}>Settings</button>
-                <span className='tab-renderer' title='Visualizer renderer'>
-                  <label className='inline'>
-                    <input type='radio'
-                           name='visualizer-renderer'
-                           value='spectrogram'
-                           checked={(settings?.visualizerRenderer || 'spectrogram') === 'spectrogram'}
-                           onChange={(e) => updateSettings({ visualizerRenderer: e.target.value })}/> Spectrogram
-                  </label>
-                  <label className='inline'>
-                    <input type='radio'
-                           name='visualizer-renderer'
-                           value='milkdrop'
-                           checked={settings?.visualizerRenderer === 'milkdrop'}
-                           onChange={(e) => updateSettings({ visualizerRenderer: e.target.value })}/> MilkDrop
-                  </label>
-                </span>
               </div>
               <div className="App-main-content-and-settings">
               <div className="App-main-content-area"

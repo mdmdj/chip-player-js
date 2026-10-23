@@ -33,7 +33,7 @@ const SPEED_LABELS = [
 ];
 const VIS_WIDTH = 448;
 const PRESET_BUTTON_STYLE = {
-  width: '33.78px', // 19px * 16/9, matching the glyph frame
+  width: '30.75px', // 19px * phi, the inline-icon height
   height: '19px',
   padding: 0,
   alignSelf: 'center',
@@ -230,18 +230,6 @@ export default class Visualizer extends PureComponent {
                             title='Random preset'>
                       <span className='inline-icon icon-shuffle'/>
                     </button>
-                  </span>
-                  <label className='PresetNav-auto'>
-                    <input type='checkbox'
-                           checked={this.state.autoCycle}
-                           onChange={this.handleAutoCycleChange}/> Auto
-                  </label>
-                  <span className='PresetNav-blend'>
-                    <span className='VisualizerParams-label'>Blend:</span>
-                    <input type='range' min='0' max='10' step='0.5'
-                           value={this.state.blendSeconds}
-                           onChange={this.handleBlendChange}/>
-                    <span className='PresetNav-blend-value'>{this.state.blendSeconds.toFixed(1)}s</span>
                   </span>
                 </div>
                 <div className='Visualizer-preset-name'>

@@ -580,13 +580,12 @@ button.IconButton {
 .MilkDrop-error { padding: var(--charH) var(--charW2); text-align: right; }
 .PresetNav-row { display: flex; align-items: center; justify-content: flex-end; gap: var(--charW1); }
 .Preset-glyph { display: inline-flex; align-items: center; color: var(--clickable); }
-.Preset-glyph-frame { opacity: .35; }
 .Preset-glyph svg { display: block; }
 .Preset-glyph svg * { vector-effect: non-scaling-stroke; }
 .PresetNav { display: inline-flex; align-items: center; gap: var(--charW1); }
 .PresetNav-auto { display: inline-flex; align-items: center; gap: 4px; margin-left: var(--charW1); }
 .PresetNav-blend { display: inline-flex; align-items: center; gap: 4px; margin-left: var(--charW1); }
-.PresetNav-blend input[type='range'] { width: 80px; margin: 0; }
+.PresetNav-blend input[type='range'] { width: 64px; margin: 0; }
 .PresetNav-blend-value { min-width: 28px; text-align: right; }
 button.PresetNav-button {
   width: 33.78px; /* 19px * 16/9, matching the glyph frame */

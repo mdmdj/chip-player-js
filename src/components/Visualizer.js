@@ -195,9 +195,6 @@ export default class Visualizer extends PureComponent {
                           <rect x='1.25' y='1.25' width='93.5' height='51.5'/>
                         </clipPath>
                       </defs>
-                      <rect className='Preset-glyph-frame' x='0.75' y='0.75'
-                            width='94.5' height='52.5'
-                            fill='none' stroke='currentColor' strokeWidth='1'/>
                       <g clipPath='url(#preset-glyph-clip)'>
                         <g transform='translate(12 4)'>
                           <g transform='translate(-16 -4) translate(48 27) rotate(24) scale(1.4) translate(-48 -27)'

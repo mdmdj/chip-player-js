@@ -68,6 +68,11 @@ The transport is styled like the footer's three-button group: pure CSS triangles
 (no bar), **33.78×19 px** (16:9, matching the glyph frame), **8 px** gap (`var(--charW1)`), and the
 shuffle glyph only for Random. The "Preset:" text label is replaced by the glyph.
 
+The options panel paints its own `var(--background)` above the absolute
+piano-keys overlay (`position: relative; z-index: 1`), so the Spectrogram
+controls cannot be read through the visualizer; the spectrogram's 448×800 size
+and visible area are unchanged.
+
 ### Preset glyph (chosen)
 
 **Nested hex** — concept 01 in `dev/features/visualizer-glyphs.html`; the sheet's

@@ -140,6 +140,17 @@ The visualizer was promoted to `feature/visualizer`; `feature/subtunes-as-first-
 was restored to `992f0996b` and force-pushed (the visualizer must not be on it).
 `./dev/overlay.sh visualizer plan` is clean ("Nothing to promote").
 
+**The PR base.** The sub-tunes work is upstream **PR mmontag/chip-player-js#253**,
+opened from the squash branch `pr/subtunes-as-first-class` (`a6cb63fe0`). That
+squash is tree-identical to `feature/subtunes-as-first-class` (`992f0996b`), so
+`git diff pr/subtunes-as-first-class..feature/visualizer` is exactly the 8
+visualizer files. While #253 is open, the visualizer PR targets that squash
+branch (in our fork); after #253 merges upstream, rebase `feature/visualizer`
+onto `master`, retarget the PR, and re-verify the diff is still only the
+visualizer. The stack is deliberate: auto mode and the song-folder behavior
+build on sub-tunes concepts (songdir), so do not rebase it off master before
+#253 lands.
+
 An off-`master` variant was tried and reverted on the way here: the visualizer UI
 was developed against the sub-tunes tree, and the intended topology is a stack,
 not a fork off master. Do not rebase the branch onto master without adapting

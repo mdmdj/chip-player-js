@@ -145,6 +145,9 @@ export default class ButterchurnVisualizer extends PureComponent {
       this.resizeObserver.disconnect();
       this.resizeObserver = null;
     }
+    if (this.visualizer && this.props.sourceNode) {
+      this.visualizer.disconnectAudio(this.props.sourceNode);
+    }
     this.visualizer = null;
   }
 

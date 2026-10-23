@@ -71,10 +71,19 @@ shuffle glyph only for Random. The "Preset:" text label is replaced by the glyph
 The Visualizer On/Off switch lives in the header (`AppHeader.js`), aligned with
 the "Chip Player JS" title line. The **Renderer** selector is window-right
 anchored at the tab row's vertical position, so it reads as part of that row
-rather than a line of its own between the header and the tabs. Neither is in
+rather than a line of its own between the header and the tabs. The selector is
+hidden on MIDI, where the piano roll owns the panel. Neither is in
 `.Visualizer-options`, so the panel holds only renderer-specific controls, sits
 above the absolute piano-keys overlay, and leaves the keys at full height; the
 spectrogram remains 448×800.
+
+Only the active renderer runs. `Spectrogram` owns a rAF loop and is paused while
+MilkDrop, the piano roll, or the hidden visualizer is on screen (including on the
+first mount, not just after an update); `ButterchurnVisualizer` is mounted only
+when the visualizer is visible on a non-MIDI song with
+`visualizerRenderer === 'milkdrop'`. It stops its rAF and 20 s preset timer when
+paused or unmounted and disconnects its audio node on unmount or source change,
+so neither renderer ticks in the background.
 
 ### Preset glyph (chosen)
 

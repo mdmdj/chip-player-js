@@ -68,11 +68,12 @@ The transport is styled like the footer's three-button group: pure CSS triangles
 (no bar), **33.78×19 px** (16:9, matching the glyph frame), **8 px** gap (`var(--charW1)`), and the
 shuffle glyph only for Random. The "Preset:" text label is replaced by the glyph.
 
-The **Renderer** selector lives in the header, directly under the Visualizer
-On/Off switch (`AppHeader.js`), not in `.Visualizer-options`. The visualizer panel
-therefore holds only renderer-specific controls, sits above the absolute
-piano-keys overlay, and leaves the keys at full height; the spectrogram remains
-448×800.
+The Visualizer On/Off switch lives in the header (`AppHeader.js`), aligned with
+the "Chip Player JS" title line. The **Renderer** selector is the rightmost item
+in the tab row, after Settings, anchored to the right edge. Neither is in
+`.Visualizer-options`, so the panel holds only renderer-specific controls, sits
+above the absolute piano-keys overlay, and leaves the keys at full height; the
+spectrogram remains 448×800.
 
 ### Preset glyph (chosen)
 

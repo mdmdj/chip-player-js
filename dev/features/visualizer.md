@@ -64,6 +64,23 @@ Up front (`.Visualizer-options`, local state like the spectrogram controls):
 previous / next / random, preset name + `(n/100)`, `Auto` (20 s rotation),
 `Blend` (0–5 s).
 
+The transport is styled like the footer's three-button group: pure CSS triangles
+(no bar), **30.75×19 px** (19 × φ), **8 px** gap (`var(--charW1)`), and the
+shuffle glyph only for Random. The "Preset:" text label is replaced by the glyph.
+
+### Preset glyph (chosen)
+
+**Nested hex** — concept 01 in `dev/features/visualizer-glyphs.html`; the sheet's
+generator is `dev/features/visualizer-glyphs.js` (both dev-only history). The app
+renders it in a 96×54 viewBox at **39.11×22 px** (16:9, matching the 22 px row):
+a 16:9 frame, two concentric hexagons, base rotated **8°**, a ghost at **24°**
+with offset **(−16, −4)**, scale **1.4**, opacity **0.3**, and the base+ghost
+ensemble optically centred by **translate(12, 4)** — the base itself is
+off-centre. The glyph group is clipped just inside the frame (`1.25`, `93.5×51.5`)
+so shapes cannot overdraw and darken the border; the ghost may still clip at the
+frame/viewBox edge, which is intentional. Strokes are
+`vector-effect: non-scaling-stroke`, 1 px; the frame is 35 % opacity.
+
 In Settings (persisted), visible only when the visualizer is on and the renderer
 is MilkDrop on a non-MIDI song:
 

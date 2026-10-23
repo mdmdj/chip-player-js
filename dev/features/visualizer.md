@@ -1,12 +1,13 @@
 # Visualizer feature — Butterchurn (MilkDrop) prototype
 
-Status: **working prototype on `dev/overlay-visualizer`**, not promoted, not yet
-shippable. Branch target: `feature/subtunes-as-first-class` (this overlay is
-stacked on the sub-tunes work). Worktree: `dev-overlay-visualizer`, ports
-**WDS 3301 / API 8301**. (`dev/overlay-visualizer` was cut from `dev/kit` one dev
-commit behind `dev/overlay-subtunes`; it was fast-forwarded to pick up the
-`dev/overlay` → `dev/overlay-subtunes` rename, which `dev/test-client-seams.js`
-needs.)
+Status: **working prototype on `dev/overlay-visualizer`**, promoted to its own
+`feature/visualizer` and **stacked additively on the sub-tunes feature**, not yet
+shippable. Target: `feature/visualizer` = `943209291` (parent
+`feature/subtunes-as-first-class` = `992f0996b`). Worktree:
+`dev-overlay-visualizer`, ports **WDS 3301 / API 8301**. (`dev/overlay-visualizer`
+was cut from `dev/kit` one dev commit behind `dev/overlay-subtunes`; it was
+fast-forwarded to pick up the `dev/overlay` → `dev/overlay-subtunes` rename,
+which `dev/test-client-seams.js` needs.)
 
 ## What exists
 
@@ -127,19 +128,27 @@ settings without these keys fall back through `||`.
   repeatedly killed this tree's dev server. Use `readlink /proc/<pid>/cwd` before
   killing a port owner.
 
-## Open decisions (need a human)
+## Topology (resolved 2026-10-23)
 
-- **PR topology.** The visualizer is independent of the sub-tunes work (it
-  touches no sub-tune code). Recommended: its own `feature/visualizer` branch
-  off `master`, not a promotion into `feature/subtunes-as-first-class` — that
-  would mix a new feature into an already-large, under-review PR. This overlay
-  is currently retargeted at `feature/subtunes-as-first-class` because its code
-  was cut from `dev/overlay-subtunes`; changing the destination is a
-  target/registry decision and should be made before more commits pile up.
+The visualizer is its **own branch, stacked additively on the sub-tunes feature**:
+
+    feature/subtunes-as-first-class  992f0996b
+            └── feature/visualizer   943209291   (8 files: the visualizer)
+                    └── dev/overlay-visualizer   (feature + dev kit)
+
+The visualizer was promoted to `feature/visualizer`; `feature/subtunes-as-first-class`
+was restored to `992f0996b` and force-pushed (the visualizer must not be on it).
+`./dev/overlay.sh visualizer plan` is clean ("Nothing to promote").
+
+An off-`master` variant was tried and reverted on the way here: the visualizer UI
+was developed against the sub-tunes tree, and the intended topology is a stack,
+not a fork off master. Do not rebase the branch onto master without adapting
+`Visualizer.js`/`Settings.js` (it uses `usesTrackLoops`, `showLoopArea`, and the
+sub-tunes `UserProvider` defaults).
 
 ## Next steps to make it shippable
 
-Recommended order: **dependency hygiene -> topology -> browser check ->
+Dependency hygiene and topology are done. Remaining order: **browser check ->
 lazy-load -> theater/optional.**
 
 1. **Dependency/build hygiene — done and proven (2026-10-22).** Exact deps in

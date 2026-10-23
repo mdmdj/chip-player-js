@@ -86,7 +86,7 @@ two concentric hexagons, base rotated **8°**, a ghost at **24°** with offset
 optically centred by **translate(12, 4)** — the base itself is off-centre. The
 glyph group is clipped to `1.25`, `93.5×51.5` so the ghost may still clip at the
 viewBox edge, which is intentional. Strokes are `vector-effect:
-non-scaling-stroke`, 1 px. There is no frame border.
+non-scaling-stroke`, 1 px; the 16:9 frame border is back at 35 % opacity.
 
 In Settings (persisted), visible only when the visualizer is on and the renderer
 is MilkDrop on a non-MIDI song:

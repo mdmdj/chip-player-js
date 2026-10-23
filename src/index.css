@@ -580,6 +580,7 @@ button.IconButton {
 .MilkDrop-error { padding: var(--charH) var(--charW2); text-align: right; }
 .PresetNav-row { display: flex; align-items: center; justify-content: flex-end; gap: var(--charW1); }
 .Preset-glyph { display: inline-flex; align-items: center; color: var(--clickable); }
+.Preset-glyph-frame { opacity: .35; }
 .Preset-glyph svg { display: block; }
 .Preset-glyph svg * { vector-effect: non-scaling-stroke; }
 .PresetNav { display: inline-flex; align-items: center; gap: var(--charW1); }

@@ -54,7 +54,6 @@ const AppHeader = ({ isMidi }) => {
                  name="visualizer-enabled"/>
           <label htmlFor="vis-off" className="inline">Off</label>
         </h3>
-        {!isMidi &&
         <div className="Visualizer-renderer-toggle">
           <span>Renderer:</span>{' '}
           <label className="inline">
@@ -72,7 +71,6 @@ const AppHeader = ({ isMidi }) => {
                    name="visualizer-renderer"/> MilkDrop
           </label>
         </div>
-        }
       </div>
     </header>
   );

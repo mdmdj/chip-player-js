@@ -144,12 +144,14 @@ was restored to `992f0996b` and force-pushed (the visualizer must not be on it).
 opened from the squash branch `pr/subtunes-as-first-class` (`a6cb63fe0`). That
 squash is tree-identical to `feature/subtunes-as-first-class` (`992f0996b`), so
 `git diff pr/subtunes-as-first-class..feature/visualizer` is exactly the 8
-visualizer files. While #253 is open, the visualizer PR targets that squash
-branch (in our fork); after #253 merges upstream, rebase `feature/visualizer`
-onto `master`, retarget the PR, and re-verify the diff is still only the
-visualizer. The stack is deliberate: auto mode and the song-folder behavior
-build on sub-tunes concepts (songdir), so do not rebase it off master before
-#253 lands.
+visualizer files. The eighth is `src/players/midi/midi-helpers.js` — a one-line
+dev-doc comment cleanup; it is intentionally kept with the stack. **No PR has
+been opened yet (2026-10-23).** While #253 is open, the visualizer PR will target
+that squash branch (in our fork); after #253 merges upstream, rebase
+`feature/visualizer` onto `master`, retarget the PR, and re-verify the diff is
+still only the visualizer. The stack is deliberate: auto mode and the
+song-folder behavior build on sub-tunes concepts (songdir), so do not rebase it
+off master before #253 lands.
 
 An off-`master` variant was tried and reverted on the way here: the visualizer UI
 was developed against the sub-tunes tree, and the intended topology is a stack,
@@ -224,5 +226,7 @@ lazy-load -> theater/optional.**
 ## Not done / not attempted
 
 - No changes to `App.js` (the visualizer props were sufficient).
-- No promotion and no `package.json` edit.
+- **No PR opened yet (2026-10-23).** The branch is pushed; the PR plan (base and
+  post-#253 retarget) is in "Topology".
+- No browser-level check yet; that is the next step.
 - No MilkDrop3 or projectM integration (see the research above).

@@ -23,6 +23,8 @@ export default class ButterchurnVisualizer extends PureComponent {
     this.visualizer = null;
     this.animFrameId = null;
     this.rotateTimer = null;
+    this.initTimer = null;
+    this.unmounted = false;
     this.resizeObserver = null;
     this.presetNames = [];
     this.presetIndex = 0;
@@ -89,10 +91,8 @@ export default class ButterchurnVisualizer extends PureComponent {
       } else {
         this.start();
       }
-
-      if (typeof ResizeObserver !== 'undefined') {
-        this.resizeObserver = new ResizeObserver(this.handleResize);
-        this.resizeObserver.observe(canvas);
+      if (!this.unmounted) {
+        this.setState({ loading: false });
       }
     } catch (e) {
       console.error('MilkDrop visualizer failed to initialize', e);

@@ -85,6 +85,20 @@ when the visualizer is visible on a non-MIDI song with
 paused or unmounted and disconnects its audio node on unmount or source change,
 so neither renderer ticks in the background.
 
+**Loading.** The renderer is a `React.lazy` import (`webpackChunkName:
+"butterchurn"`) behind a `Suspense` fallback (`Loading MilkDrop…`), so the main
+bundle carries neither Butterchurn nor the preset pack. The first switch fetches
+two chunks on demand: `butterchurn.chunk.js` (10.4 KB decoded / 2.8 KB gzip) and
+the Butterchurn + preset-pack vendor chunk (988 KB decoded / 181 KB gzip). The
+component also defers its synchronous WebGL/preset init by a task and shows a
+`Loading MilkDrop…` overlay over the canvas until the first preset is ready, so
+the loading state gets a paint before shader compilation blocks the main thread.
+Presets are one pack, not per-preset requests: all 100 are parsed when the lazy
+chunk evaluates, `getPresets()` builds the name map at init, and Butterchurn
+compiles a preset's shaders when it is selected. Per-preset lazy loading would
+need a manifest over the package's 1,754 individual JSONs and is not worth the
+request count at this size.
+
 ### Preset glyph (chosen)
 
 **Nested hex** — concept 01 in `dev/features/visualizer-glyphs.html`; the sheet's
@@ -142,6 +156,13 @@ settings without these keys fall back through `||`.
   `mesh_width/height = 64/48`, `texsizeX/Y = 1344×2400`.
 - Settings section hides on Spectrogram, returns on MilkDrop.
 - Renderer choice persists across reload.
+- **Lazy load (2026-10-23):** with Spectrogram selected, a reload requests no
+  Butterchurn chunk. The first MilkDrop switch fetches
+  `vendors-node_modules_butterchurn-presets...chunk.js` (988 KB decoded /
+  181 KB gzip, contains the 100 presets) and `butterchurn.chunk.js` (10.4 KB /
+  2.8 KB). The loading placeholder and the init overlay were both observed via
+  MutationObserver; the preset arrived in the same switch and `▶` advanced it.
+  The main bundle's preset-name count is 0.
 - MIDI still shows the piano roll, no MilkDrop canvas, no renderer selector.
 - `dev/check-promotable-refs.js` and `dev/test-client-seams.js` (22/0) green.
 - `./dev/run-tests.sh` on the clean tree (2026-10-22): **25 passed, 1 skipped,
@@ -210,8 +231,10 @@ lazy-load -> theater/optional.**
    `package.json` + lock, webpack back at 5.106.0, and a clean
    `npm ci --ignore-scripts` + `npm rebuild better-sqlite3` reproduces the tree
    with byte-identical manifests.
-2. Lazy-load the module + presets (dynamic `import()`, like
-   `localFilesSubtunes`) — the preset pack is several MB in the bundle.
+2. **Lazy-load the module + presets — done (2026-10-23).** `React.lazy` +
+   `Suspense` around `ButterchurnVisualizer`, with a deferred WebGL init and a
+   visible loading state. Measured: two chunks fetched on the first switch, no
+   preset data in the main bundle (details under "Loading").
 3. Decide the setting surface: `visualizerRenderer` is persisted, but Auto/Blend
    are local; promote them if they should stick.
 4. Theater/fullscreen: `activeTheaterMode` in `App.js` is `isMidi`-gated and must

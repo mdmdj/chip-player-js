@@ -61,8 +61,8 @@ rating/favorites. Don't design around them.
 ## Controls
 
 Up front (`.Visualizer-options`, local state like the spectrogram controls):
-previous / next / random, preset name + `(n/100)`, `Auto` (20 s rotation),
-`Blend` (0–5 s).
+previous / next / random, `Auto` (20 s rotation) and `Blend` (0–10 s) in the
+transport row, then the preset name + `(n/100)` beneath it.
 
 The transport is styled like the footer's three-button group: pure CSS triangles
 (no bar), **33.78×19 px** (16:9, matching the glyph frame), **8 px** gap (`var(--charW1)`), and the

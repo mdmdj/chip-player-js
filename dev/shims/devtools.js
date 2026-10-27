@@ -9,6 +9,27 @@
 // repeat/loop behavior and spy on player state without listening to audio.
 // Not part of the app; never shipped. `dev/remove.sh` deletes the staged file.
 
+// The dev user is per worktree now. The settings/favorites in localStorage are
+// keyed only by name, so when the identity changes (a reused port, a rebuilt
+// worktree, an older shared `dev-user`), drop the previous account's copies
+// before UserProvider reads them. The marker is per origin.
+(function resetDevIdentityStorage() {
+  try {
+    const raw = process.env.REACT_APP_DEV_USER;
+    if (!raw) return;
+    const uid = JSON.parse(raw).uid;
+    const marker = 'cpDevUserUid';
+    if (window.localStorage.getItem(marker) !== uid) {
+      window.localStorage.removeItem('settings');
+      window.localStorage.removeItem('faves');
+      window.localStorage.setItem(marker, uid);
+    }
+  } catch (e) {
+    // localStorage may be unavailable (private mode / disabled); the app still
+    // works from server state.
+  }
+})();
+
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // The app assigns itself to `window.ChipPlayer` in its constructor. Poll for it

@@ -15,7 +15,20 @@
 //
 // Set `DEV_AUTH_MODE=bypass` (default) for a fixed user, or
 // `DEV_AUTH_MODE=proxy` to derive the user id from a `x-dev-uid` header.
-const DEV_USER_ID = process.env.DEV_USER_ID || 'dev-user';
+const path = require('path');
+
+// Per-worktree dev identity. The helper lives in the worktree's dev/ (this shim
+// is staged into server/middleware); fall back to the old id only outside an
+// overlay, where the dev environment does not exist anyway.
+let devUserId;
+try {
+  ({ devUserId } = require(path.join(__dirname, '..', '..', 'dev', 'dev-user.js')));
+} catch (e) {
+  devUserId = null;
+}
+const DEV_USER_ID = process.env.DEV_USER_ID
+  || (devUserId && devUserId(path.join(__dirname, '..', '..')))
+  || 'dev-user';
 const DEV_AUTH_MODE = process.env.DEV_AUTH_MODE || 'bypass';
 
 function resolveUserId(req) {

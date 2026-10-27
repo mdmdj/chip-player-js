@@ -30,7 +30,11 @@ overlay_require_worktrees
 cd "$OV_OVERLAY_WT"
 
 [ "$(git rev-parse --abbrev-ref HEAD)" = "$BRANCH" ] || die "expected to be on $BRANCH"
-if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+# The two applied dev patches (dev/apply.sh) are uncommitted modifications by
+# design, exactly as promote-plan excludes them. Everything else must be clean.
+if [ -n "$(git status --porcelain --untracked-files=no -- . \
+        ':(exclude)server/index.js' \
+        ':(exclude)src/components/UserProvider.js')" ]; then
   die "uncommitted changes on $BRANCH; commit first"
 fi
 if [ -d .git/rebase-merge ] || [ -d .git/rebase-apply ]; then

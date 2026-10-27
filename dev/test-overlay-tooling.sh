@@ -84,9 +84,11 @@ printf 'a  feature/a  dev/overlay-a  3000 8080\n' > "$WORK/ov-a/dev/overlay.conf
   git add -A && git commit -qm "a: dev overlay content"
 )
 
-# --- kit: capture the overlay-only content from overlay-a --------------------
+# --- kit: capture the overlay-only content from overlay-a (explicit import) --
 KIT_OUT="$(cd "$WORK/ov-a" && KIT_SOURCE=dev/overlay-a bash dev/kit.sh capture)"
 expect_contains "kit: capture reports the update" "$KIT_OUT" "dev/kit updated from dev/overlay-a"
+NOSRC="$(cd "$WORK/ov-a" && env -u KIT_SOURCE bash dev/kit.sh capture 2>&1 || true)"
+expect_contains "kit: capture requires an explicit import source" "$NOSRC" "dev/kit is canonical"
 KIT_LIST="$(cd "$WORK/ov-a" && bash dev/kit.sh list)"
 expect_contains "kit: carries dev/**"        "$KIT_LIST" "dev/**"
 expect_contains "kit: carries the vendored tree" "$KIT_LIST" "libvgm/**"
@@ -105,7 +107,7 @@ else ok "kit: feature notes are not captured"; fi
 (cd "$WORK/ov-a" && KIT_SOURCE=dev/overlay-a bash dev/kit.sh capture AGENTS.md) >/dev/null
 expect_contains "kit: an explicit path publishes a seed" "$(git -C "$REPO" show dev/kit:AGENTS.md)" "OVERLAY A NOTES"
 # A branch mistaken for a path is refused, not silently read as one.
-REFUSED="$(cd "$WORK/ov-a" && KIT_CANONICAL=dev/overlay-a bash dev/kit.sh capture dev/overlay-a AGENTS.md 2>&1 || true)"
+REFUSED="$(cd "$WORK/ov-a" && KIT_SOURCE=dev/overlay-a bash dev/kit.sh capture dev/overlay-a AGENTS.md 2>&1 || true)"
 expect_contains "kit: a branch passed as a path is refused" "$REFUSED" "is a branch, not a path"
 
 # --- new target: feature/b + the kit, in its own worktrees -------------------

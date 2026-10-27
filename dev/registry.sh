@@ -156,7 +156,7 @@ cmd_port() {
 
 cmd_list() {
   printf '%-14s %-38s %-22s %-6s %-6s %s\n' NAME FEATURE OVERLAY WDS API LIVE
-  rows | while read -r n f o w a; do
+  rows | while read -r n f o w a b; do
     live=""
     port_live "$w" && live="wds"
     port_live "$a" && live="${live:+$live,}api"

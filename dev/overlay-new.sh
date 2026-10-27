@@ -65,7 +65,7 @@ echo "new: $ov_wt -> $overlay"
 if git -C "$ROOT" show-ref --verify --quiet "refs/heads/$KIT_BRANCH"; then
   bash "$DIR/kit.sh" pull "$overlay"
 else
-  echo "new: $KIT_BRANCH does not exist yet; build it with ./dev/kit.sh capture,"
+  echo "new: $KIT_BRANCH does not exist yet; check out the canonical dev/kit branch,"
   echo "     then run dev/overlay.sh $name refresh"
 fi
 

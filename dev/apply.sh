@@ -12,9 +12,15 @@ cd "$ROOT"
 
 echo "[dev] Applying development shims..."
 
-# 1. chip-core stub -> src/chip-core.js (gitignored, safe to overwrite)
-cp dev/shims/chip-core.js src/chip-core.js
-echo "[dev]   installed src/chip-core.js (stub)"
+# 1. chip-core stub -> src/chip-core.js (gitignored). Only when there is no core:
+# a built core's JS glue is real audio, and overwriting it with this no-op shim
+# silently kills playback in a live tree. `bringup` copies a real core after this.
+if [ ! -f src/chip-core.js ]; then
+  cp dev/shims/chip-core.js src/chip-core.js
+  echo "[dev]   installed src/chip-core.js (stub)"
+else
+  echo "[dev]   kept existing src/chip-core.js (not replacing a built core with the stub)"
+fi
 
 # 2. Firebase placeholder -> src/config/firebaseConfig.js (gitignored)
 if [ -f src/config/firebaseConfig.js ] && [ ! -f src/config/firebaseConfig.js.dev-backup ]; then

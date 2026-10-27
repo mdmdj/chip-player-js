@@ -433,12 +433,12 @@ To revert:
 | --- | --- | --- | --- |
 | `shims/chip-core.js` | `src/chip-core.js` | target gitignored | No-op Emscripten module + in-memory FS. No audio. |
 | `shims/firebaseConfig.js` | `src/config/firebaseConfig.js` | target gitignored | Placeholder Firebase config. |
-| `shims/server-auth.js` | `server/middleware/auth.dev.js` | staged file gitignored | Fixed `dev-user`; loaded via `DEV_AUTH_MODULE` in `server/.env.local`. No tracked file patched. |
-| `shims/devtools.js` | `src/chip-player-devtools.js` | staged file gitignored | Browser test hooks (`window.__cpDev`); injected by the dev webpack entry. |
+| `shims/server-auth.js` | `server/middleware/auth.dev.js` | staged file gitignored | Per-worktree `dev-user-<target>` (from `dev/dev-user.js`); loaded via `DEV_AUTH_MODULE` in `server/.env.local`. No tracked file patched. |
+| `shims/devtools.js` | `src/chip-player-devtools.js` | staged file gitignored | Browser test hooks (`window.__cpDev`); injected by the dev webpack entry. Also drops the previous dev user's localStorage copy when the per-worktree id changes. |
 | `shims/recorder.js` | `src/chip-player-record.js` | staged file gitignored | Clip-recording hooks (`window.__cpRec`): settings pinning, an audio mirror off the app's gain node, the green sync mark, click-by-exact-name. For the PR communication page — see `dev/record/README.md`. |
 | `patch-server.js` | `server/index.js` | target tracked (reversible) | Applies the dev-only server deltas: `skia-canvas` optional, the dev auth bypass (`DEV_AUTH_MODULE`), per-target `API_PORT`/`WDS_PORT`, the dev `window.__devApiPort` injection, and no-cache in dev. `--revert` restores the plain file, so run `dev/remove.sh --revert` before a promote. |
 | `patch-client.js` | `src/components/UserProvider.js` | target tracked (reversible) | Applies the fake dev user (`REACT_APP_DEV_USER`), which the file cannot carry in the kit because it is a feature file. No-ops on a file that already delivers one (an overlay's own DEV regions). |
-| `seed-dbs.js` | `server/users.db`, `server/csdb.db` | gitignored | Creates `users`/`playlists`/`playbacks` schemas. |
+| `seed-dbs.js` | `server/users.db`, `server/csdb.db` | gitignored | Creates `users`/`playlists`/`playbacks` schemas and the per-worktree dev user (`dev-user-<target>`). |
 | `import-songlengths.js` | `server/csdb.db` (`hvsc_files`) | gitignored | Imports HVSC `Songlengths.txt` lengths for local SIDs, matched by the libsidplayfp fingerprint (not md5-of-file). Fetches the canonical copy to a tmp cache unless `--file` is given; `--dry-run` changes nothing. |
 | generated | `server/.env.local` | gitignored | Points server at local dirs; sets `DEV_AUTH_MODULE`. |
 | generated | `catalog/`, `server/catalog.db` | gitignored | Built by `scripts/build-music.js`. |
@@ -446,12 +446,19 @@ To revert:
 The dev user on the client comes from `REACT_APP_DEV_USER` in the dev webpack
 config (`UserProvider` turns it into a fake `user` with `getIdToken()`), so the
 favorites UI works without Firebase and without patching any tracked file.
+The uid is **per worktree** (`dev-user-<target>`, derived by `dev/dev-user.js`);
+the server auth shim, the webpack config and `seed-dbs.js` all call the same
+helper, so they agree. That is deliberate: a single `dev-user` made every target
+the same account, and a copied DB, a reused browser origin or a client pointed at
+the wrong API could carry settings/favorites between features. The devtools shim
+also clears the old `settings`/`faves` localStorage keys whenever the uid changes.
 
 ## Auth modes
 
 The bypass supports two modes via `DEV_AUTH_MODE`:
 
-- `bypass` (default): every authenticated request uses `dev-user`.
+- `bypass` (default): every authenticated request uses this worktree's
+  `dev-user-<target>`.
 - `proxy`: uses the `x-dev-uid` request header.
 
 `optionalAuth` only sets a user when an `Authorization` header is present.
@@ -568,7 +575,8 @@ these hooks exist to exercise (Hurry Up!.vgz is the reference fixture).
 
 - No audio with the stub core (build the real chip-core for playback; SID is
   silent on it too unless `./scripts/build-libsidplayfp.sh` has been run).
-- No real login (placeholder Firebase config). A fake `dev-user` is injected so
-  favorites can be added/removed and persist through the local API
-  (`server/users.db`), which is seeded automatically.
+- No real login (placeholder Firebase config). A fake `dev-user-<target>` is
+  injected so favorites can be added/removed and persist through the local API
+  (`server/users.db`), which is seeded automatically. It is per worktree, not a
+  shared account.
 - `/preview` images are disabled if skia-canvas is unavailable.

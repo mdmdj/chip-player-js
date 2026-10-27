@@ -23,9 +23,12 @@ const publicPath = '/';
 const publicUrl = '';
 // DEV-ONLY (overlay): inject a fake user so favorites work without Firebase.
 // Read by UserProvider via the DEV-ONLY branch there; absent in prod builds.
+// The uid is derived from this worktree's branch, so two overlays are two dev
+// users rather than one shared account.
+const { devUserId } = require('../dev/dev-user');
 if (!process.env.REACT_APP_DEV_USER) {
   process.env.REACT_APP_DEV_USER = JSON.stringify({
-    uid: 'dev-user',
+    uid: devUserId(path.resolve(__dirname, '..')),
     displayName: 'Dev User',
     email: 'dev@example.com',
   });

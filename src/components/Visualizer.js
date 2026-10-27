@@ -1,16 +1,17 @@
 import pianoKeys from '../images/piano-keys.png';
 import Spectrogram from '../Spectrogram';
 import PianoRollVisualizer from '../piano-roll/PianoRollVisualizer';
-import ButterchurnVisualizer from '../butterchurn/ButterchurnVisualizer';
 import { isMidiData } from '../piano-roll/midi-parser';
 import { usesTrackLoops } from '../players/midi/midi-helpers';
 import { UserContext } from './UserProvider';
-import React, { Fragment, PureComponent } from 'react';
+import React, { Fragment, PureComponent, Suspense, lazy } from 'react';
 
-const RENDERER_MODES = [
-  { label: 'Spectrogram', value: 'spectrogram' },
-  { label: 'MilkDrop', value: 'milkdrop' },
-];
+// The renderer and its preset pack are optional; keep them out of the main
+// bundle and fetch them the first time MilkDrop is selected.
+const ButterchurnVisualizer = lazy(() =>
+  import(/* webpackChunkName: "butterchurn" */ '../butterchurn/ButterchurnVisualizer')
+);
+
 const SPECTROGRAM_MODES = [
   'Linear FFT', 'Log FFT', 'Constant Q'
 ];
@@ -31,6 +32,16 @@ const SPEED_LABELS = [
   'Lo', 'Med', 'Hi'
 ];
 const VIS_WIDTH = 448;
+const PRESET_BUTTON_STYLE = {
+  width: '33.78px', // 19px * 16/9, matching the glyph frame
+  height: '19px',
+  padding: 0,
+  alignSelf: 'center',
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  boxSizing: 'border-box',
+};
 
 export default class Visualizer extends PureComponent {
   static contextType = UserContext;
@@ -70,9 +81,10 @@ export default class Visualizer extends PureComponent {
     this.spectrogram.setSpeed(this.state.speed);
 
     const isMidi = this.isCurrentSongMidi();
-    if (!isMidi) {
-      this.spectrogram.setPaused(this.props.visible ? this.props.paused : true);
-    }
+    const showMilkDrop = this.props.visible && !isMidi && this.getRenderer() === 'milkdrop';
+    this.spectrogram.setPaused(
+      isMidi || showMilkDrop || !this.props.visible || this.props.paused
+    );
   }
 
   isCurrentSongMidi() {
@@ -89,7 +101,7 @@ export default class Visualizer extends PureComponent {
 
   componentDidUpdate() {
     const isMidi = this.isCurrentSongMidi();
-    const showMilkDrop = !isMidi && this.getRenderer() === 'milkdrop';
+    const showMilkDrop = this.props.visible && !isMidi && this.getRenderer() === 'milkdrop';
 
     // The spectrogram owns a rAF loop, so pause it whenever another renderer
     // is on screen or the visualizer is hidden.
@@ -97,10 +109,6 @@ export default class Visualizer extends PureComponent {
       isMidi || showMilkDrop || !this.props.visible || this.props.paused
     );
   }
-
-  handleRendererClick = (e) => {
-    this.context.updateSettings({ visualizerRenderer: e.target.value });
-  };
 
   handlePresetNext = () => {
     this.milkdropRef.current?.nextPreset();
@@ -164,7 +172,7 @@ export default class Visualizer extends PureComponent {
     const isMidi = this.isCurrentSongMidi();
     const renderer = this.getRenderer();
     const settings = this.context?.settings || {};
-    const showMilkDrop = !isMidi && renderer === 'milkdrop';
+    const showMilkDrop = this.props.visible && !isMidi && renderer === 'milkdrop';
     const [meshWidth, meshHeight] = (settings.milkdropMesh || '48x36').split('x').map(Number);
 
     const specStyle = {
@@ -177,53 +185,69 @@ export default class Visualizer extends PureComponent {
       <div className='Visualizer' style={{ display: this.props.visible ? 'flex' : 'none' }}>
         {!isMidi && (
           <div className='Visualizer-options' style={{ width: VIS_WIDTH, boxSizing: 'border-box' }}>
-            <div>
-              <span className='VisualizerParams-label'>Renderer:</span>
-              {
-                RENDERER_MODES.map((mode, i) =>
-                  <label key={'r_'+i} className='inline'><input onChange={this.handleRendererClick}
-                                        type='radio'
-                                        name='visualizer-renderer'
-                                        checked={renderer === mode.value}
-                                        value={mode.value}/>{mode.label}</label>
-                )
-              }
-            </div>
             {renderer === 'milkdrop' && (
               <Fragment>
-                <div>
-                  <span className='VisualizerParams-label'>Preset:</span>
-                  <button className='box-button' onClick={this.handlePresetPrev}
-                          title='Previous preset'>
-                    <span className='inline-icon icon-prev'/>
-                  </button>
-                  <button className='box-button' onClick={this.handlePresetNext}
-                          title='Next preset'>
-                    <span className='inline-icon icon-next'/>
-                  </button>
-                  <button className='box-button' onClick={this.handlePresetRandom}
-                          title='Random preset'>
-                    <span className='inline-icon icon-shuffle'/> Random
-                  </button>
+                <div className='PresetNav-row'>
+                  <span className='Preset-glyph' title='Preset' aria-label='Preset'>
+                    <svg viewBox='0 0 96 54' width='39.111' height='22' aria-hidden='true'>
+                      <defs>
+                        <clipPath id='preset-glyph-clip'>
+                          <rect x='1.25' y='1.25' width='93.5' height='51.5'/>
+                        </clipPath>
+                      </defs>
+                      <rect className='Preset-glyph-frame' x='0.75' y='0.75'
+                            width='94.5' height='52.5'
+                            fill='none' stroke='currentColor' strokeWidth='1'/>
+                      <g clipPath='url(#preset-glyph-clip)'>
+                        <g transform='translate(12 4)'>
+                          <g transform='translate(-16 -4) translate(48 27) rotate(24) scale(1.4) translate(-48 -27)'
+                             opacity='0.3'>
+                            <polygon points='68,27 58,44.3 38,44.3 28,27 38,9.7 58,9.7'
+                                     fill='none' stroke='currentColor' strokeWidth='1'/>
+                            <polygon points='58,27 53,35.7 43,35.7 38,27 43,18.3 53,18.3'
+                                     fill='none' stroke='currentColor' strokeWidth='1'/>
+                          </g>
+                          <g transform='rotate(8 48 27)'>
+                            <polygon points='68,27 58,44.3 38,44.3 28,27 38,9.7 58,9.7'
+                                     fill='none' stroke='currentColor' strokeWidth='1'/>
+                            <polygon points='58,27 53,35.7 43,35.7 38,27 43,18.3 53,18.3'
+                                     fill='none' stroke='currentColor' strokeWidth='1'/>
+                          </g>
+                        </g>
+                      </g>
+                    </svg>
+                  </span>
+                  <span className='PresetNav'>
+                    <button className='box-button PresetNav-button' style={PRESET_BUTTON_STYLE} onClick={this.handlePresetPrev}
+                            title='Previous preset'>
+                      <span className='PresetNav-triangle PresetNav-triangle-prev'/>
+                    </button>
+                    <button className='box-button PresetNav-button' style={PRESET_BUTTON_STYLE} onClick={this.handlePresetNext}
+                            title='Next preset'>
+                      <span className='PresetNav-triangle PresetNav-triangle-next'/>
+                    </button>
+                    <button className='box-button PresetNav-button' style={PRESET_BUTTON_STYLE} onClick={this.handlePresetRandom}
+                            title='Random preset'>
+                      <span className='inline-icon icon-shuffle'/>
+                    </button>
+                  </span>
+                  <label className='PresetNav-auto'>
+                    <input type='checkbox'
+                           checked={this.state.autoCycle}
+                           onChange={this.handleAutoCycleChange}/> Auto
+                  </label>
+                  <span className='PresetNav-blend'>
+                    <span className='VisualizerParams-label'>Blend:</span>
+                    <input type='range' min='0' max='10' step='0.5'
+                           value={this.state.blendSeconds}
+                           onChange={this.handleBlendChange}/>
+                    <span className='PresetNav-blend-value'>{this.state.blendSeconds.toFixed(1)}s</span>
+                  </span>
                 </div>
                 <div className='Visualizer-preset-name'>
                   {this.state.presetName || '\u2014'}
                   {this.state.presetCount > 0 &&
                     <span> ({this.state.presetIndex + 1}/{this.state.presetCount})</span>}
-                </div>
-                <div>
-                  <label className='inline'>
-                    <input type='checkbox'
-                           checked={this.state.autoCycle}
-                           onChange={this.handleAutoCycleChange}/> Auto
-                  </label>
-                </div>
-                <div>
-                  <span className='VisualizerParams-label'>Blend:</span>
-                  <input type='range' min='0' max='5' step='0.5'
-                         value={this.state.blendSeconds}
-                         onChange={this.handleBlendChange}/>
-                  {' '}{this.state.blendSeconds.toFixed(1)}s
                 </div>
               </Fragment>
             )}
@@ -326,20 +350,26 @@ export default class Visualizer extends PureComponent {
 
         {/* MilkDrop visualizer (Butterchurn) */}
         {showMilkDrop && (
-          <ButterchurnVisualizer
-            ref={this.milkdropRef}
-            audioCtx={this.props.audioCtx}
-            sourceNode={this.props.sourceNode}
-            width={VIS_WIDTH}
-            height={800}
-            paused={!this.props.visible || this.props.paused}
-            autoCycle={this.state.autoCycle}
-            blendSeconds={this.state.blendSeconds}
-            meshWidth={meshWidth}
-            meshHeight={meshHeight}
-            resolutionScale={settings.milkdropResolution || 1}
-            onPresetChange={this.handlePresetChange}
-          />
+          <Suspense fallback={
+            <div className='MilkDrop MilkDrop-placeholder' style={{ width: VIS_WIDTH }}>
+              Loading MilkDrop…
+            </div>
+          }>
+            <ButterchurnVisualizer
+              ref={this.milkdropRef}
+              audioCtx={this.props.audioCtx}
+              sourceNode={this.props.sourceNode}
+              width={VIS_WIDTH}
+              height={800}
+              paused={!this.props.visible || this.props.paused}
+              autoCycle={this.state.autoCycle}
+              blendSeconds={this.state.blendSeconds}
+              meshWidth={meshWidth}
+              meshHeight={meshHeight}
+              resolutionScale={settings.milkdropResolution || 1}
+              onPresetChange={this.handlePresetChange}
+            />
+          </Suspense>
         )}
 
         {/* Spectrogram visualizer */}

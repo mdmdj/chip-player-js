@@ -37,6 +37,19 @@ die() { echo "promote: $*" >&2; exit 1; }
 # files must still be committed first: they are path-listed/hand-carried, so the
 # plan cannot see uncommitted hunks there anyway.
 overlay_require_worktrees
+
+# A row whose name appears in neither branch is how a promotion once landed on a
+# shared branch: `bringup <name> <base>` registered the base AS the target. The
+# plan already prints the pair; this says when the two look like different features.
+# Not a refusal -- promoting into a shared branch deliberately is legitimate, and
+# `registry.sh claim --allow-mismatch` registers one.
+case "$OV_OVERLAY" in *"$OV_NAME"*) ;; *)
+  echo "promote: WARNING: target '$OV_NAME' does not appear in $OV_OVERLAY" >&2 ;;
+esac
+case "$OV_FEATURE" in *"$OV_NAME"*) ;; *)
+  echo "promote: WARNING: target '$OV_NAME' does not appear in $OV_FEATURE -- check that this is the branch you mean to promote into" >&2 ;;
+esac
+
 cd "$OV_OVERLAY_WT"
 if [ -n "$(git status --porcelain -uno -- . \
         ':(exclude)server/index.js' ':(exclude)src/components/UserProvider.js')" ]; then

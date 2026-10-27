@@ -11,7 +11,13 @@
 #
 # A row is one manifest line, so discovery and port claiming are one act:
 #
-#   name  feature-branch  overlay-branch  wds  api
+#   name  feature-branch  overlay-branch  wds  api  [base]
+#
+# The target name must appear in BOTH branches (the slug rule). A row whose
+# "feature" is really the BASE that the work extends is how a visualizer promote
+# landed on the shared sub-tunes branch: `bringup <name> <base>` registered the
+# base as the promote target. The base is the optional last field, for information
+# only -- nothing resolves through it.
 #
 # Port policy (the rule):
 #   * 3000 / 8080 are reserved for the long-lived target (dev/overlay-subtunes).
@@ -19,7 +25,7 @@
 #   * a pair is taken if the registry names it OR a socket listens on it.
 #
 # Usage:
-#   dev/registry.sh claim <name> [<feature> [<overlay>]]   # idempotent; prints the row
+#   dev/registry.sh claim <name> [<feature> [<overlay> [<base>]]] [--allow-mismatch]
 #   dev/registry.sh port  <name>                           # prints "wds api"
 #   dev/registry.sh list                                   # the registry + what is live
 #   dev/registry.sh release <name>
@@ -56,40 +62,77 @@ get_row() { rows | awk -v n="$1" '$1 == n { print; exit }'; }
 
 # Replace (or append) a target's row. Used to reconcile a target whose feature or
 # overlay branch is being corrected.
-registry_put() { # name feature overlay wds api
+registry_put() { # name feature overlay wds api [base]
   touch "$REG"
   awk -v n="$1" '$1 != n' "$REG" > "$REG.tmp"
   mv "$REG.tmp" "$REG"
-  printf '%s %s %s %s %s\n' "$1" "$2" "$3" "$4" "$5" >> "$REG"
+  printf '%s %s %s %s %s %s\n' "$1" "$2" "$3" "$4" "$5" "${6:--}" >> "$REG"
+}
+
+# The target's own name belongs in both branches it names: `visualizer` ->
+# feature/visualizer + dev/overlay-visualizer, and `subtunes` ->
+# feature/subtunes-as-first-class + dev/overlay-subtunes. A pair that fails this is
+# almost always a BASE (the branch the work sits on) registered as the target.
+slug_matches() { # name feature overlay
+  case "$3" in *"$1"*) ;; *) return 1 ;; esac
+  case "$2" in *"$1"*) ;; *) return 1 ;; esac
 }
 
 cmd_claim() {
-  local name="${1:-}" feature="${2:-}" overlay="${3:-}" row wds="" api=""
-  [ -n "$name" ] || die "usage: registry.sh claim <name> [<feature> [<overlay>]]"
-  row="$(get_row "$name")"
+  local name="" feature="" overlay="" base="" allow=0
+  local -a pos=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --allow-mismatch) allow=1 ;;
+      *) pos+=("$1") ;;
+    esac
+    shift
+  done
+  name="${pos[0]:-}"; feature="${pos[1]:-}"; overlay="${pos[2]:-}"; base="${pos[3]:-}"
+  [ -n "$name" ] || die "usage: registry.sh claim <name> [<feature> [<overlay> [<base>]]] [--allow-mismatch]"
+
+  local row; row="$(get_row "$name")"
+  local have_f="" have_o="" have_w="" have_a="" have_b="-"
   if [ -n "$row" ]; then
     # A re-run must be able to CORRECT a target: bringup called again with a
     # different feature branch has to reconcile, not silently keep the old pair.
     # Only fields the caller actually named are reconciled -- `claim <name>` alone
     # must not reset an existing target to the derived defaults.
-    local have_f have_o have_w have_a
-    read -r _ have_f have_o have_w have_a <<< "$row"
-    [ -n "$feature" ] && have_f="$feature"
-    [ -n "$overlay" ] && have_o="$overlay"
-    if [ "$have_f $have_o" != "$(awk '{print $2, $3}' <<< "$row")" ]; then
-      registry_put "$name" "$have_f" "$have_o" "$have_w" "$have_a"
-      printf '%s %s %s %s %s\n' "$name" "$have_f" "$have_o" "$have_w" "$have_a"
+    read -r _ have_f have_o have_w have_a have_b <<< "$row"
+    have_b="${have_b:--}"
+  fi
+
+  feature="${feature:-${have_f:-feature/$name}}"
+  overlay="${overlay:-${have_o:-dev/overlay-$name}}"
+  base="${base:-$have_b}"
+
+  if ! slug_matches "$name" "$feature" "$overlay"; then
+    if [ "$allow" = 1 ]; then
+      echo "registry: MISMATCH ACCEPTED for '$name': feature=$feature overlay=$overlay (--allow-mismatch)" >&2
+    else
+      die "target '$name' does not match its branches:
+       feature=$feature
+       overlay=$overlay
+     the name '$name' should appear in both. If '$feature' is the BASE the work sits
+     on rather than the branch it promotes to, registering it as the target would put
+     this feature's commits on that branch -- bringup takes the base positionally and
+     always targets feature/<name>. Deliberate shared target: pass --allow-mismatch."
+    fi
+  fi
+
+  [ "$feature" != "$overlay" ] || die "feature and overlay cannot both be $feature"
+
+  if [ -n "$row" ]; then
+    if [ "$feature $overlay $base" != "$have_f $have_o $have_b" ]; then
+      registry_put "$name" "$feature" "$overlay" "$have_w" "$have_a" "$base"
+      printf '%s %s %s %s %s %s\n' "$name" "$feature" "$overlay" "$have_w" "$have_a" "$base"
       return 0
     fi
     printf '%s\n' "$row"
     return 0
   fi
 
-  feature="${feature:-feature/$name}"
-  overlay="${overlay:-dev/overlay-$name}"
-  [ "$feature" != "$overlay" ] || die "feature and overlay cannot both be $feature"
-
-  local i p q
+  local i p q wds="" api=""
   for ((i = 0; i < POOL; i++)); do
     p=$((WDS_BASE + i)); q=$((API_BASE + i))
     wds_taken "$p" && continue
@@ -101,8 +144,8 @@ cmd_claim() {
   done
   [ -n "$wds" ] || die "no free port pair in ${WDS_BASE}-$((WDS_BASE+POOL-1)); release one with 'registry.sh release <name>'"
 
-  printf '%s %s %s %s %s\n' "$name" "$feature" "$overlay" "$wds" "$api" >> "$REG"
-  printf '%s %s %s %s %s\n' "$name" "$feature" "$overlay" "$wds" "$api"
+  printf '%s %s %s %s %s %s\n' "$name" "$feature" "$overlay" "$wds" "$api" "$base" >> "$REG"
+  printf '%s %s %s %s %s %s\n' "$name" "$feature" "$overlay" "$wds" "$api" "$base"
 }
 
 cmd_port() {
@@ -127,10 +170,10 @@ cmd_list() {
 cmd_release() {
   local name="${1:-}"; [ -n "$name" ] || die "usage: registry.sh release <name>"
   [ -f "$REG" ] || return 0
-  local n f o w a
-  while read -r n f o w a; do
+  local n f o w a b
+  while read -r n f o w a b; do
     case "$n" in ''|'#'*) continue ;; esac
-    [ "$n" = "$name" ] || printf '%s %s %s %s %s\n' "$n" "$f" "$o" "$w" "$a"
+    [ "$n" = "$name" ] || printf '%s %s %s %s %s %s\n' "$n" "$f" "$o" "$w" "$a" "${b:--}"
   done < "$REG" > "$REG.tmp"
   mv "$REG.tmp" "$REG"
   echo "registry: released $name"

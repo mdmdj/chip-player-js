@@ -188,6 +188,16 @@ expect_not      "promote: DEV region did NOT reach feature/b" "$(cat "$FEB/src/a
 [ ! -e "$OVB/dev/.promote-armed" ] && ok "promote: arm key consumed" || bad "promote: arm key consumed"
 expect_contains "promote: feature/a is untouched" "$(cat "$WORK/feat-a/src/app.js")" "a feature"
 
+# push-overlay: the two applied dev patches are uncommitted by design, so they must
+# not block publishing the committed overlay. The old check refused the whole tree.
+git init --bare -q "$WORK/origin.git"
+git -C "$OVB" remote add origin "$WORK/origin.git" 2>/dev/null || true
+printf '\n// applied dev patch\n' >> "$OVB/server/index.js"
+mkdir -p "$OVB/src/components"
+printf '// applied dev user patch\n' >> "$OVB/src/components/UserProvider.js"
+PUSH_OUT="$(cd "$OVB" && bash dev/push-overlay.sh 2>&1 || true)"
+expect_contains "push: applied dev patches do not block publish" "$PUSH_OUT" "push-overlay: dev/overlay-b -> origin"
+
 # --- an ambiguous retarget refuses rather than guessing ---------------------
 REF="$(cd "$OVB" && bash dev/promote.sh feature/zzz 2>&1 || true)"
 expect_contains "refuse: ambiguous retarget is refused" "$REF" "is the overlay for feature/b"

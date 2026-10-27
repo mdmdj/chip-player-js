@@ -1,15 +1,20 @@
 #!/usr/bin/env bash
 #
-# DEV-ONLY: keep the overlay-only *whole-file* content in one place (`dev/kit`)
-# and sync it onto any overlay, instead of hand-copying it per target.
+# DEV-ONLY: the canonical home of the overlay-only *whole-file* content (`dev/kit`).
+# Edit it here, then sync it onto any overlay with `pull` -- do not maintain a
+# separate copy on each overlay.
 #
 # Why a kit: an overlay carries two kinds of thing -- files that are ours and
 # only ours (dev/**, the engine build, the vendored-tree deletion, the two
 # engine-config files), and DEV regions inside files the feature branch owns.
-# The first kind is identical for every target, so copying it onto each overlay
-# by hand is N copies of the same material. The kit holds it once; `pull` writes
-# it into a target overlay, which commits it. Nothing here rewrites history, so
-# it composes with the existing rebase/promote cycle unchanged.
+# The first kind is identical for every target, so `pull` writes it from this
+# branch into a target overlay, which commits it. Nothing here rewrites history,
+# so it composes with the existing rebase/promote cycle unchanged.
+#
+# `dev/kit` is CANONICAL: change a tool or doc by editing it here, committing on
+# this branch, and pulling it to the targets. `capture`/`import` exists only to
+# bootstrap or deliberately rebuild the kit from an overlay; it is not the normal
+# route and requires `KIT_SOURCE` (no implicit "canonical overlay").
 #
 # The kit deliberately excludes the feature-coupled parts, which cannot be a
 # shared whole-file copy because they edit feature-owned files:
@@ -22,27 +27,19 @@
 # except two paths handled specially:
 #
 #   * KIT_SEED (AGENTS.md) -- the shared playbook. It lives on dev/kit as a
-#     TEMPLATE: `pull` delivers it only to a target that has none, and `capture`
+#     TEMPLATE: `pull` delivers it only to a target that has none, and an import
 #     never takes an overlay's copy up. So an overlay keeps its own notes, and a
-#     fresh worktree gets the clean template. Improve the template by editing it
-#     on dev/kit, or publish one file explicitly:
-#         ./dev/kit.sh capture <src> AGENTS.md
+#     fresh worktree gets the clean template.
 #   * KIT_NEVER -- paths the kit must not carry: per-feature notes
-#     (dev/features), and files whose content must match the branch's own sources
-#     (scripts/build-chip-core.js, whose export list is coupled to the engine
-#     sources). Upstream's script is sibling-path based, so the layout the kit
-#     supplies (dev/engines.sh) is all a master-based worktree needs.
+#     (dev/features), and feature tests (from dev/tests.manifest).
 #
 # Usage:
-#   ./dev/kit.sh capture [<path>...]   # build/update dev/kit; paths publish just those
-#   ./dev/kit.sh pull <target>         # write dev/kit onto the target's overlay
-#   ./dev/kit.sh list                  # what the kit carries, seeds, never carries
+#   ./dev/kit.sh import <source> [<path>...]  # bootstrap only; rebuilds dev/kit from an overlay
+#   ./dev/kit.sh capture [<path>...]          # same, with KIT_SOURCE=<ref> (compat alias)
+#   ./dev/kit.sh pull <target>                # write dev/kit onto the target's overlay
+#   ./dev/kit.sh list                         # what the kit carries, seeds, never carries
 #
-# capture publishes from KIT_SOURCE, or from the canonical overlay (KIT_CANONICAL,
-# default dev/overlay-subtunes) -- NOT from whatever branch you are on, so standing in a
-# feature overlay cannot publish that feature's kit-path edits as the template.
-# Naming paths (AGENTS.md) overrides the seed rule and publishes those alone.
-# pull writes onto a target's overlay worktree and commits only what it changed.
+# `pull` writes onto a target's overlay worktree and commits only what it changed.
 # KIT_BASE is the branch a fresh dev/kit is based on (default master). Nothing is
 # pushed.
 set -euo pipefail
@@ -73,16 +70,12 @@ KIT_SEED="${KIT_SEED:-AGENTS.md}"
 die() { echo "kit: $*" >&2; exit 1; }
 kit_exists() { git -C "$ROOT" show-ref --verify --quiet "refs/heads/$KIT_BRANCH"; }
 
-# The overlay to capture from. Defaults to the CANONICAL overlay, not whatever
-# branch you happen to be on: capture publishes a template, and a feature overlay's
-# kit-path edits (a rebuild script, a build flag) are that feature's, not
-# everyone's -- publishing them by standing in the wrong directory is exactly how
-# one feature's baggage becomes the next feature's starting point. Publish from
-# another overlay on purpose with KIT_SOURCE=<overlay>.
-KIT_CANONICAL="${KIT_CANONICAL:-dev/overlay-subtunes}"
-kit_source() {
-  if [ -n "${KIT_SOURCE:-}" ]; then echo "$KIT_SOURCE"; return; fi
-  echo "$KIT_CANONICAL"
+# An import source must be named explicitly. There is no default canonical
+# overlay: dev/kit is canonical, and silently importing from whichever overlay
+# happened to be first is how one feature's kit-path edits became the template.
+kit_import_source() {
+  [ -n "${KIT_SOURCE:-}" ] || die "dev/kit is canonical; edit it directly. To import from an overlay: $0 import <ref> [<path>...]"
+  printf '%s\n' "$KIT_SOURCE"
 }
 
 # Feature test harnesses are source-coupled: they belong to the branch whose code
@@ -144,9 +137,9 @@ populate_from() { # src dest path...
   done
 }
 
-cmd_capture() { # [<path>...] -- naming paths publishes just those (from the source)
-  local src wt; src="$(kit_source)"
-  git -C "$ROOT" rev-parse --verify -q "$src" >/dev/null || die "source overlay $src not found"
+cmd_capture() { # [<path>...] -- naming paths imports just those (from KIT_SOURCE)
+  local src wt; src="$(kit_import_source)"
+  git -C "$ROOT" rev-parse --verify -q "$src" >/dev/null || die "import source $src not found"
   kit_exists || git -C "$ROOT" branch "$KIT_BRANCH" "$KIT_BASE"
   wt="$(mktemp -d)"; rmdir "$wt"
   git -C "$ROOT" worktree add -q "$wt" "$KIT_BRANCH"
@@ -165,7 +158,7 @@ cmd_capture() { # [<path>...] -- naming paths publishes just those (from the sou
     local p
     for p in "$@"; do
       git -C "$ROOT" rev-parse --verify -q "$p" >/dev/null 2>&1 \
-        && die "'$p' is a branch, not a path. The source is $KIT_CANONICAL; use KIT_SOURCE=$p $0 capture <path>"
+        && die "'$p' is a branch, not a path. Set KIT_SOURCE=$p and use '$0 import $p <path>'"
       paths+=("$p")
     done
   else
@@ -199,7 +192,7 @@ cmd_pull() { # write dev/kit onto the target's overlay worktree
   fi
   wt="$(overlay_wt "$ov")"
   [ -n "$wt" ] || die "$ov is not checked out in any worktree"
-  kit_exists || die "$KIT_BRANCH does not exist; build it with 'kit.sh capture' first"
+  kit_exists || die "$KIT_BRANCH does not exist; check out the canonical dev/kit branch first"
 
   local -a paths=()
   while IFS= read -r p; do [ -n "$p" ] && paths+=("$(kit_bare "$p")"); done < <(kit_paths "$KIT_BRANCH")
@@ -243,24 +236,30 @@ cmd_pull() { # write dev/kit onto the target's overlay worktree
 }
 
 cmd_list() {
-  local src; src="$(kit_source)"
-  echo "kit:    $KIT_BRANCH $(kit_exists && git -C "$ROOT" rev-parse --short "$KIT_BRANCH" || echo '(absent)')"
-  echo "source: $src"
+  kit_exists || die "$KIT_BRANCH does not exist; check out the canonical dev/kit branch first"
+  echo "kit:    $KIT_BRANCH $(git -C "$ROOT" rev-parse --short "$KIT_BRANCH")"
+  echo "source: $KIT_BRANCH (canonical)"
   echo "carries (dev/promote-paths.txt minus $KIT_EXCLUDE and the seeds):"
-  kit_paths "$(kit_exists && echo "$KIT_BRANCH" || echo "$src")" --no-seed | sed 's/^/  /'
-  echo "seeded (delivered only to a target that has none, never captured up):"
-  kit_paths "$(kit_exists && echo "$KIT_BRANCH" || echo "$src")" --seed | sed 's/^/  /'
-  echo "never captured (not template material):"
-  local nev; while IFS= read -r nev; do [ -n "$nev" ] && echo "  $nev"; done < <(kit_never_paths "$(kit_exists && echo "$KIT_BRANCH" || echo "$src")")
+  kit_paths "$KIT_BRANCH" --no-seed | sed 's/^/  /'
+  echo "seeded (delivered only to a target that has none, never imported up):"
+  kit_paths "$KIT_BRANCH" --seed | sed 's/^/  /'
+  echo "never carried (not template material):"
+  local nev; while IFS= read -r nev; do [ -n "$nev" ] && echo "  $nev"; done < <(kit_never_paths "$KIT_BRANCH")
 }
 
 case "${1:-}" in
+  import)
+    shift
+    [ -n "${1:-}" ] || die "usage: dev/kit.sh import <source> [<path>...]"
+    KIT_SOURCE="$1"; shift
+    cmd_capture "$@"
+    ;;
   capture) shift; cmd_capture "$@" ;;
   pull)    [ -n "${2:-}" ] || die "usage: dev/kit.sh pull <target>"; cmd_pull "$2" ;;
   list)    cmd_list ;;
-  never)   kit_never_paths "$(kit_exists && echo "$KIT_BRANCH" || echo "$(kit_source)")" ;;
-  owned)   kit_paths "$(kit_exists && echo "$KIT_BRANCH" || echo "$(kit_source)")" ;;
-  carried) kit_paths "$(kit_exists && echo "$KIT_BRANCH" || echo "$(kit_source)")" --no-seed ;;
-  "")      sed -n '2,29p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' ;;
-  *)       die "unknown command '$1' (capture|pull|list)" ;;
+  never)   kit_never_paths "$KIT_BRANCH" ;;
+  owned)   kit_paths "$KIT_BRANCH" ;;
+  carried) kit_paths "$KIT_BRANCH" --no-seed ;;
+  "")      sed -n '2,40p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' ;;
+  *)       die "unknown command '$1' (import|capture|pull|list)" ;;
 esac

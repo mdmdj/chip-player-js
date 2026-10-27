@@ -2,7 +2,6 @@ let API_BASE = 'https://chiptune.app/api';
 let CATALOG_PREFIX = 'https://gifx.co/music';
 let SOUNDFONT_URL_PATH = 'https://gifx.co/soundfonts';
 
-// DEV-BEGIN (stripped for promotion; dev-overlay host/port selection)
 if (process.env.NODE_ENV === 'development') {
   // The client may have been loaded from any host (LAN, WSL, Tailscale), so use
   // that host rather than localhost. The port is the server's own, injected as
@@ -15,18 +14,6 @@ if (process.env.NODE_ENV === 'development') {
   API_BASE = `http://${devHostname}:${devPort}/api`; // npm run server - Node.js server
   CATALOG_PREFIX = `http://${devHostname}:${devPort}/catalog`;
   SOUNDFONT_URL_PATH = `http://${devHostname}:${devPort}/soundfonts`;
-}
-// DEV-END
-
-// Node tools (the catalog loudness scanner) run the player classes offline
-// against a local catalog and metadata server. Point the same modules at it
-// instead of the public API. This wins over the dev block so a scanner run with
-// NODE_ENV=development still resolves its own files.
-if (typeof process !== 'undefined' && process.env && process.env.CHIP_LOUDNESS_BASE) {
-  const base = process.env.CHIP_LOUDNESS_BASE.replace(/\/+$/, '');
-  API_BASE = `${base}/api`;
-  CATALOG_PREFIX = `${base}/catalog`;
-  SOUNDFONT_URL_PATH = `${base}/soundfonts`;
 }
 
 const MAX_SAMPLE_RATE = 48000; // Higher rates are problematic for some players.

@@ -6,7 +6,7 @@ per-target binding.
 
 | Piece | What it is |
 | --- | --- |
-| `dev/kit` | the dev layer as its own branch — `dev/**`, the engine layout and inventory, the test registry and runner, and the `AGENTS.md` **template** |
+| `dev/kit` | the **canonical** dev layer as its own branch — `dev/**`, the engine layout and inventory, the test registry and runner, and the `AGENTS.md` **template**. Edit it here; overlays receive it by `pull`. |
 | `feature/<name>` | the reviewable PR branch for one feature. Never carries `dev/` |
 | `dev/overlay-<name>` | the branch you work on: `feature/<name>` + the kit + feature work |
 | `dev/overlay.conf` | the manifest — one line per target: name, feature branch, overlay branch, ports |
@@ -14,7 +14,7 @@ per-target binding.
 
 A worktree *is* one target's dev tree. You commit normally on the overlay;
 publishing is deliberate, and has two paths — **feature → promote**, **dev files →
-capture/pull** (see "Where your work goes" below).
+edit `dev/kit` → pull** (see "Where your work goes" below).
 
 ## Start here
 
@@ -33,10 +33,10 @@ worktree created from `dev/kit` (or from another overlay) needs nothing else fir
 
 ## The five rules it is built on
 
-1. **`dev/kit` is a template, not a snapshot.** `AGENTS.md` is *seeded*: a new
-   worktree gets the template, and `pull` never overwrites a worktree's own notes.
-   A feature's history belongs in `dev/features/<name>.md`, which is never captured
-   into the kit and never promoted.
+1. **`dev/kit` is canonical.** A dev tool or doc is edited on `dev/kit` and pulled
+   down. `AGENTS.md` is *seeded*: a new worktree gets the template, and `pull`
+   never overwrites a worktree's own notes. A feature's history belongs in
+   `dev/features/<name>.md`, which is never carried into the kit and never promoted.
 2. **Tests are source-coupled.** `dev/tests.manifest` is the registry: the kit ships
    the *infrastructure* tests, and a branch's own tests travel with it. Derive from
    a branch that has the code and its tests run (and are expected to pass); derive
@@ -56,15 +56,16 @@ worktree created from `dev/kit` (or from another overlay) needs nothing else fir
 | Task | Command |
 | --- | --- |
 | New target on master | `./dev/overlay.sh <name> bringup` |
-| New target stacked on an existing one | `./dev/overlay.sh <name> bringup <feature-branch>` on a worktree cut from that overlay |
+| New target stacked on an existing one | `./dev/overlay.sh <name> bringup <base-branch>` — the argument is the **base**; the target is always `feature/<name>` (`--target` overrides) |
 | See what a worktree is | `./dev/overlay.sh <name> status` |
 | Run the app | `./dev/overlay.sh <name> dev` (background it; one log per target) |
 | Run the tests | `./dev/run-tests.sh` (`VERBOSE=1` for full output) |
 | Add a test | one `infra`/`feature` line in `dev/tests.manifest` (+ a `group` line naming the feature's marker files) |
 | Choose the chip-core's base | `./dev/core.sh list`, then `use <ref>`; or `CORE_REF=<ref> bringup`; `build` builds from this tree's sources |
 | Give a worktree a bigger catalog | `./dev/sample.sh steal <other-worktree>` (or `node dev/fetch-seo-fixtures.mjs`) |
-| Publish feature work | `./dev/overlay.sh <t> plan` → arm → `./dev/overlay.sh <t> promote` |
-| Publish dev tooling | `./dev/kit.sh capture` (to the kit), then `./dev/kit.sh pull <target>` on each target |
+| Publish feature work | `./dev/overlay.sh <t> refresh --dry-run` (refresh if stale) → `./dev/backup.sh <t>` → `./dev/overlay.sh <t> plan` (works with the dev patches applied) → arm → `./dev/overlay.sh <t> promote` |
+| Back up before a promote | `./dev/backup.sh <t>` — tags both branches and tars the gitignored dev artifacts |
+| Publish dev tooling | edit + commit on **`dev/kit`**, then `./dev/kit.sh pull <target>` on each target (or `./dev/overlay.sh <t> refresh`) |
 | Refresh an overlay | `./dev/overlay.sh <t> refresh [--dry-run]` — kit sync + rebase, **verified**; `all` refreshes every target, skipping the ones it cannot |
 | Publish the overlay / the kit | `./dev/push-overlay.sh`, `git push origin dev/kit` |
 | Stage/undo the dev environment | `./dev/apply.sh`, `./dev/remove.sh` |
@@ -84,8 +85,9 @@ lives under `dev/`, is carried to every target by the kit, and never reaches the
 | `bringup.sh` | one-command setup of a worktree (branches, port, engines, modules, apply, sample, core) |
 | `overlay-new.sh` | create `feature/<name>` + `dev/overlay-<name>` and their worktrees, from the kit |
 | `refresh.sh` | bring an overlay (or `all`) up to date: kit sync + rebase, verified; `--dry-run` |
+| `backup.sh` | before a promote: tag the overlay + feature branches and tar the gitignored dev artifacts (`dev/.backups/`) |
 | `registry.sh` | the shared target/port registry, in the common git dir |
-| `kit.sh` | the dev layer itself: `capture` (to the kit), `pull` (into a target), `list`, `owned`, `never` |
+| `kit.sh` | the canonical dev layer itself: `pull` (into a target), `list`, `owned`, `never`; `import`/`capture` only bootstraps/rebuilds it from an overlay |
 | `engines.sh` | the engine inventory: `check` (flags a decoy), `link` (farms the siblings) |
 | `core.sh` | choose the chip-core's base: `list`, `use`, `steal`, `from`, `build` |
 | `sample.sh` | the cheap catalog sample: `seed`, `steal`, `list` |
@@ -113,11 +115,46 @@ The other two mechanisms are not files: a `DEV-BEGIN … DEV-END` region inside 
 feature file (a chunk that strips to prod behaviour exactly) and the single
 hand-carry list, `server/index.js`. Both are explained under "Where your work goes".
 
+## Adding a dependency
+
+A feature that adds a package commits `package.json` **and** the lockfile, and
+touches nothing else:
+
+```sh
+npm install --save-exact <pkg>@<version>          # --save-exact matches the repo's pins
+git diff --stat package.json package-lock.json    # exactly those two files
+```
+
+The plan validates both: `*.json` goes through `JSON.parse` and `*.css` through
+postcss, so a dependency or a stylesheet promotes with the same protection as JS
+and C rather than as an unvalidated blank.
+
+**Never `npm install --no-save`.** It resolves the whole tree against
+`package.json`, so it prunes what a previous `--no-save` added *and* upgrades
+existing deps as a side effect (it moved webpack 5.106 → 5.112 once, which removed
+`webpack/hot/log.js` and broke the dev build). A killed reify can leave
+`node_modules` half-written, so repair a drifted tree with a clean install rather
+than re-running the same command:
+
+```sh
+rm -rf node_modules && npm ci --ignore-scripts && npm rebuild better-sqlite3
+```
+
+`--ignore-scripts` is not optional under Node 24 (the unused `sqlite3`
+devDependency cannot build there); `better-sqlite3` is then rebuilt for the pinned
+Node — `nvm use`, or the PATH export in a non-interactive shell.
+
+A worktree whose `node_modules` `bringup` hardlinked does **not** see a new
+dependency automatically: the install replaces directory entries in the tree that
+ran it, so run the sequence above in each tree that needs the package.
+
 ## Housekeeping
 
-- **The kit's currency is asserted.** `dev/test-overlay-discovery.sh` fails if a
-  tool or doc changed on the overlay but was not captured, so "documented" and
-  "delivered to a new worktree" cannot drift apart.
+- **The kit is canonical, and the test says whether this tree is current.**
+  `dev/kit` is the source; `dev/test-overlay-discovery.sh` compares this
+  worktree's carried kit paths with `dev/kit` and, in a feature overlay, reports
+  a stale tree with the `refresh` command rather than treating it as a broken
+  branch. A kit-path change is authored on `dev/kit`, not on an overlay.
 - **A refresh is verified, and can be looked at first.** `./dev/overlay.sh <t>
   refresh --dry-run` prints what the kit would change in that worktree (the files
   the kit *supplies*, so nothing is listed that a pull would not touch) and whether
@@ -143,7 +180,7 @@ hand-carry list, `server/index.js`. Both are explained under "Where your work go
 
 In a non-interactive shell `nvm` is not on `PATH`, so export the pinned version
 directly (it is ABI-matched to `better-sqlite3`):
-`export PATH="$HOME/.nvm/versions/node/v24.21.0/bin:$PATH"`.
+`export PATH="$HOME/.nvm/versions/node/v24.22.1/bin:$PATH"`.
 
 ## Usage
 
@@ -180,7 +217,7 @@ It needs two things the normal setup does not:
   install also rebuilds `better-sqlite3` against whatever `node` is on PATH (the
   host default is 26.x, so it ends up compiled for the wrong ABI). If
   `dev/run-tests.sh` starts failing with `NODE_MODULE_VERSION`, run
-  `PATH="$HOME/.nvm/versions/node/v24.21.0/bin:$PATH" npm rebuild better-sqlite3`.
+  `PATH="$HOME/.nvm/versions/node/v24.22.1/bin:$PATH" npm rebuild better-sqlite3`.
   Full list of the ways this bites: AGENTS.md §Dev environment.
 - **Chromium**, already fetched into `~/.cache/ms-playwright`.
 
@@ -230,12 +267,11 @@ so one checkout can drive any number of targets:
 ./dev/overlay.sh gba plan      # name the target explicitly
 ```
 
-To add a target, put `dev/kit` (the overlay-only whole-file content) in one place
-and build the pair from it — or, in one command, `./dev/overlay.sh <name> bringup`
-(see "Spinning up a new target" below):
+To add a target, the kit is already the canonical source; create the pair from
+it — or, in one command, `./dev/overlay.sh <name> bringup` (see "Spinning up a
+new target" below):
 
 ```sh
-./dev/kit.sh capture           # once: capture the overlay-only content
 ./dev/overlay-new.sh gba       # feature/gba + dev/kit, its own worktrees
 ```
 
@@ -268,6 +304,16 @@ seconds and prints the run command:
 curl -s -o /dev/null -w '%{http_code}\n' localhost:<api>/   # the HTML route
 ```
 
+**The positional branch is the BASE, not the target.** `bringup <name> <base>`
+creates `feature/<name>` *from* `<base>` (`--base` is the explicit form) and
+registers `feature/<name>` as the promote target; `--target <branch>` overrides
+the target deliberately and loudly. This distinction is load-bearing: before it
+existed, `bringup visualizer feature/subtunes-as-first-class` meant "based on
+sub-tunes" to the caller and "promote into sub-tunes" to the tool, and a promote
+put the visualizer's files on the shared branch. A target whose name appears in
+neither branch is now refused by `registry.sh claim`, and the plan warns when the
+pair looks like two different features.
+
 `dev/apply.sh` is what makes the tree runnable: it patches the dev-only deltas
 into `server/index.js` (auth bypass, per-target ports, the dev HTML injection),
 which the kit deliberately does not carry. `dev/patch-server.js --revert` (run by
@@ -279,7 +325,18 @@ which the kit deliberately does not carry. `dev/patch-server.js --revert` (run b
 the **common git dir**: every worktree has its own copy of `dev/`, so a row in
 `dev/overlay.conf` is invisible from another worktree — which is why a target
 registered by one agent could not be reached by another, or by the main checkout.
-A row is a manifest line: `name feature overlay wds api`.
+A row is a manifest line: `name feature overlay wds api [base]`. The last field is
+the base the work sits on, for information only — nothing resolves through it, and
+`-` means "not recorded".
+
+**The slug rule.** The target name must appear in *both* branches: `visualizer` →
+`feature/visualizer` + `dev/overlay-visualizer`, and `subtunes` →
+`feature/subtunes-as-first-class` + `dev/overlay-subtunes`. `claim` refuses a pair
+that fails it, because the usual reason is a *base* branch registered as the
+target. A deliberate shared target is explicit: `claim <name> <feature> <overlay>
+--allow-mismatch`, which registers it and prints `MISMATCH ACCEPTED`. The promote
+plan also warns when the pair looks like two different features — a warning, not a
+refusal, since the override exists.
 
 Port policy (the rule):
 
@@ -331,26 +388,22 @@ their own subset of an overlay that deliberately mixes both:
 | Your change | Path | Command |
 | --- | --- | --- |
 | Feature code in a feature file | **promote** onto the feature branch | `dev/overlay.sh <t> plan` → arm → `promote` |
-| A whole dev-only file (`dev/**`, the build scripts, `src/config/index.js`) | **capture** to `dev/kit`, then **pull** into the other overlays | `dev/kit.sh capture` / `dev/kit.sh pull <t>` |
+| A whole dev-only file (`dev/**`, the build scripts, `src/config/index.js`) | **edit it on `dev/kit`**, then **pull** it into the overlays | commit on `dev/kit`; `dev/kit.sh pull <t>` or `overlay.sh <t> refresh` |
 | Dev-only code *inside* a feature file | wrapped in `DEV-BEGIN`/`DEV-END`; promote strips it, so it never ships | — |
 | `server/index.js`'s dev deltas | neither: `dev/apply.sh` patches them in place, `dev/remove.sh` reverts | — |
 
-Four buckets, two commands — and nothing is ever "on the wrong branch" while you
-work. The filters are the path list (`dev/promote-paths.txt`) and the regions, not
-your commit discipline.
+Four buckets, two publication paths — and nothing is ever "on the wrong branch"
+while you work. The filters are the path list (`dev/promote-paths.txt`) and the
+regions, not your commit discipline.
 
-`capture` is a **snapshot, not a merge**: it copies the named paths from the
-source overlay onto `dev/kit`, so two agents capturing at once are
-last-write-wins. It publishes from the **canonical overlay**
-(`KIT_CANONICAL`, default `dev/overlay-subtunes`), *not* from whatever branch you are
-standing on — otherwise a feature overlay's kit-path edits (a rebuild script, a
-build flag) would silently become every future feature's starting point. To
-publish from another overlay, say so: `KIT_SOURCE=<overlay> dev/kit.sh capture`.
-Naming paths publishes just those, seeds included (`dev/kit.sh capture AGENTS.md`),
-and read `git diff dev/kit` before relying on the result.
+`dev/kit` is the **canonical** copy: edit the tool or doc there, commit on
+`dev/kit`, and pull it into the targets. `import`/`capture` is only a bootstrap
+or a deliberate rebuild from an overlay; it requires an explicit source
+(`dev/kit.sh import <ref> [<path>...]`, or `KIT_SOURCE=<ref> dev/kit.sh capture`)
+and is last-write-wins. There is no implicit "canonical overlay" to import from.
 
 `AGENTS.md` is **seeded, not synced**: `dev/kit` holds the shared playbook as a
-template, `pull` delivers it only to a worktree that has none, and `capture` never
+template, `pull` delivers it only to a worktree that has none, and an import never
 takes an overlay's copy up. A new feature therefore starts from a clean playbook
 while the overlay that earned the detail keeps it.
 
@@ -358,9 +411,9 @@ while the overlay that earned the detail keeps it.
 
 Put a feature's design decisions, measurements, hand-offs and history in its own
 note — `dev/features/<name>.md` — and keep `AGENTS.md` to what is true for *every*
-feature. `dev/features/**` is never captured into the kit, so one feature's
-notes cannot follow the next feature around, and it sits inside `dev/**`, so it
-never reaches the PR either.
+feature. `dev/features/**` is never carried into the kit, so one feature's notes
+cannot follow the next feature around, and it sits inside `dev/**`, so it never
+reaches the PR either.
 
 The older, pre-`dev/features/` notes are still on the overlay that wrote them (they
 are tracked on its branch, so they are never lost) but the kit deliberately does not
@@ -380,12 +433,12 @@ To revert:
 | --- | --- | --- | --- |
 | `shims/chip-core.js` | `src/chip-core.js` | target gitignored | No-op Emscripten module + in-memory FS. No audio. |
 | `shims/firebaseConfig.js` | `src/config/firebaseConfig.js` | target gitignored | Placeholder Firebase config. |
-| `shims/server-auth.js` | `server/middleware/auth.dev.js` | staged file gitignored | Fixed `dev-user`; loaded via `DEV_AUTH_MODULE` in `server/.env.local`. No tracked file patched. |
-| `shims/devtools.js` | `src/chip-player-devtools.js` | staged file gitignored | Browser test hooks (`window.__cpDev`); injected by the dev webpack entry. |
+| `shims/server-auth.js` | `server/middleware/auth.dev.js` | staged file gitignored | Per-worktree `dev-user-<target>` (from `dev/dev-user.js`); loaded via `DEV_AUTH_MODULE` in `server/.env.local`. No tracked file patched. |
+| `shims/devtools.js` | `src/chip-player-devtools.js` | staged file gitignored | Browser test hooks (`window.__cpDev`); injected by the dev webpack entry. Also drops the previous dev user's localStorage copy when the per-worktree id changes. |
 | `shims/recorder.js` | `src/chip-player-record.js` | staged file gitignored | Clip-recording hooks (`window.__cpRec`): settings pinning, an audio mirror off the app's gain node, the green sync mark, click-by-exact-name. For the PR communication page — see `dev/record/README.md`. |
 | `patch-server.js` | `server/index.js` | target tracked (reversible) | Applies the dev-only server deltas: `skia-canvas` optional, the dev auth bypass (`DEV_AUTH_MODULE`), per-target `API_PORT`/`WDS_PORT`, the dev `window.__devApiPort` injection, and no-cache in dev. `--revert` restores the plain file, so run `dev/remove.sh --revert` before a promote. |
 | `patch-client.js` | `src/components/UserProvider.js` | target tracked (reversible) | Applies the fake dev user (`REACT_APP_DEV_USER`), which the file cannot carry in the kit because it is a feature file. No-ops on a file that already delivers one (an overlay's own DEV regions). |
-| `seed-dbs.js` | `server/users.db`, `server/csdb.db` | gitignored | Creates `users`/`playlists`/`playbacks` schemas. |
+| `seed-dbs.js` | `server/users.db`, `server/csdb.db` | gitignored | Creates `users`/`playlists`/`playbacks` schemas and the per-worktree dev user (`dev-user-<target>`). |
 | `import-songlengths.js` | `server/csdb.db` (`hvsc_files`) | gitignored | Imports HVSC `Songlengths.txt` lengths for local SIDs, matched by the libsidplayfp fingerprint (not md5-of-file). Fetches the canonical copy to a tmp cache unless `--file` is given; `--dry-run` changes nothing. |
 | generated | `server/.env.local` | gitignored | Points server at local dirs; sets `DEV_AUTH_MODULE`. |
 | generated | `catalog/`, `server/catalog.db` | gitignored | Built by `scripts/build-music.js`. |
@@ -393,12 +446,19 @@ To revert:
 The dev user on the client comes from `REACT_APP_DEV_USER` in the dev webpack
 config (`UserProvider` turns it into a fake `user` with `getIdToken()`), so the
 favorites UI works without Firebase and without patching any tracked file.
+The uid is **per worktree** (`dev-user-<target>`, derived by `dev/dev-user.js`);
+the server auth shim, the webpack config and `seed-dbs.js` all call the same
+helper, so they agree. That is deliberate: a single `dev-user` made every target
+the same account, and a copied DB, a reused browser origin or a client pointed at
+the wrong API could carry settings/favorites between features. The devtools shim
+also clears the old `settings`/`faves` localStorage keys whenever the uid changes.
 
 ## Auth modes
 
 The bypass supports two modes via `DEV_AUTH_MODE`:
 
-- `bypass` (default): every authenticated request uses `dev-user`.
+- `bypass` (default): every authenticated request uses this worktree's
+  `dev-user-<target>`.
 - `proxy`: uses the `x-dev-uid` request header.
 
 `optionalAuth` only sets a user when an `Authorization` header is present.
@@ -461,6 +521,12 @@ travels with the branch):
 - derived from one with none (current master) → you get the bare infrastructure and
   the feature tests are **skipped with the reason**, not failed.
 
+One consequence to know: **a harness fix does not travel.** Because feature tests
+are pruned from the kit, an overlay cut before the fix keeps running the old check
+— a stale `test-midi-loops.js` reported a failure for a file its source overlay had
+already learned to skip. Copy the file from the source overlay and commit it on that
+overlay; the copy is deliberate, because the branch owns its tests.
+
 `run-tests.sh` is driven by that file and nothing is hard-coded in it; the kit
 derives its never-carried list from the same file, so a feature's tests are pruned
 automatically. Add a feature with one `group` line plus a `test feature` line per
@@ -509,7 +575,8 @@ these hooks exist to exercise (Hurry Up!.vgz is the reference fixture).
 
 - No audio with the stub core (build the real chip-core for playback; SID is
   silent on it too unless `./scripts/build-libsidplayfp.sh` has been run).
-- No real login (placeholder Firebase config). A fake `dev-user` is injected so
-  favorites can be added/removed and persist through the local API
-  (`server/users.db`), which is seeded automatically.
+- No real login (placeholder Firebase config). A fake `dev-user-<target>` is
+  injected so favorites can be added/removed and persist through the local API
+  (`server/users.db`), which is seeded automatically. It is per worktree, not a
+  shared account.
 - `/preview` images are disabled if skia-canvas is unavailable.

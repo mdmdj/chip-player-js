@@ -61,7 +61,8 @@ git branch dev/overlay-a feature/a
 git worktree add -q "$WORK/ov-a" dev/overlay-a
 mkdir -p "$WORK/ov-a/dev"
 for f in overlaylib.sh promote.sh promote-plan.sh promote-apply.sh rebase.sh \
-         push-overlay.sh kit.sh overlay-new.sh overlay.sh refresh.sh registry.sh; do
+         push-overlay.sh kit.sh overlay-new.sh overlay.sh refresh.sh registry.sh \
+         bringup.sh; do
   cp "$SRC/dev/$f" "$WORK/ov-a/dev/$f"
 done
 chmod +x "$WORK/ov-a/dev/"*.sh
@@ -83,9 +84,11 @@ printf 'a  feature/a  dev/overlay-a  3000 8080\n' > "$WORK/ov-a/dev/overlay.conf
   git add -A && git commit -qm "a: dev overlay content"
 )
 
-# --- kit: capture the overlay-only content from overlay-a --------------------
+# --- kit: capture the overlay-only content from overlay-a (explicit import) --
 KIT_OUT="$(cd "$WORK/ov-a" && KIT_SOURCE=dev/overlay-a bash dev/kit.sh capture)"
 expect_contains "kit: capture reports the update" "$KIT_OUT" "dev/kit updated from dev/overlay-a"
+NOSRC="$(cd "$WORK/ov-a" && env -u KIT_SOURCE bash dev/kit.sh capture 2>&1 || true)"
+expect_contains "kit: capture requires an explicit import source" "$NOSRC" "dev/kit is canonical"
 KIT_LIST="$(cd "$WORK/ov-a" && bash dev/kit.sh list)"
 expect_contains "kit: carries dev/**"        "$KIT_LIST" "dev/**"
 expect_contains "kit: carries the vendored tree" "$KIT_LIST" "libvgm/**"
@@ -104,7 +107,7 @@ else ok "kit: feature notes are not captured"; fi
 (cd "$WORK/ov-a" && KIT_SOURCE=dev/overlay-a bash dev/kit.sh capture AGENTS.md) >/dev/null
 expect_contains "kit: an explicit path publishes a seed" "$(git -C "$REPO" show dev/kit:AGENTS.md)" "OVERLAY A NOTES"
 # A branch mistaken for a path is refused, not silently read as one.
-REFUSED="$(cd "$WORK/ov-a" && KIT_CANONICAL=dev/overlay-a bash dev/kit.sh capture dev/overlay-a AGENTS.md 2>&1 || true)"
+REFUSED="$(cd "$WORK/ov-a" && KIT_SOURCE=dev/overlay-a bash dev/kit.sh capture dev/overlay-a AGENTS.md 2>&1 || true)"
 expect_contains "kit: a branch passed as a path is refused" "$REFUSED" "is a branch, not a path"
 
 # --- new target: feature/b + the kit, in its own worktrees -------------------
@@ -185,9 +188,51 @@ expect_not      "promote: DEV region did NOT reach feature/b" "$(cat "$FEB/src/a
 [ ! -e "$OVB/dev/.promote-armed" ] && ok "promote: arm key consumed" || bad "promote: arm key consumed"
 expect_contains "promote: feature/a is untouched" "$(cat "$WORK/feat-a/src/app.js")" "a feature"
 
+# push-overlay: the two applied dev patches are uncommitted by design, so they must
+# not block publishing the committed overlay. The old check refused the whole tree.
+git init --bare -q "$WORK/origin.git"
+git -C "$OVB" remote add origin "$WORK/origin.git" 2>/dev/null || true
+printf '\n// applied dev patch\n' >> "$OVB/server/index.js"
+mkdir -p "$OVB/src/components"
+printf '// applied dev user patch\n' >> "$OVB/src/components/UserProvider.js"
+PUSH_OUT="$(cd "$OVB" && bash dev/push-overlay.sh 2>&1 || true)"
+expect_contains "push: applied dev patches do not block publish" "$PUSH_OUT" "push-overlay: dev/overlay-b -> origin"
+
 # --- an ambiguous retarget refuses rather than guessing ---------------------
 REF="$(cd "$OVB" && bash dev/promote.sh feature/zzz 2>&1 || true)"
 expect_contains "refuse: ambiguous retarget is refused" "$REF" "is the overlay for feature/b"
+
+# --- wrong-target guard: a base is not a target ------------------------------
+# `bringup <name> <base>` used to register the BASE as the promote target, and a
+# promote then wrote this feature's commits into the shared sub-tunes branch. The
+# target's name must appear in both branches; a deliberate shared target is
+# explicit and loud.
+MIS_RC=0
+MIS="$(cd "$OVB" && WDS_BASE=3900 API_BASE=8900 bash dev/registry.sh claim visualizer feature/subtunes-as-first-class dev/overlay-visualizer 2>&1)" || MIS_RC=$?
+expect_eq       "guard: a base-as-target claim is refused" "$MIS_RC" "1"
+expect_contains "guard: the refusal names both branches" "$MIS" "does not match its branches"
+expect_contains "guard: and points at the explicit override" "$MIS" "--allow-mismatch"
+
+OVR="$(cd "$OVB" && WDS_BASE=3900 API_BASE=8900 bash dev/registry.sh claim visualizer feature/subtunes-as-first-class dev/overlay-visualizer --allow-mismatch 2>&1)"
+expect_contains "guard: --allow-mismatch registers a shared target, loudly" "$OVR" "MISMATCH ACCEPTED"
+
+OKC_RC=0
+OKC="$(cd "$OVB" && WDS_BASE=3900 API_BASE=8900 bash dev/registry.sh claim subtunes feature/subtunes-as-first-class dev/overlay-subtunes 2>&1)" || OKC_RC=$?
+expect_eq       "guard: a slug that appears in both branches passes (subtunes)" "$OKC_RC" "0"
+
+# bringup: the positional branch is the BASE; the target is feature/<name>.
+# Run it from the main checkout: bringup refuses to create a second pair while
+# standing in an overlay, and $REPO is the only non-overlay tree in the fixture.
+mkdir -p "$REPO/dev"
+cp -a "$WORK/ov-a/dev/." "$REPO/dev/"
+git -C "$REPO" checkout -q --detach
+BU="$(cd "$REPO" && BRINGUP_STOP_AFTER_REGISTER=1 bash dev/bringup.sh delta --base feature/b 2>&1 || true)"
+expect_contains "bringup: creates the target from the base" "$BU" "created feature/delta from feature/b"
+expect_contains "bringup: registers feature/delta, not the base" "$BU" "registered delta -> feature/delta / dev/overlay-delta (base feature/b)"
+expect_eq       "bringup: the new branch starts at the base" \
+                "$(git -C "$REPO" rev-parse feature/delta 2>/dev/null)" "$(git -C "$REPO" rev-parse feature/b)"
+expect_eq       "bringup: the row records the base" \
+                "$(awk '$1 == "delta" { print $6 }' "$REPO/.git/dev-targets")" "feature/b"
 
 echo
 echo "overlay-tooling: $pass passed, $fail failed"

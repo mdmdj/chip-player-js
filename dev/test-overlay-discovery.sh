@@ -5,17 +5,18 @@
 # someone who just landed in a `dev/kit` worktree can find it. Two things have to
 # hold -- the entry points must explain themselves, and the docs that point at
 # them (AGENTS.md, dev/README.md) must actually be ON the kit branch, since that
-# is what a fresh worktree checks out. Forgetting `dev/kit.sh capture` after
-# changing dev/ is how a worktree ends up without the script the docs name.
+# is what a fresh worktree checks out. `dev/kit` is canonical, so a feature tree
+# whose dev/ is behind it should refresh; there is no capture step to forget.
 set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$DIR/.." && pwd)"
 cd "$ROOT"
 
-pass=0; fail=0
+pass=0; fail=0; skipped=0
 ok()   { echo "ok   - $1"; pass=$((pass+1)); }
 bad()  { echo "FAIL - $1"; fail=$((fail+1)); }
+skip() { echo "skip - $1"; skipped=$((skipped+1)); }
 expect_contains() { case "$2" in *"$3"*) ok "$1" ;; *) bad "$1 (missing: $3)" ;; esac; }
 
 # 1. Every entry point explains itself when run with no arguments.
@@ -50,24 +51,39 @@ expect_contains "session start points at bring-up" "$SESSION" "bringup"
 #    and a branch that do not exist there.
 for f in AGENTS.md dev/README.md dev/overlay.sh dev/overlaylib.sh dev/bringup.sh dev/registry.sh dev/engines.sh dev/kit.sh dev/promote.sh dev/promote-plan.sh dev/promote-apply.sh dev/rebase.sh dev/push-overlay.sh dev/promote-paths.txt dev/overlay.conf; do
   if git cat-file -e "dev/kit:$f" 2>/dev/null; then ok "kit carries $f"
-  else bad "kit carries $f (run ./dev/kit.sh capture)"; fi
+  else bad "kit carries $f (dev/kit is canonical; add it there)"; fi
 done
 
-# 5. ...and carries them CURRENT. "Everything it carries" is the carried pathspecs
-#    minus the never-carried paths (the seeded AGENTS.md, per-feature notes, and the
-#    feature tests): those are deliberately absent, so they cannot read as drift.
+# 5. ...and THIS worktree is current with the canonical kit. The kit is the
+#    source, so drift is a stale overlay (refresh it) -- not "forgot to capture".
 KLIST="$(./dev/kit.sh list)"
+expect_contains "the kit names dev/kit as canonical" "$KLIST" "source: dev/kit (canonical)"
 mapfile -t KPATHS < <(printf '%s\n' "$KLIST" | awk '/^carries/{f=1;next} f && !/^  /{exit} f{sub(/^ +/,"");print}')
 mapfile -t NEVER < <(./dev/kit.sh never)
 if [ ${#KPATHS[@]} -gt 0 ]; then ok "kit path list is readable (${#KPATHS[@]} paths)"
 else bad "kit path list is readable"; fi
 EXCL=()
 for n in "${NEVER[@]}"; do [ -n "$n" ] && EXCL+=(":(exclude)$n"); done
-DRIFT="$(git diff --name-only dev/kit dev/overlay-subtunes -- "${KPATHS[@]}" "${EXCL[@]}" 2>/dev/null || true)"
+DRIFT="$(git diff --name-only dev/kit -- "${KPATHS[@]}" "${EXCL[@]}" 2>/dev/null || true)"
 if [ -z "$DRIFT" ]; then
-  ok "the kit matches dev/overlay-subtunes for everything it carries"
+  ok "this worktree's carried kit paths match dev/kit"
 else
-  bad "the kit is stale for: $(tr '\n' ' ' <<< "$DRIFT") -- run ./dev/kit.sh capture"
+  if [ "$(git rev-parse --abbrev-ref HEAD)" = "dev/kit" ]; then
+    bad "dev/kit has uncommitted changes in: $(tr '\n' ' ' <<< "$DRIFT")"
+  else
+    skip "this tree's kit is behind (run ./dev/overlay.sh <target> refresh): $(tr '\n' ' ' <<< "$DRIFT")"
+  fi
+fi
+
+# 5b. A de-listing needs its region to exist. src/config/index.js was de-listed with
+#     a comment claiming its dev block was a DEV region; it was not -- the block
+#     REPLACES the feature branch's localhost block, and the plan carried the LAN
+#     host / port override toward the PR. Pinned so a tidier-looking comment cannot
+#     repeat it (and the entry is what protects overlays that predate any fix).
+if grep -qx 'src/config/index.js' dev/promote-paths.txt; then
+  ok "src/config/index.js stays path-listed (its dev block replaces; it cannot strip)"
+else
+  bad "src/config/index.js is not path-listed -- its dev block replaces the feature branch's localhost block, so it cannot be a DEV region (see promote-paths.txt)"
 fi
 
 # 6. AGENTS.md is a SEED: the template a new worktree gets, never captured up, and
@@ -100,11 +116,11 @@ else ok "the kit carries no dev/features"; fi
 # The build script's export list is coupled to the engine sources a tree actually
 # has, and the kit carries one script for every base -- so the script must adapt
 # (drop an export the sources do not define) rather than be swapped per branch.
-if git show dev/kit:scripts/build-chip-core.js 2>/dev/null | grep -q 'OPTIONAL_EXPORTS'; then
-  ok "the kit's build script adapts its exports to the tree's sources"
-else
-  bad "the kit's build script adapts its exports to the tree's sources"
-fi
+KIT_BUILD_SCRIPT="$(git show dev/kit:scripts/build-chip-core.js 2>/dev/null || true)"
+case "$KIT_BUILD_SCRIPT" in
+  *OPTIONAL_EXPORTS*) ok "the kit's build script adapts its exports to the tree's sources" ;;
+  *) bad "the kit's build script adapts its exports to the tree's sources" ;;
+esac
 AGENTS_KIT="$(git show dev/kit:AGENTS.md)"
 case "$AGENTS_KIT" in
   *"sibling"*' '*"in-repo"*) ok "the template explains the two engine sources" ;;
@@ -193,5 +209,5 @@ case "$MANIFEST_KIT" in *"group subtunes"*) ok "the registry declares the featur
 *) bad "the registry declares the feature markers" ;; esac
 
 echo
-echo "overlay-discovery: $pass passed, $fail failed"
+echo "overlay-discovery: $pass passed, $skipped skipped, $fail failed"
 [ "$fail" -eq 0 ]

@@ -10,10 +10,12 @@
 const path = require('path');
 const fs = require('fs');
 const Database = require('better-sqlite3');
+const { devUserId } = require('./dev-user');
 
 const serverDir = process.argv[2] || path.join(__dirname, '..', 'server');
 const userDbPath = path.resolve(serverDir, 'users.db');
 const csdbDbPath = path.resolve(serverDir, 'csdb.db');
+const userId = process.env.DEV_USER_ID || devUserId(path.resolve(serverDir, '..'));
 
 if (fs.existsSync(userDbPath) && !process.env.DEV_SEED_FORCE) {
   console.log(`[dev] ${userDbPath} already exists (set DEV_SEED_FORCE=1 to reseed).`);
@@ -60,14 +62,21 @@ if (fs.existsSync(userDbPath) && !process.env.DEV_SEED_FORCE) {
     CREATE INDEX IF NOT EXISTS idx_playbacks_played_at ON playbacks(played_at);
   `);
 
+  // The old shared identity is no longer used. Remove it (and its favorites) so a
+  // stale theme/favorites set cannot be read or saved by a later worktree; each
+  // worktree now starts under its own dev-user-<target> id.
+  if (userId !== 'dev-user') {
+    db.prepare("DELETE FROM playlists WHERE user_id = 'dev-user'").run();
+    db.prepare("DELETE FROM users WHERE id = 'dev-user'").run();
+  }
   const now = Math.floor(Date.now() / 1000);
   db.prepare(`
     INSERT INTO users (id, email, display_name, photo_url, created_at, last_login, settings)
-    VALUES ('dev-user', 'dev@example.com', 'Dev User', NULL, ?, ?, '{}')
+    VALUES (?, 'dev@example.com', 'Dev User', NULL, ?, ?, '{}')
     ON CONFLICT(id) DO NOTHING
-  `).run(now, now);
+  `).run(userId, now, now);
   db.close();
-  console.log(`[dev] Seeded ${userDbPath}`);
+  console.log(`[dev] Seeded ${userDbPath} for ${userId}`);
 }
 
 {

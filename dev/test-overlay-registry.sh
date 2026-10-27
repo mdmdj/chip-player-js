@@ -55,6 +55,10 @@ expect_contains "an explicit shared target is allowed, loudly" \
 expect_eq       "the base is recorded as the last field" \
   "$("$reg" claim theta feature/theta dev/overlay-theta feature/subtunes-as-first-class | awk '{print $6}')" \
   "feature/subtunes-as-first-class"
+GLIST="$(OVERLAY_REGISTRY="$WORK/guard-targets" "$reg" list)"
+expect_eq       "list consumes the optional base field" \
+  "$(awk '$1 == "theta" { print $4, $5, $6 }' <<< "$GLIST")" \
+  "3901 8901 -"
 expect_eq       "a slug in both branches passes (subtunes)" \
   "$("$reg" claim subtunes feature/subtunes-as-first-class dev/overlay-subtunes | awk '{print $1, $2}')" \
   "subtunes feature/subtunes-as-first-class"

@@ -61,12 +61,32 @@ case "$cmd" in
     overlay_resolve "$target"
     overlay_require_worktrees
     arm="$OV_OVERLAY_WT/dev/.promote-armed"
+    base="-"
+    regfile="$(overlay_registry_file)"
+    if [ -f "$regfile" ]; then
+      base="$(awk -v n="$OV_NAME" '$1 == n { print ($6 == "" ? "-" : $6); exit }' "$regfile")"
+    fi
+    kit_state="(absent)"
+    if git show-ref --verify --quiet refs/heads/dev/kit; then
+      kit_state="present"
+      mapfile -t kit_paths < <(bash "$DIR/kit.sh" owned 2>/dev/null || true)
+      mapfile -t kit_never < <(bash "$DIR/kit.sh" never 2>/dev/null || true)
+      kit_excl=(":(exclude)AGENTS.md")
+      for n in "${kit_never[@]}"; do [ -n "$n" ] && kit_excl+=(":(exclude)$n"); done
+      if [ ${#kit_paths[@]} -gt 0 ]; then
+        kit_drift="$(git -C "$OV_OVERLAY_WT" diff --name-only dev/kit -- "${kit_paths[@]}" "${kit_excl[@]}" 2>/dev/null || true)"
+        if [ -n "$kit_drift" ]; then
+          kit_state="present (stale: $(printf '%s\n' "$kit_drift" | wc -l | tr -d ' ') file(s); run refresh)"
+        fi
+      fi
+    fi
     printf 'target    %s\n' "$OV_NAME"
     printf 'feature   %s  (%s)\n' "$OV_FEATURE" "$OV_FEATURE_WT"
+    printf 'base      %s\n' "$base"
     printf 'overlay   %s  (%s)\n' "$OV_OVERLAY" "$OV_OVERLAY_WT"
     printf 'ports     wds=%s api=%s\n' "$OV_WDS" "$OV_API"
     printf 'arm key   %s%s\n' "${arm#"$ROOT"/}" "$([ -e "$arm" ] && echo '  (ARMED)' || echo '')"
-    printf 'kit       %s\n' "$(git show-ref --verify --quiet refs/heads/dev/kit && echo present || echo '(absent)')"
+    printf 'kit       %s\n' "$kit_state"
     ;;
 
   plan)    exec "$DIR/promote.sh" "$target" ;;

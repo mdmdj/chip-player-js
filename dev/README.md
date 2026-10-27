@@ -6,7 +6,7 @@ per-target binding.
 
 | Piece | What it is |
 | --- | --- |
-| `dev/kit` | the dev layer as its own branch — `dev/**`, the engine layout and inventory, the test registry and runner, and the `AGENTS.md` **template** |
+| `dev/kit` | the **canonical** dev layer as its own branch — `dev/**`, the engine layout and inventory, the test registry and runner, and the `AGENTS.md` **template**. Edit it here; overlays receive it by `pull`. |
 | `feature/<name>` | the reviewable PR branch for one feature. Never carries `dev/` |
 | `dev/overlay-<name>` | the branch you work on: `feature/<name>` + the kit + feature work |
 | `dev/overlay.conf` | the manifest — one line per target: name, feature branch, overlay branch, ports |
@@ -14,7 +14,7 @@ per-target binding.
 
 A worktree *is* one target's dev tree. You commit normally on the overlay;
 publishing is deliberate, and has two paths — **feature → promote**, **dev files →
-capture/pull** (see "Where your work goes" below).
+edit `dev/kit` → pull** (see "Where your work goes" below).
 
 ## Start here
 
@@ -33,10 +33,10 @@ worktree created from `dev/kit` (or from another overlay) needs nothing else fir
 
 ## The five rules it is built on
 
-1. **`dev/kit` is a template, not a snapshot.** `AGENTS.md` is *seeded*: a new
-   worktree gets the template, and `pull` never overwrites a worktree's own notes.
-   A feature's history belongs in `dev/features/<name>.md`, which is never captured
-   into the kit and never promoted.
+1. **`dev/kit` is canonical.** A dev tool or doc is edited on `dev/kit` and pulled
+   down. `AGENTS.md` is *seeded*: a new worktree gets the template, and `pull`
+   never overwrites a worktree's own notes. A feature's history belongs in
+   `dev/features/<name>.md`, which is never carried into the kit and never promoted.
 2. **Tests are source-coupled.** `dev/tests.manifest` is the registry: the kit ships
    the *infrastructure* tests, and a branch's own tests travel with it. Derive from
    a branch that has the code and its tests run (and are expected to pass); derive
@@ -63,9 +63,9 @@ worktree created from `dev/kit` (or from another overlay) needs nothing else fir
 | Add a test | one `infra`/`feature` line in `dev/tests.manifest` (+ a `group` line naming the feature's marker files) |
 | Choose the chip-core's base | `./dev/core.sh list`, then `use <ref>`; or `CORE_REF=<ref> bringup`; `build` builds from this tree's sources |
 | Give a worktree a bigger catalog | `./dev/sample.sh steal <other-worktree>` (or `node dev/fetch-seo-fixtures.mjs`) |
-| Publish feature work | `./dev/overlay.sh <t> plan` (works with the dev patches applied) → arm → `./dev/overlay.sh <t> promote` |
+| Publish feature work | `./dev/overlay.sh <t> refresh --dry-run` (refresh if stale) → `./dev/backup.sh <t>` → `./dev/overlay.sh <t> plan` (works with the dev patches applied) → arm → `./dev/overlay.sh <t> promote` |
 | Back up before a promote | `./dev/backup.sh <t>` — tags both branches and tars the gitignored dev artifacts |
-| Publish dev tooling | `./dev/kit.sh capture` (to the kit), then `./dev/kit.sh pull <target>` on each target |
+| Publish dev tooling | edit + commit on **`dev/kit`**, then `./dev/kit.sh pull <target>` on each target (or `./dev/overlay.sh <t> refresh`) |
 | Refresh an overlay | `./dev/overlay.sh <t> refresh [--dry-run]` — kit sync + rebase, **verified**; `all` refreshes every target, skipping the ones it cannot |
 | Publish the overlay / the kit | `./dev/push-overlay.sh`, `git push origin dev/kit` |
 | Stage/undo the dev environment | `./dev/apply.sh`, `./dev/remove.sh` |
@@ -87,7 +87,7 @@ lives under `dev/`, is carried to every target by the kit, and never reaches the
 | `refresh.sh` | bring an overlay (or `all`) up to date: kit sync + rebase, verified; `--dry-run` |
 | `backup.sh` | before a promote: tag the overlay + feature branches and tar the gitignored dev artifacts (`dev/.backups/`) |
 | `registry.sh` | the shared target/port registry, in the common git dir |
-| `kit.sh` | the dev layer itself: `capture` (to the kit), `pull` (into a target), `list`, `owned`, `never` |
+| `kit.sh` | the canonical dev layer itself: `pull` (into a target), `list`, `owned`, `never`; `import`/`capture` only bootstraps/rebuilds it from an overlay |
 | `engines.sh` | the engine inventory: `check` (flags a decoy), `link` (farms the siblings) |
 | `core.sh` | choose the chip-core's base: `list`, `use`, `steal`, `from`, `build` |
 | `sample.sh` | the cheap catalog sample: `seed`, `steal`, `list` |
@@ -150,9 +150,11 @@ ran it, so run the sequence above in each tree that needs the package.
 
 ## Housekeeping
 
-- **The kit's currency is asserted.** `dev/test-overlay-discovery.sh` fails if a
-  tool or doc changed on the overlay but was not captured, so "documented" and
-  "delivered to a new worktree" cannot drift apart.
+- **The kit is canonical, and the test says whether this tree is current.**
+  `dev/kit` is the source; `dev/test-overlay-discovery.sh` compares this
+  worktree's carried kit paths with `dev/kit` and, in a feature overlay, reports
+  a stale tree with the `refresh` command rather than treating it as a broken
+  branch. A kit-path change is authored on `dev/kit`, not on an overlay.
 - **A refresh is verified, and can be looked at first.** `./dev/overlay.sh <t>
   refresh --dry-run` prints what the kit would change in that worktree (the files
   the kit *supplies*, so nothing is listed that a pull would not touch) and whether
@@ -265,12 +267,11 @@ so one checkout can drive any number of targets:
 ./dev/overlay.sh gba plan      # name the target explicitly
 ```
 
-To add a target, put `dev/kit` (the overlay-only whole-file content) in one place
-and build the pair from it — or, in one command, `./dev/overlay.sh <name> bringup`
-(see "Spinning up a new target" below):
+To add a target, the kit is already the canonical source; create the pair from
+it — or, in one command, `./dev/overlay.sh <name> bringup` (see "Spinning up a
+new target" below):
 
 ```sh
-./dev/kit.sh capture           # once: capture the overlay-only content
 ./dev/overlay-new.sh gba       # feature/gba + dev/kit, its own worktrees
 ```
 
@@ -387,26 +388,22 @@ their own subset of an overlay that deliberately mixes both:
 | Your change | Path | Command |
 | --- | --- | --- |
 | Feature code in a feature file | **promote** onto the feature branch | `dev/overlay.sh <t> plan` → arm → `promote` |
-| A whole dev-only file (`dev/**`, the build scripts, `src/config/index.js`) | **capture** to `dev/kit`, then **pull** into the other overlays | `dev/kit.sh capture` / `dev/kit.sh pull <t>` |
+| A whole dev-only file (`dev/**`, the build scripts, `src/config/index.js`) | **edit it on `dev/kit`**, then **pull** it into the overlays | commit on `dev/kit`; `dev/kit.sh pull <t>` or `overlay.sh <t> refresh` |
 | Dev-only code *inside* a feature file | wrapped in `DEV-BEGIN`/`DEV-END`; promote strips it, so it never ships | — |
 | `server/index.js`'s dev deltas | neither: `dev/apply.sh` patches them in place, `dev/remove.sh` reverts | — |
 
-Four buckets, two commands — and nothing is ever "on the wrong branch" while you
-work. The filters are the path list (`dev/promote-paths.txt`) and the regions, not
-your commit discipline.
+Four buckets, two publication paths — and nothing is ever "on the wrong branch"
+while you work. The filters are the path list (`dev/promote-paths.txt`) and the
+regions, not your commit discipline.
 
-`capture` is a **snapshot, not a merge**: it copies the named paths from the
-source overlay onto `dev/kit`, so two agents capturing at once are
-last-write-wins. It publishes from the **canonical overlay**
-(`KIT_CANONICAL`, default `dev/overlay-subtunes`), *not* from whatever branch you are
-standing on — otherwise a feature overlay's kit-path edits (a rebuild script, a
-build flag) would silently become every future feature's starting point. To
-publish from another overlay, say so: `KIT_SOURCE=<overlay> dev/kit.sh capture`.
-Naming paths publishes just those, seeds included (`dev/kit.sh capture AGENTS.md`),
-and read `git diff dev/kit` before relying on the result.
+`dev/kit` is the **canonical** copy: edit the tool or doc there, commit on
+`dev/kit`, and pull it into the targets. `import`/`capture` is only a bootstrap
+or a deliberate rebuild from an overlay; it requires an explicit source
+(`dev/kit.sh import <ref> [<path>...]`, or `KIT_SOURCE=<ref> dev/kit.sh capture`)
+and is last-write-wins. There is no implicit "canonical overlay" to import from.
 
 `AGENTS.md` is **seeded, not synced**: `dev/kit` holds the shared playbook as a
-template, `pull` delivers it only to a worktree that has none, and `capture` never
+template, `pull` delivers it only to a worktree that has none, and an import never
 takes an overlay's copy up. A new feature therefore starts from a clean playbook
 while the overlay that earned the detail keeps it.
 
@@ -414,9 +411,9 @@ while the overlay that earned the detail keeps it.
 
 Put a feature's design decisions, measurements, hand-offs and history in its own
 note — `dev/features/<name>.md` — and keep `AGENTS.md` to what is true for *every*
-feature. `dev/features/**` is never captured into the kit, so one feature's
-notes cannot follow the next feature around, and it sits inside `dev/**`, so it
-never reaches the PR either.
+feature. `dev/features/**` is never carried into the kit, so one feature's notes
+cannot follow the next feature around, and it sits inside `dev/**`, so it never
+reaches the PR either.
 
 The older, pre-`dev/features/` notes are still on the overlay that wrote them (they
 are tracked on its branch, so they are never lost) but the kit deliberately does not

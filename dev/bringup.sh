@@ -61,7 +61,7 @@ feature="${feature:-feature/$name}"
 overlay="dev/overlay-$name"
 
 git -C "$ROOT" show-ref --verify --quiet refs/heads/dev/kit \
-  || die "dev/kit does not exist; build it first with ./dev/kit.sh capture"
+  || die "dev/kit does not exist; check out the canonical dev/kit branch first"
 
 main_wt="$(git -C "$ROOT" worktree list --porcelain | awk '$1 == "worktree" { print $2; exit }')"
 [ -n "$main_wt" ] || die "could not find the main worktree"

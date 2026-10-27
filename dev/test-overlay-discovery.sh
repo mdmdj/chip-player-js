@@ -5,8 +5,8 @@
 # someone who just landed in a `dev/kit` worktree can find it. Two things have to
 # hold -- the entry points must explain themselves, and the docs that point at
 # them (AGENTS.md, dev/README.md) must actually be ON the kit branch, since that
-# is what a fresh worktree checks out. Forgetting `dev/kit.sh capture` after
-# changing dev/ is how a worktree ends up without the script the docs name.
+# is what a fresh worktree checks out. `dev/kit` is canonical, so a feature tree
+# whose dev/ is behind it should refresh; there is no capture step to forget.
 set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -51,31 +51,25 @@ expect_contains "session start points at bring-up" "$SESSION" "bringup"
 #    and a branch that do not exist there.
 for f in AGENTS.md dev/README.md dev/overlay.sh dev/overlaylib.sh dev/bringup.sh dev/registry.sh dev/engines.sh dev/kit.sh dev/promote.sh dev/promote-plan.sh dev/promote-apply.sh dev/rebase.sh dev/push-overlay.sh dev/promote-paths.txt dev/overlay.conf; do
   if git cat-file -e "dev/kit:$f" 2>/dev/null; then ok "kit carries $f"
-  else bad "kit carries $f (run ./dev/kit.sh capture)"; fi
+  else bad "kit carries $f (dev/kit is canonical; add it there)"; fi
 done
 
-# 5. ...and carries them CURRENT. "Everything it carries" is the carried pathspecs
-#    minus the never-carried paths (the seeded AGENTS.md, per-feature notes, and the
-#    feature tests): those are deliberately absent, so they cannot read as drift.
+# 5. ...and THIS worktree is current with the canonical kit. The kit is the
+#    source, so drift is a stale overlay (refresh it) -- not "forgot to capture".
 KLIST="$(./dev/kit.sh list)"
+expect_contains "the kit names dev/kit as canonical" "$KLIST" "source: dev/kit (canonical)"
 mapfile -t KPATHS < <(printf '%s\n' "$KLIST" | awk '/^carries/{f=1;next} f && !/^  /{exit} f{sub(/^ +/,"");print}')
 mapfile -t NEVER < <(./dev/kit.sh never)
 if [ ${#KPATHS[@]} -gt 0 ]; then ok "kit path list is readable (${#KPATHS[@]} paths)"
 else bad "kit path list is readable"; fi
 EXCL=()
 for n in "${NEVER[@]}"; do [ -n "$n" ] && EXCL+=(":(exclude)$n"); done
-SOURCE_OVERLAY="$(awk 'NF >= 3 && $1 !~ /^#/ { print $3; exit }' dev/overlay.conf 2>/dev/null || true)"
-[ -n "$SOURCE_OVERLAY" ] || SOURCE_OVERLAY=dev/overlay-subtunes
-DRIFT="$(git diff --name-only dev/kit "$SOURCE_OVERLAY" -- "${KPATHS[@]}" "${EXCL[@]}" 2>/dev/null || true)"
+DRIFT="$(git diff --name-only dev/kit -- "${KPATHS[@]}" "${EXCL[@]}" 2>/dev/null || true)"
 if [ -z "$DRIFT" ]; then
-  ok "the kit matches $SOURCE_OVERLAY for everything it carries"
+  ok "this worktree's carried kit paths match dev/kit"
 else
-  # A hard failure belongs where capture is the only right next step: the source
-  # overlay. Every OTHER tree is "stale" by definition until it refreshes, and a
-  # red suite there reads as a broken tree rather than "pull the kit" -- so it is
-  # a reported skip with the exact command.
-  if [ "$(git rev-parse --abbrev-ref HEAD)" = "$SOURCE_OVERLAY" ]; then
-    bad "the kit is stale for: $(tr '\n' ' ' <<< "$DRIFT") -- run ./dev/kit.sh capture"
+  if [ "$(git rev-parse --abbrev-ref HEAD)" = "dev/kit" ]; then
+    bad "dev/kit has uncommitted changes in: $(tr '\n' ' ' <<< "$DRIFT")"
   else
     skip "this tree's kit is behind (run ./dev/overlay.sh <target> refresh): $(tr '\n' ' ' <<< "$DRIFT")"
   fi
@@ -122,11 +116,11 @@ else ok "the kit carries no dev/features"; fi
 # The build script's export list is coupled to the engine sources a tree actually
 # has, and the kit carries one script for every base -- so the script must adapt
 # (drop an export the sources do not define) rather than be swapped per branch.
-if git show dev/kit:scripts/build-chip-core.js 2>/dev/null | grep -q 'OPTIONAL_EXPORTS'; then
-  ok "the kit's build script adapts its exports to the tree's sources"
-else
-  bad "the kit's build script adapts its exports to the tree's sources"
-fi
+KIT_BUILD_SCRIPT="$(git show dev/kit:scripts/build-chip-core.js 2>/dev/null || true)"
+case "$KIT_BUILD_SCRIPT" in
+  *OPTIONAL_EXPORTS*) ok "the kit's build script adapts its exports to the tree's sources" ;;
+  *) bad "the kit's build script adapts its exports to the tree's sources" ;;
+esac
 AGENTS_KIT="$(git show dev/kit:AGENTS.md)"
 case "$AGENTS_KIT" in
   *"sibling"*' '*"in-repo"*) ok "the template explains the two engine sources" ;;

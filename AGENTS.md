@@ -6,7 +6,7 @@ overwrites it — so keep it to what is true for *every* feature.
 
 **Put your feature's own history somewhere else.** Design decisions, measurements,
 benchmarks, hand-offs and "what the last session found" belong in
-`dev/features/<name>.md`. That file is never captured into the kit (so it cannot
+`dev/features/<name>.md`. That file is never carried into the kit (so it cannot
 follow the next feature around) and never promoted (it is inside `dev/**`). Notes
 from features that came before live on the overlay branch that produced them, not
 here. If a lesson is true for every feature, it belongs *here*; if it is the story
@@ -126,9 +126,9 @@ the tree did not move** — never rebase by hand; an interrupted rebase must be
 aborted, not resumed. The rebase rewrites the overlay's history, so publishing it
 is `dev/push-overlay.sh` (`--force-with-lease`) — never `git pull` the overlay.
 
-**Publishing has two paths** (feature → promote; dev files → `dev/kit.sh
-capture`/`pull`), and `AGENTS.md` is seeded, not synced. The model, four buckets
-and the capture caveats are in `dev/README.md` §"Where your work goes".
+**Publishing has two paths** (feature → promote; dev files → edit `dev/kit`, then
+`pull`), and `AGENTS.md` is seeded, not synced. `dev/kit` is canonical; the model,
+four buckets and the import caveats are in `dev/README.md` §"Where your work goes".
 
 ### What promotes, and what does not
 

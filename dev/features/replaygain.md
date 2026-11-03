@@ -56,8 +56,9 @@ node scripts/analyze-loudness.js --retry-failed # retry errors/timeouts
 - One child process pool (default `min(4, cpus-1)`), each with its own wasm core.
   The parent owns the only SQLite writer.
 - A tiny local HTTP server serves the catalog, `public/soundfonts`, `/metadata`
-  and `/hvsc`; `CHIP_LOUDNESS_BASE` points `src/config` at it, so a scan is
-  offline and reproducible.
+  and `/hvsc`. The Node loader (`scripts/loudness-node-require.js`) points the
+  player modules at it by overriding the loaded `src/config` export; that file
+  is path-listed, so the scanner does not need a feature change there.
 - Resumable/incremental: candidates are rows whose size, mtime or
   `LOUDNESS_VERSION` moved. Progress is committed per file. A killed run resumes.
 - Watchdog: if a child does not answer within `--timeout` (default 120 s), it is
@@ -191,9 +192,8 @@ and N64 retries:
   at promotion time. So are the route's `dbStatements` if the feature branch is
   promoted without `server/database.js` (it is not path-listed, so normally the
   promote carries it; keep the pair together).
-- **`src/config/index.js` now promotes**: its dev block is a DEV region and the
-  `CHIP_LOUDNESS_BASE` override is feature code for the scanner. Removing it from
-  `dev/promote-paths.txt` is deliberate.
+- **`src/config/index.js` stays path-listed.** The scanner's local-base override
+  lives in `scripts/loudness-node-require.js`, not in the config module.
 
 ## Verify
 

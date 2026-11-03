@@ -9,6 +9,7 @@ const { toArabic } = require('roman-numerals');
 const { FORMATS } = require('../src/config/index');
 const { parseMetadata, cleanString } = require('./metadata-parsers');
 const { describeSubtunes } = require('./subtune-headers');
+const { ensureLoudnessSchema } = require('../server/loudness-schema');
 
 
 const program = new Command();
@@ -121,6 +122,9 @@ if (options.resetDb) {
     DROP TABLE IF EXISTS music_fts;
     DROP TABLE IF EXISTS hvsc_files;
     DROP TABLE IF EXISTS sid_release_map;
+    DROP TABLE IF EXISTS loudness;
+    DROP TABLE IF EXISTS loudness_files;
+    DROP TABLE IF EXISTS loudness_albums;
   `);
 }
 
@@ -243,6 +247,11 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_directories_sort ON directories(sort_order);
   CREATE INDEX IF NOT EXISTS idx_song_music ON song(music_id);
 `);
+
+// Loudness is catalog data: create it here so a freshly built catalog is always
+// ready for the scanner to fill, and so the server can query it without a
+// separate migration step.
+ensureLoudnessSchema(db);
 
 // The song index is rebuilt from music + subtune on every run rather than kept
 // incrementally: it is the only thing /search reads, and a build is the only

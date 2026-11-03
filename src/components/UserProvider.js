@@ -28,6 +28,10 @@ const DEFAULT_SETTINGS = {
   theme: 'msdos',
   silenceDuration: -1,
   showLoopArea: true,
+  // ReplayGain-style loudness normalization. On by default: the point is that
+  // quiet engines and songs do not need the volume slider at 150%.
+  volumeNormalization: 'auto',
+  normalizationTarget: -18,
 };
 
 

@@ -36,6 +36,7 @@ import {
 } from '../util';
 import LocalFilesManager from '../LocalFilesManager';
 import { describeLocalSubtunes } from '../localFilesSubtunes';
+import ReplayGain from '../ReplayGain';
 import Sequencer, { NUM_REPEAT_MODES, NUM_SHUFFLE_MODES, REPEAT_OFF, SHUFFLE_OFF } from '../Sequencer';
 
 import GMEPlayer from '../players/GMEPlayer';
@@ -79,13 +80,18 @@ class App extends React.Component {
     // Guards updateLocalFiles against out-of-order sub-tune parses.
     this.localFilesGeneration = 0;
     this.midiPlayer = null; // Need a reference to MIDIPlayer to handle SoundFont loading.
+    this.normalizationGain = 1;
+    this.replayGainSong = null;
+    this.replayGainSongKey = null;
+    this.replayGainContext = null;
     window.ChipPlayer = this;
 
 
     // Initialize audio graph
-    // ┌────────────┐      ┌────────────┐      ┌─────────────┐
-    // │ playerNode ├─────>│  gainNode  ├─────>│ destination │
-    // └────────────┘      └────────────┘      └─────────────┘
+    // ┌────────────┐   ┌──────────────────┐   ┌────────────┐   ┌─────────────┐
+    // │ playerNode ├──>│ normalizationGain ├──>│  gainNode  ├──>│ destination │
+    // └────────────┘   └────────┬─────────┘   └────────────┘   └─────────────┘
+    //                           └────────────> visualizer analyser
 
     // Smaller buffer for mobile devices. 'interactive' yields 128 samples on iOS/Android.
     const latencyHint = isMobile.any ? 'interactive' : 'playback';
@@ -108,11 +114,17 @@ class App extends React.Component {
 
     const bufferSize = Math.max( // Make sure script node bufferSize is at least baseLatency
       Math.pow(2, Math.ceil(Math.log2((audioCtx.baseLatency || 0.001) * audioCtx.sampleRate))), 2048);
+    // Normalization is a separate stage from the user's volume: the spectrogram
+    // taps this node, so a quiet track looks normalized but the volume slider
+    // still does not dim the visualizer.
+    const normalizationGainNode = this.normalizationGainNode = audioCtx.createGain();
+    normalizationGainNode.gain.value = 1;
     const gainNode = this.gainNode = audioCtx.createGain();
     gainNode.gain.value = 1;
     gainNode.connect(audioCtx.destination);
+    normalizationGainNode.connect(gainNode);
     const playerNode = this.playerNode = audioCtx.createScriptProcessor(bufferSize, 0, 2);
-    playerNode.connect(gainNode);
+    playerNode.connect(normalizationGainNode);
 
     unlockAudioContext(audioCtx);
     console.log('Sample rate: %d hz. Base latency: %d. Buffer size: %d.',
@@ -151,6 +163,9 @@ class App extends React.Component {
       // Special playable contexts
       localFiles: [],
       theaterMode: false,
+      replayGainDb: 0,
+      replayGainSource: 'off',
+      replayGainAlbumProgress: null,
     };
 
     this.initChipCore(audioCtx, playerNode, bufferSize);
@@ -212,6 +227,15 @@ class App extends React.Component {
 
     // Create localFilesManager before performing the syncfs.
     this.localFilesManager = new LocalFilesManager(this.chipCore.FS, 'local');
+
+    // ReplayGain-style normalization. Scans run in a worker, so a cold song
+    // starts at unity gain and ramps to its measured value a moment later.
+    this.replayGain = new ReplayGain({
+      sampleRate: audioCtx.sampleRate,
+      getSettings: () => this.props.userContext?.settings,
+      onChange: this.handleReplayGainChange,
+      fetchServer: (filepath, subtune) => this.fetchLoudness(filepath, subtune),
+    });
 
     // Populate all mounted IDBFS file systems from IndexedDB.
     this.chipCore.FS.syncfs(true, (err) => {
@@ -303,6 +327,20 @@ class App extends React.Component {
     if (prevProps.location?.pathname !== this.props.location?.pathname && this.state.theaterMode) {
       const { updateSettings } = this.props.userContext;
       updateSettings({ showVisualizer: false });
+    }
+
+    const prevMode = prevProps.userContext?.settings?.volumeNormalization;
+    const mode = this.props.userContext?.settings?.volumeNormalization;
+    const prevTarget = prevProps.userContext?.settings?.normalizationTarget;
+    const target = this.props.userContext?.settings?.normalizationTarget;
+    if (this.replayGain && this.replayGainSong) {
+      if (prevMode !== mode) {
+        // Album mode needs the folder listing, so restart rather than just
+        // re-applying the measurement we already have.
+        this.startReplayGain(this.replayGainSong);
+      } else if (prevTarget !== target) {
+        this.replayGain.refresh();
+      }
     }
   }
 
@@ -470,6 +508,10 @@ class App extends React.Component {
     console.debug('App.handleSequencerStateUpdate(isEjected=%s)', isEjected);
 
     if (isEjected) {
+      this.replayGainSong = null;
+      this.replayGainSongKey = null;
+      this.replayGainContext = null;
+      this.replayGain?.clear();
       this.setState({
         ejected: true,
         currentSongMetadata: {},
@@ -499,6 +541,21 @@ class App extends React.Component {
       const songPath = this.sequencer.getCurrSongPath();
       const currSongRef = this.sequencer.getCurrSongRef();
       const songTitleKey = songRefKey(currSongRef);
+      const songBuffer = this.sequencer.getCurrSongBuffer();
+      const replayGainKey = songRefKey(currSongRef);
+      const context = this.sequencer.getCurrContext();
+      const contextChanged = context !== this.replayGainContext;
+      if (songPath && songBuffer && (replayGainKey !== this.replayGainSongKey || contextChanged)) {
+        this.replayGainSongKey = replayGainKey;
+        this.replayGainContext = context;
+        this.replayGainSong = {
+          filepath: songPath,
+          buffer: songBuffer,
+          subtune: currSongRef?.subtune || 0,
+          context,
+        };
+        this.startReplayGain(this.replayGainSong);
+      }
       // TODO: this is messy. imageUrl comes asynchronously from the /metadata request.
       //       Title, artist, etc. come synchronously from player.getMetadata().
       //       ...but these are also emitted with playerStateUpdate.
@@ -742,8 +799,46 @@ class App extends React.Component {
   }
 
   handleVolumeChange(volume) {
-    this.setState({ volume });
-    this.gainNode.gain.value = Math.max(0, Math.min(2, volume * 0.01));
+    this.setState({ volume }, this.applyOutputGain);
+  }
+
+  handleReplayGainChange(result) {
+    this.normalizationGain = result.linear;
+    this.applyOutputGain();
+    this.setState({
+      replayGainDb: result.gainDb,
+      replayGainSource: result.source,
+      replayGainAlbumProgress: result.albumTotal
+        ? { analyzed: result.albumAnalyzed || 0, total: result.albumTotal }
+        : null,
+    });
+  }
+
+  applyOutputGain() {
+    if (!this.gainNode || !this.normalizationGainNode) return;
+    const volume = Math.max(0, Math.min(2, this.state.volume * 0.01));
+    const normalization = Math.max(0, Math.min(8, this.normalizationGain || 1));
+    const now = this.audioCtx.currentTime;
+    this.normalizationGainNode.gain.setTargetAtTime(normalization, now, 0.06);
+    this.gainNode.gain.setTargetAtTime(volume, now, 0.06);
+  }
+
+  startReplayGain(song) {
+    if (!this.replayGain) return;
+    this.replayGain.setSong({
+      filepath: song.filepath,
+      buffer: song.buffer,
+      subtune: song.subtune || 0,
+      isLocal: song.filepath.startsWith('local/'),
+      context: song.context,
+    });
+  }
+
+  async fetchLoudness(filepath, subtune = 0) {
+    const url = `${API_BASE}/loudness?path=${encodeURIComponent(filepath)}&subtune=${subtune}`;
+    const response = await fetch(url);
+    if (!response.ok) return null;
+    return response.json();
   }
 
   handleCycleRepeat() {
@@ -1192,6 +1287,9 @@ class App extends React.Component {
                     onParamChange={this.handleParamChange}
                     onPinParam={this.handlePinParam}
                     persistedSettings={settings}
+                    replayGainDb={this.state.replayGainDb}
+                    replayGainSource={this.state.replayGainSource}
+                    replayGainAlbumProgress={this.state.replayGainAlbumProgress}
                     sequencer={this.sequencer}
                   />
                 </div>
@@ -1201,6 +1299,7 @@ class App extends React.Component {
             {!isMobile.phone && !this.state.loading && !!this.chipCore &&
               <Visualizer audioCtx={this.audioCtx}
                           sourceNode={this.playerNode}
+                          visualizerSourceNode={this.normalizationGainNode}
                           chipCore={this.chipCore}
                           paused={this.state.ejected || this.state.paused}
                           songPath={this.state.songPath}

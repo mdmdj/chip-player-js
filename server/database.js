@@ -16,6 +16,10 @@ const CSDB_DB_PATH = path.resolve(__dirname, 'csdb.db');
 db.exec(`ATTACH DATABASE '${CSDB_DB_PATH}' AS csdb_db`);
 console.log(`Attached CSdb database at ${CSDB_DB_PATH}`);
 
+// Loudness rows are catalog data; make sure an older catalog.db has the tables
+// even before the next full catalog build.
+require('./loudness-schema').ensureLoudnessSchema(db);
+
 // playbacks.subtune is new; add it in place for databases created before it.
 const playbackColumns = db.prepare('PRAGMA user_db.table_info(playbacks)').all();
 if (playbackColumns.length > 0 && !playbackColumns.some(c => c.name === 'subtune')) {
@@ -122,6 +126,36 @@ const dbStatements = {
       ORDER BY RANDOM() LIMIT ?
   `),
   getTotalStmt: db.prepare('SELECT COUNT(*) as total, COUNT(DISTINCT song_id) as `unique` FROM music'),
+
+  // Loudness (catalog.db, filled by scripts/analyze-loudness.js)
+  getLoudnessStmt: db.prepare(`
+      SELECT l.path, l.subtune, l.status, l.lufs, l.peak_db, l.duration_sec,
+             l.partial, l.engine, f.subtune_count
+      FROM loudness l
+      JOIN loudness_files f ON f.path = l.path
+      WHERE l.path = ? AND l.subtune = ?
+      LIMIT 1
+  `),
+  getLoudnessFileStmt: db.prepare(`
+      SELECT path, status, subtune_count, analyzed_subtunes, lufs, peak_db,
+             duration_sec, engine
+      FROM loudness_files
+      WHERE path = ?
+      LIMIT 1
+  `),
+  getLoudnessAlbumStmt: db.prepare(`
+      SELECT directory_path, status, lufs, peak_db, track_count, duration_sec
+      FROM loudness_albums
+      WHERE directory_path = ?
+      LIMIT 1
+  `),
+  getSongDirectoryStmt: db.prepare(`
+      SELECT d.path as directory_path
+      FROM music m
+      JOIN directories d ON d.id = m.directory_id
+      WHERE m.path = ?
+      LIMIT 1
+  `),
 
   // Users
   getUserStmt: db.prepare('SELECT * FROM users WHERE id = ?'),

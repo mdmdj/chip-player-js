@@ -43,10 +43,13 @@ export default class Visualizer extends PureComponent {
   }
 
   componentDidMount() {
+    // The spectrogram measures what the listener hears, so its analyser taps
+    // after the volume/normalization gain. `sourceNode` stays the pre-gain
+    // player node because getAudioLatencyMs needs its buffer size.
     this.spectrogram = new Spectrogram(
       this.props.chipCore,
       this.props.audioCtx,
-      this.props.sourceNode,
+      this.props.visualizerSourceNode || this.props.sourceNode,
       this.freqCanvasRef.current,
       this.specCanvasRef.current,
       this.pianoKeysRef.current,

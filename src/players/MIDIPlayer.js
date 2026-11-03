@@ -746,8 +746,13 @@ export default class MIDIPlayer extends Player {
         break;
       case 'soundfont':
         const url = `${SOUNDFONT_URL_PATH}/${value}`;
-        ensureEmscFileWithUrl(core, `${SOUNDFONT_MOUNTPOINT}/${value}`, url)
-          .then(filename => this._loadSoundfont(filename));
+        // Keep the promise so an offline renderer can wait for the synth to be
+        // ready instead of measuring the silence before it loads.
+        this.soundfontPromise = ensureEmscFileWithUrl(core, `${SOUNDFONT_MOUNTPOINT}/${value}`, url)
+          .then(filename => this._loadSoundfont(filename))
+          .catch((e) => {
+            console.warn('Could not load soundfont %s: %s', value, e.message || e);
+          });
         break;
       case 'reverb':
         // TODO: call fluidsynth directly from JS, similar to chorus

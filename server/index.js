@@ -43,6 +43,10 @@ const {
   getSubtuneCountBySongIdStmt,
   getSongByIdStmt,
   getSongImageByIdStmt,
+  getLoudnessStmt,
+  getLoudnessFileStmt,
+  getLoudnessAlbumStmt,
+  getSongDirectoryStmt,
 
   getFavoritesStmt,
   addFavoriteByPathStmt,
@@ -650,6 +654,72 @@ router.get('/metadata', cache1Hour, (req, res, next) => {
   } else {
     res.json({});
   }
+});
+
+/**
+ * Returns the measured loudness for one playable song.
+ *
+ * {
+ *   track: {
+ *     path, subtune, status, lufs, peakDb, durationSec, partial, engine
+ *   } | null,
+ *   album: {
+ *     kind: 'file'|'directory', status, lufs, peakDb, trackCount, durationSec
+ *   } | null,
+ *   subtuneCount: number | null
+ * }
+ *
+ * A multi-song file's album is the file's own sub-tunes aggregated; otherwise
+ * the album is the containing directory. `album.status` is 'complete' only when
+ * every song in the scope was measured, so the client can fall back to track
+ * gain rather than apply a partial average.
+ */
+router.get('/loudness', cache1Hour, (req, res) => {
+  const normalizedPath = (req.query.path || '').replace(/^\/+/, '');
+  if (!normalizedPath) return res.json({ track: null, album: null, subtuneCount: null });
+  const subtune = Number.parseInt(req.query.subtune, 10) || 0;
+
+  const track = getLoudnessStmt.get(normalizedPath, subtune);
+  const file = getLoudnessFileStmt.get(normalizedPath);
+  let album = null;
+  if (file && file.subtune_count > 1 && Number.isFinite(file.lufs)) {
+    album = {
+      kind: 'file',
+      status: file.status === 'ok' ? 'complete' : 'partial',
+      lufs: file.lufs,
+      peakDb: file.peak_db,
+      trackCount: file.analyzed_subtunes,
+      durationSec: file.duration_sec,
+    };
+  } else {
+    const directory = getSongDirectoryStmt.get(normalizedPath);
+    const row = directory ? getLoudnessAlbumStmt.get(directory.directory_path) : null;
+    if (row && Number.isFinite(row.lufs)) {
+      album = {
+        kind: 'directory',
+        status: row.status === 'ok' ? 'complete' : 'partial',
+        lufs: row.lufs,
+        peakDb: row.peak_db,
+        trackCount: row.track_count,
+        durationSec: row.duration_sec,
+      };
+    }
+  }
+
+  res.json({
+    track: track ? {
+      path: track.path,
+      subtune: track.subtune,
+      status: track.status,
+      lufs: track.lufs,
+      peakDb: track.peak_db,
+      durationSec: track.duration_sec,
+      partial: !!track.partial,
+      engine: track.engine,
+    } : null,
+    album,
+    subtuneCount: file ? file.subtune_count || 1 : null,
+  });
 });
 
 router.post('/playback',

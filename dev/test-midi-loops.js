@@ -1401,6 +1401,55 @@ check('a bend authored only inside the region does not open the next pass', () =
     'and the region carries its own bend into the pass');
 });
 
+check('a forward seek restores a pitch bend from before the current position', () => {
+  // This is the state a seek carries forward, not the range it walks: the bend
+  // landed before `fromIdx`, but it is still the live state at the target.
+  const synth = stubSynth(true);
+  const p = makePlayer(synth);
+  p.load(parseBytes(buildMidi([
+    tempo(),
+    bendAt(0, 0, 0x0000),
+    noteOnAt(TPQ * 2, 0, 60), noteOffAt(TPQ * 2, 0, 60),
+    noteOnAt(TPQ * 4, 0, 64), noteOffAt(TPQ * 4, 0, 64),
+  ])), false);
+  p.play(() => {});
+  const bendIdx = p.events.findIndex(e => e.subtype === MIDIEvents.EVENT_MIDI_PITCH_BEND);
+  assert.ok(bendIdx >= 0, 'fixture has a bend');
+  p.position = bendIdx + 1;   // past the bend, before the target
+  p.elapsedTime = 1000;
+  synth.log.length = 0;
+  p.setPosition(1500);
+  assert.ok(synth.log.some(([kind, ch, value]) =>
+    kind === 'bend' && ch === 0 && value === 0),
+  'the bend before the seek target must be restored: ' + JSON.stringify(synth.log));
+});
+
+check('a loop that first programs a channel inside the region opens on program 0', () => {
+  // No intro and no program before the loop start: the authored opening state is
+  // MIDI's default program 0, but the synth is still holding the pass's program
+  // 40 at the seam. The wrap has to say program 0 before the region's own 40.
+  const synth = stubSynth(true);
+  const p = makePlayer(synth);
+  p.load(parseBytes(buildMidi([
+    tempo(), ccAt(0, 110, 0), programChangeAt(0, 0, 40),
+    noteOnAt(0, 0, 60), noteOffAt(TPQ, 0, 60), ccAt(TPQ, 111, 0),
+    noteOnAt(0, 0, 72), noteOffAt(TPQ, 0, 72),   // outro, so duration covers the seek
+  ])), false);
+  assert.ok(p.loop && p.loop.jumpMs === 0, `expected a loop from 0: ${JSON.stringify(p.loop)}`);
+  p.play(() => {});
+  p.setLooping(true);
+  p.setPosition(p.loop.endMs - 30);
+  synth.log.length = 0;
+  p.processPlaySynth(0, 2048);
+  const programs = synth.log.filter(([kind]) => kind === 'prog').map(([, ch, program]) => [ch, program]);
+  const defaultAt = programs.findIndex(([ch, program]) => ch === 0 && program === 0);
+  const authoredAt = programs.findIndex(([ch, program]) => ch === 0 && program === 40);
+  assert.ok(defaultAt !== -1,
+    'the wrap must restore the default program 0: ' + JSON.stringify(programs));
+  assert.ok(authoredAt === -1 || defaultAt < authoredAt,
+    'the default must land before the region programs 40: ' + JSON.stringify(programs));
+});
+
 check('the wrap opens in the loop start state, defaulting what it does not author', () => {
   // Both merges: the loop start is the wrap target only when the file is not expanded,
   // so the collection point is the same there and one region earlier when it is.

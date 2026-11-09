@@ -6,7 +6,7 @@ A file that holds several songs (NSF/NSFE, SID, GBS, AY) becomes a **song folder
 
 **Write-up with a video for every behaviour:** https://mdm.dj/dev/chip-player-js/subtunes-as-first-class/
 
-53 files, +4,893/−651. Three pieces are structural: the catalog schema, the client's song identity, and the loop wrappers. Nothing is taken out of `master`: the shared-file changes are additive, the two wrappers only add loop getters, and the one vendored engine touched is `mdxmini`.
+55 files, +4,900/−664 (two of them are upstream's own tests, adapted to the sub-tune contract). Three pieces are structural: the catalog schema, the client's song identity, and the loop wrappers. Nothing is taken out of `master`: the shared-file changes are additive, the two wrappers only add loop getters, and the one vendored engine touched is `mdxmini`.
 
 ## Suggested Review Phases
 
@@ -26,7 +26,7 @@ A file that holds several songs (NSF/NSFE, SID, GBS, AY) becomes a **song folder
 
 ## How I Checked It
 
-A local build of the real core (all engines), a catalog made of sample files (including all files `test:seo` exercise) built and browsed, and every format played and looped on the real engine, with the shared paths A/B'd against `master` for identical output. The same behaviour carries 290 checks in the harness I work with locally (not part of this PR for size). Every clip in the write-up was recorded with its own assertions, so each video always shows what it claims.
+A local build of the real core (all engines), a catalog made of sample files (including all files `test:seo` exercise) built and browsed, and every format played and looped on the real engine, with the shared paths A/B'd against `master` for identical output. The same behaviour carries 290 checks in the harness I work with locally (not part of this PR for size). Upstream's `tests/` suite arrived with the catch-up; this PR adapts two of those tests to the sub-tune contract (favorite removal keyed by `(path, sub-tune)`, and the lifecycle state fields) and changes nothing else in `tests/`. Every clip in the write-up was recorded with its own assertions, so each video always shows what it claims.
 
 ## Known Limits
 

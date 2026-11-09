@@ -153,9 +153,10 @@ export const summary = {
     },
     {
       id: 'tests',
-      title: 'Testing Is Not in the PR',
+      title: 'Tests: Upstream’s Suite, Plus Local Harnesses',
       body: [
-        '<strong>No test suite is included.</strong> This repo has no test runner, no CI and no <code>test</code> script, and the catalog is gitignored, so a tracked suite would silently skip about a third of its checks because there is no fixture. The harnesses behind every number on this page live in <code>dev/</code> and are not in the diff; they build their own minimal SMFs for the edge cases rather than depending on a catalog file. If you want them tracked, they can move to a <code>test/</code> directory running on <code>node --test</code> with no new dependencies.',
+        '<strong>The sub-tune work does not add a test suite.</strong> <code>master</code> now carries its own <code>tests/</code> suite and <code>npm run test:player-lifecycle</code>, so the PR only adapts two of those tests to the contract it changes: a favorite is keyed by <code>(path, sub-tune)</code>, and player state carries the sub-tune count/title. Those two files are the only test change in the diff.',
+        '<strong>Every number on this page still comes from the local harnesses in <code>dev/</code></strong>, which are not in the diff. They build their own minimal SMFs for the edge cases rather than depending on a catalog file; the catalog itself is gitignored, so a tracked copy of them would silently skip about a third of its checks. If you want them tracked, they can move under <code>test/</code> and use the same <code>node --test</code> pattern as upstream’s suite, with no new dependencies.',
       ],
     },
     {

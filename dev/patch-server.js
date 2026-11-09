@@ -64,13 +64,12 @@ const PATCHES = [
   {
     name: 'api-port-injection',
     required: true,
+    // Insert immediately before the send. Anchoring on the preceding template
+    // replacement line made this break when upstream changed it to a callback;
+    // the send is the stable point on both bases.
     find:
-      `    .replace(/__NOSCRIPT_CONTENT__/g, noscriptContent || defaultNoscript);\n` +
-      `\n` +
-      `  res.send(finalHtml);`,
+      `  res.send(finalHtml);\n`,
     replace:
-      `    .replace(/__NOSCRIPT_CONTENT__/g, noscriptContent || defaultNoscript);\n` +
-      `\n` +
       `  // Local dev: tell the client which port this server is on, so a second dev\n` +
       `  // tree is reachable without rebuilding the bundle. Production never takes\n` +
       `  // this branch, so the line is inert there.\n` +
@@ -81,7 +80,7 @@ const PATCHES = [
       `    );\n` +
       `  }\n` +
       `\n` +
-      `  res.send(finalHtml);`,
+      `  res.send(finalHtml);\n`,
   },
   {
     name: 'dev-no-cache',

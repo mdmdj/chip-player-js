@@ -609,6 +609,22 @@ check('a Web MIDI seek into the ending does not rewind either', () => {
     `the first callback must not rewind (${Math.round(wAt)} -> ${Math.round(w.elapsedTime)})`);
 });
 
+check('a pending bank change replays both bank bytes', () => {
+  // Only MSB changes after the program; the pair is still a new bank. Replaying
+  // MSB alone leaves a synth that resolves MSB/LSB on an incomplete bank.
+  const p = makePlayer(stubSynth(true));
+  p.load(parseBytes(buildMidi([
+    tempo(), ccAt(0, 0, 1), ccAt(0, 32, 2), programChangeAt(0, 0, 5),
+    ccAt(0, 0, 3), ccAt(0, 32, 2),   // MSB 1 -> 3, LSB unchanged
+    ccAt(TPQ, 110, 0), noteOnAt(0, 0, 60), noteOffAt(TPQ, 0, 60), cc(111),
+  ])), false);
+  const name = (e) => e.subtype === MIDIEvents.EVENT_MIDI_PROGRAM_CHANGE ? `P${e.channel}:${e.param1}`
+    : (e.param1 === 0 || e.param1 === 32) ? `B${e.channel}:${e.param1}=${e.param2}` : null;
+  const collected = p.collectStateEvents(0, p.loop.startMs).eventList.map(name).filter(Boolean);
+  assert.deepStrictEqual(collected, ['B0:0=1', 'B0:32=2', 'P0:5', 'B0:0=3', 'B0:32=2'],
+    'the pending pair keeps both latest bytes: ' + JSON.stringify(collected));
+});
+
 check('a wrap replays bank select before the program that uses it', () => {
   // Bank select applies to the *next* program change, and the collected list is in
   // first-seen order -- so a channel that picks a program before it ever picks a
@@ -628,8 +644,8 @@ check('a wrap replays bank select before the program that uses it', () => {
   const collected = p.collectStateEvents(0, p.loop.jumpMs).eventList.map(name).filter(Boolean);
   // Its own bank (bank 0, the default, said explicitly) then the program, then the
   // pending selection the file made afterwards.
-  assert.deepStrictEqual(collected, ['B0:0=0', 'B0:32=0', 'P0:2', 'B0:0=1'],
-    'the collector presents the program bank before the program, and the pending one after');
+  assert.deepStrictEqual(collected, ['B0:0=0', 'B0:32=0', 'P0:2', 'B0:0=1', 'B0:32=0'],
+    'the collector presents the program bank before the program, and the pending pair after');
   p.play(() => {});
   p.setLooping(true);
   p.setPosition(p.loop.endMs - 20);

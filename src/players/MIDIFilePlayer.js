@@ -601,7 +601,7 @@ MIDIPlayer.prototype.setPositionWebMidi = function (ms, eventList) {
   }
 };
 
-MIDIPlayer.prototype.collectStateEvents = function (fromIdx, toMs) {
+MIDIPlayer.prototype.collectStateEvents = function (fromIdx, toMs, fromMs = null) {
   // Newest program/controller state before toMs, for restoring the synth
   // after a transport move (seek or loop wrap). RPN/NRPN/data-entry
   // controllers must replay in order; everything else is last-wins.
@@ -624,16 +624,24 @@ MIDIPlayer.prototype.collectStateEvents = function (fromIdx, toMs) {
   // panic() centers the wheel, so a forward seek must restore the last bend before the
   // target even when that bend lives before `fromIdx`. The wrap collects from 0, so this
   // loop is empty there.
-  for (let i = 0; i < fromIdx; i++) {
-    const e = this.events[i];
-    if (e.subtype === MIDIEvents.EVENT_MIDI_CONTROLLER &&
-        (e.param1 === CC_BANK_SELECT_MSB || e.param1 === CC_BANK_SELECT_LSB)) {
-      noteBank(e.channel, e);
-    } else if (e.subtype === MIDIEvents.EVENT_MIDI_PITCH_BEND) {
-      eventMap[`${e.subtype}-${e.channel}`] = e;
+  let pos;
+  if (fromMs != null) {
+    // The caller supplies the state before `fromMs` separately (the expanded
+    // seam); collect only the events from that point on.
+    pos = this.events.findIndex(e => e.playTime >= fromMs);
+    if (pos < 0) pos = this.events.length;
+  } else {
+    for (let i = 0; i < fromIdx; i++) {
+      const e = this.events[i];
+      if (e.subtype === MIDIEvents.EVENT_MIDI_CONTROLLER &&
+          (e.param1 === CC_BANK_SELECT_MSB || e.param1 === CC_BANK_SELECT_LSB)) {
+        noteBank(e.channel, e);
+      } else if (e.subtype === MIDIEvents.EVENT_MIDI_PITCH_BEND) {
+        eventMap[`${e.subtype}-${e.channel}`] = e;
+      }
     }
+    pos = fromIdx;
   }
-  let pos = fromIdx;
   while (this.events[pos] && this.events[pos].playTime < toMs) {
     const event = this.events[pos];
     if (event.subtype === MIDIEvents.EVENT_MIDI_PROGRAM_CHANGE) {
@@ -700,7 +708,23 @@ MIDIPlayer.prototype.setPosition = function (ms) {
   this.panic(this.lastSendTimestamp + 10);
   this.activeNotes.clear();
   const fromIdx = ms < this.elapsedTime ? 0 : this.position;
-  const { eventList, endIdx } = this.collectStateEvents(fromIdx, ms);
+  let eventList;
+  let endIdx;
+  if (this.firstSeamMs != null && ms >= this.firstSeamMs) {
+    // In the expanded second pass the state at the loop start is a reset, not
+    // the state the first pass ended in. Apply that reset, then only the
+    // second-pass events up to the target -- a plain 0..target walk would
+    // restore the first pass's last program instead.
+    const start = this.collectStateEvents(0, this.loop.startMs).eventList;
+    this.addLoopStartPrograms(start);
+    const after = this.collectStateEvents(0, ms, this.firstSeamMs);
+    eventList = start.concat(after.eventList);
+    endIdx = after.endIdx;
+  } else {
+    const collected = this.collectStateEvents(fromIdx, ms);
+    eventList = collected.eventList;
+    endIdx = collected.endIdx;
+  }
 
   if (this.useWebMIDI) {
     this.setPositionWebMidi(ms, eventList);

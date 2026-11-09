@@ -1424,6 +1424,33 @@ check('a forward seek restores a pitch bend from before the current position', (
   'the bend before the seek target must be restored: ' + JSON.stringify(synth.log));
 });
 
+check('Web MIDI does not queue the expanded seam reset before its window', () => {
+  // The seam reset belongs to the same look-ahead budget as the events; queueing
+  // it from a long rest would leave program/controller messages in the output
+  // that a song switch cannot cancel.
+  const sends = [];
+  const p = new MIDIFilePlayer({
+    programChangeCb: () => {},
+    useWebMIDI: true,
+    output: { send: (message, timestamp) => sends.push([message, timestamp]) },
+    skipSilence: false,
+    sampleRate: 44100,
+    synth: stubSynth(true),
+  });
+  p.load(parseBytes(buildMidi([
+    tempo(), ccAt(0, 110, 0),
+    noteOnAt(0, 0, 60), ccAt(TPQ, 111, 0),
+  ])), true);
+  assert.ok(p.loop && p.firstSeamMs === p.loop.jumpMs, 'expected an expanded seam');
+  p.play(() => {});
+  sends.length = 0;
+  p.processPlay(); // at 0: only the first-pass events are inside BUFFER_AHEAD
+  const programs = sends.filter(([message]) => (message[0] & 0xf0) === 0xc0);
+  assert.strictEqual(programs.length, 0,
+    'no seam program reset may be queued before the look-ahead reaches it: '
+      + JSON.stringify(sends.map(([m, t]) => [m[0].toString(16), Math.round(t)])));
+});
+
 check('a loop that first programs a channel inside the region opens on program 0', () => {
   // No intro and no program before the loop start: the authored opening state is
   // MIDI's default program 0, but the synth is still holding the pass's program

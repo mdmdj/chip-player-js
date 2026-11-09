@@ -46,6 +46,7 @@ global.window = {
 };
 
 const { describeLocalSubtunes } = require(path.join(ROOT, 'src', 'localFilesSubtunes'));
+const LocalFilesManager = require(path.join(ROOT, 'src', 'LocalFilesManager')).default;
 
 let passed = 0;
 let failed = 0;
@@ -73,6 +74,21 @@ function nsf(trackCount, title) {
 const A = nsf(3, 'old');
 const B = nsf(7, 'new');
 const count = (m, p = 'local/rev.nsf') => (m.get(p) || []).length;
+
+checkAsync('readAll keeps the full file timestamp in mtimeMs', async () => {
+  // Date.parse(Date) drops milliseconds; the cache then cannot tell a
+  // same-size replacement inside one second from the file it replaced.
+  const mtime = new Date(1700000000123);
+  const fs = {
+    mkdirTree() {}, mount() {}, filesystems: { IDBFS: {} },
+    readdir: () => ['rev.nsf'],
+    stat: () => ({ size: 128, mtime }),
+  };
+  const manager = new LocalFilesManager(fs, 'local');
+  const [file] = manager.readAll();
+  assert.strictEqual(file.mtimeMs, 1700000000123,
+    'mtimeMs must preserve the Date milliseconds');
+});
 
 checkAsync('a same-size replacement inside one second is re-parsed', async () => {
   // Same path, same size, same whole second -- the listing's `mtime` cannot tell

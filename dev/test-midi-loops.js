@@ -1430,14 +1430,14 @@ check('a seek into the expanded second pass uses the seam state', () => {
   const synth = stubSynth(true);
   const p = makePlayer(synth);
   p.load(parseBytes(buildMidi([
-    tempo(), programChangeAt(0, 0, 0), noteOnAt(0, 0, 60), noteOffAt(TPQ, 0, 60),
+    tempo(), ccAt(0, 0, 100), programChangeAt(0, 0, 0), noteOnAt(0, 0, 60), noteOffAt(TPQ, 0, 60),
     ccAt(TPQ, 110, 0),             // loop start, 1000ms
     programChangeAt(TPQ, 0, 40),   // first pass, 1500ms
     noteOnAt(0, 0, 64), noteOffAt(TPQ, 0, 64),
     ccAt(TPQ, 111, 0),             // loop end / seam, 2500ms
     noteOnAt(TPQ * 2, 0, 72), noteOffAt(TPQ, 0, 72), // outro coverage
   ])), true);
-  assert.ok(p.loop && p.firstSeamMs === p.loop.jumpMs, 'expected an expanded seam');
+  assert.ok(p.loop && p.loop.jumpMs > 0, 'expected an expanded seam');
   p.play(() => {});
   synth.log.length = 0;
   p.setPosition(2800);
@@ -1446,6 +1446,11 @@ check('a seek into the expanded second pass uses the seam state', () => {
     'the seek must restore the loop-start program: ' + JSON.stringify(programs));
   assert.ok(!programs.some(([ch, program]) => ch === 0 && program === 40),
     'the first pass program must not survive into the second: ' + JSON.stringify(programs));
+  const bankAt = synth.log.findIndex(([kind, ch, cc, value]) =>
+    kind === 'cc' && ch === 0 && cc === 0 && value === 100);
+  const firstProgram = synth.log.findIndex(([kind]) => kind === 'prog');
+  assert.ok(bankAt !== -1 && (firstProgram === -1 || bankAt < firstProgram),
+    'the pre-loop bank must precede the restored program: ' + JSON.stringify(synth.log.slice(0, 12)));
 });
 
 check('Web MIDI does not queue the expanded seam reset before its window', () => {
@@ -1465,7 +1470,7 @@ check('Web MIDI does not queue the expanded seam reset before its window', () =>
     tempo(), ccAt(0, 110, 0),
     noteOnAt(0, 0, 60), ccAt(TPQ, 111, 0),
   ])), true);
-  assert.ok(p.loop && p.firstSeamMs === p.loop.jumpMs, 'expected an expanded seam');
+  assert.ok(p.loop && p.loop.jumpMs > 0, 'expected an expanded seam');
   p.play(() => {});
   sends.length = 0;
   p.processPlay(); // at 0: only the first-pass events are inside BUFFER_AHEAD
@@ -1513,9 +1518,9 @@ check('the expanded first seam restores the loop-start program', () => {
     programChangeAt(TPQ, 0, 40), noteOnAt(0, 0, 64), noteOffAt(TPQ, 0, 64),
     ccAt(TPQ, 111, 0),
   ])), true);
-  assert.ok(p.loop && p.firstSeamMs === p.loop.jumpMs, 'expected an expanded seam');
+  assert.ok(p.loop && p.loop.jumpMs > 0, 'expected an expanded seam');
   p.play(() => {});
-  p.setPosition(p.firstSeamMs - 30);
+  p.setPosition(p.loop.jumpMs - 30);
   synth.log.length = 0;
   p.processPlaySynth(0, 2048);
   const programs = synth.log.filter(([kind]) => kind === 'prog').map(([, ch, program]) => [ch, program]);

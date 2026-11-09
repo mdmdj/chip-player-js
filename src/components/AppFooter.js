@@ -49,8 +49,7 @@ function AppFooter(props) {
     handleCycleShuffle,
     handleTimeSliderChange,
     handleVolumeChange,
-    nextSong,
-    prevSong,
+
     sequencer,
     toggleInfo,
     togglePause,
@@ -101,7 +100,7 @@ function AppFooter(props) {
     <div className="AppFooter">
       <div className="AppFooter-main">
         <div className="AppFooter-top-row">
-          <button onClick={prevSong}
+          <button onClick={() => sequencer.prevSong()}
                   title="Previous"
                   className="box-button"
                   disabled={ejected}>
@@ -113,12 +112,13 @@ function AppFooter(props) {
                   disabled={ejected}>
             <span className={`inline-icon ${playPauseClass}`}/>
           </button>
-          <button onClick={nextSong}
+          <button onClick={() => sequencer.nextSong()}
                   title="Next"
                   className="box-button"
                   disabled={ejected}>
             <span className="inline-icon icon-next"/>
           </button>
+
           <button title="Cycle Repeat (repeat off, repeat all songs in the context, or repeat one song)"
                   style={{ marginLeft: 'auto' }}
                   className="AppFooter-repeat box-button" onClick={handleCycleRepeat}>

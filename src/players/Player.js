@@ -1,4 +1,6 @@
 import EventEmitter from 'events';
+import axios from 'redaxios';
+import { getMetadataUrlForFilepath, getUrlFromFilepath } from '../util';
 //
 // Player can be viewed as a state machine with
 // 3 states (playing, paused, stopped) and 5 transitions
@@ -31,6 +33,9 @@ export default class Player extends EventEmitter {
     this.core = core;
     this.paused = true;
     this.stopped = true;
+    this.pendingLoad = null;
+    this.catalogMeta = {};
+    this.catalogMetaPromise = null;
     this.fileExtensions = [];
     this.metadata = null;
     this.sampleRate = sampleRate;
@@ -93,16 +98,73 @@ export default class Player extends EventEmitter {
     return this.fileExtensions.indexOf(fileExtension.toLowerCase()) !== -1;
   }
 
+  // A new load replaces any pending work from the previous song. Async player
+  // operations must check the signal after each await before changing state.
+  beginLoad() {
+    if (this.pendingLoad) this.pendingLoad.abort();
+    this.pendingLoad = new AbortController();
+    this.catalogMeta = {};
+    this.catalogMetaPromise = null;
+    return this.pendingLoad.signal;
+  }
+
+  fetchCatalogMetadata(filepath, loadSignal = this.pendingLoad?.signal) {
+    if (!filepath || filepath.startsWith('local/')) {
+      return Promise.resolve({});
+    }
+    if (this.catalogMetaPromise) {
+      return this.catalogMetaPromise;
+    }
+    const metadataUrl = getMetadataUrlForFilepath(filepath);
+    this.catalogMetaPromise = axios.get(metadataUrl, {
+        fetch: (url, options) => fetch(url, { ...options, signal: loadSignal }),
+      })
+      .then(response => {
+        if (loadSignal?.aborted) return {};
+        const { imageUrl: imagePath, infoTexts = [], md5 = null, songId = null, soundfont = null } = response.data || {};
+        this.catalogMeta = {
+          imageUrl: imagePath ? getUrlFromFilepath(imagePath) : null,
+          infoTexts,
+          md5,
+          songId,
+          soundfont,
+        };
+        if (!this.stopped) {
+          this.emit('playerStateUpdate', this.getCatalogState());
+        }
+        return this.catalogMeta;
+      })
+      .catch(e => {
+        if (!loadSignal?.aborted) console.warn('Could not load metadata:', e);
+        return {};
+      });
+    return this.catalogMetaPromise;
+  }
+
   /**
    * @param {ArrayBuffer} data - File contents
    * @param {string} filename - Filename for metadata fallback
    */
-  loadData(data, filename) {
+  async loadData(data, filename) {
     throw Error('Player.loadData() must be implemented.');
   }
 
+  /**
+   * Stops audio rendering and resets playback state.
+   * Cancels in-flight loads and silences audio output.
+   */
   stop() {
-    throw Error('Player.stop() must be implemented.');
+    if (this.pendingLoad) {
+      this.pendingLoad.abort();
+      this.pendingLoad = null;
+    }
+    this.catalogMeta = {};
+    this.catalogMetaPromise = null;
+    this.stopped = true;
+    this.paused = true;
+    this.silenceSamplesRemaining = 0;
+    this.onSilenceEnd = null;
+    this.trailingSilenceSamples = 0;
   }
 
   isPlaying() {
@@ -147,20 +209,6 @@ export default class Player extends EventEmitter {
     console.debug(`Player.seekMs() not implemented for ${this.constructor.name}.`);
   }
 
-  // Deprecated in favor of getVoiceGroups
-  getVoiceName(index) {
-    return 'Voice ' + (index + 1);
-  }
-
-  // Deprecated in favor of getVoiceGroups
-  getVoiceNames() {
-    const names = [];
-    for (let i = 0; i < this.getVoiceMask().length; i++) {
-      names.push(this.getVoiceName(i));
-    }
-    return names;
-  }
-
   getVoiceMask() {
     console.debug(`Player.getVoiceMask() not implemented for ${this.constructor.name}.`);
     return [];
@@ -200,9 +248,16 @@ export default class Player extends EventEmitter {
     },
   ]
    */
-  // a nice replacement for getNumVoices and getVoiceName.
   getVoiceGroups() {
-    return [];
+    const mask = this.getVoiceMask();
+    if (!mask || mask.length === 0) return [];
+    return [{
+      name: 'Voices',
+      voices: mask.map((_, i) => ({
+        idx: i,
+        name: `Voice ${i + 1}`,
+      })),
+    }];
   }
 
   getNumSubtunes() {
@@ -218,10 +273,11 @@ export default class Player extends EventEmitter {
   playSubtune() {}
 
   getMetadata() {
+    const metadata = this.metadata || { title: null, author: null };
     return {
-      title: null,
-      author: null,
-    }
+      ...metadata,
+      imageUrl: metadata.imageUrl || this.catalogMeta?.imageUrl || null,
+    };
   }
 
   getInfoTexts() {
@@ -283,10 +339,19 @@ export default class Player extends EventEmitter {
     return paramValues;
   }
 
+  getCatalogState() {
+    return {
+      metadata: this.getMetadata(),
+      infoTexts: [...this.getInfoTexts(), ...(this.catalogMeta?.infoTexts || [])],
+      md5: this.catalogMeta?.md5 || null,
+      songId: this.catalogMeta?.songId || null,
+    };
+  }
+
   getBasePlayerState() {
     this.durationMs = this.getDurationMs() || 0;
     return {
-      metadata: this.getMetadata(),
+      ...this.getCatalogState(),
       durationMs: this.durationMs,
       positionMs: this.getPositionMs(),
       numSubtunes: this.getNumSubtunes(),
@@ -295,11 +360,8 @@ export default class Player extends EventEmitter {
       paramValues: this.getParamValues(),
       tempo: this.getTempo(),
       voiceMask: this.getVoiceMask(),
-      voiceNames: this.getVoiceNames(),
       voiceGroups: this.getVoiceGroups(),
-      infoTexts: this.getInfoTexts(),
-      isStopped: this.stopped,
-      isPaused: this.paused,
+      paused: this.paused,
     };
   }
 
@@ -379,7 +441,10 @@ export default class Player extends EventEmitter {
   handleSongEnd(onSilenceEnd = null) {
     // A player plays exactly one song and then stops. Sub-tune navigation is
     // the sequencer's job: each sub-tune is its own context entry.
-    const endAction = onSilenceEnd || (() => this.stop());
+    const endAction = onSilenceEnd || (() => {
+      this.stop();
+      this.emit('playerSongEnd');
+    });
 
     if (this.silenceDuration >= 0) {
       const trailingSilenceSec = this.trailingSilenceSamples / this.sampleRate;
@@ -455,6 +520,7 @@ export default class Player extends EventEmitter {
             cb();
           } else {
             this.stop();
+            this.emit('playerSongEnd');
           }
         }
       }

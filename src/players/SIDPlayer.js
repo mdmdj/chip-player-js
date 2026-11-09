@@ -43,10 +43,6 @@ export default class SIDPlayer extends Player {
     this.playerKey = 'sid';
     this.name = 'SID Player';
     this.speed = 1;
-    // Bumped per load. getSidMetadata() below is a network fetch, so a slower
-    // older load can resume after a newer selection has already started and
-    // would otherwise reset the shared core to its own sub-tune and resume it.
-    this.loadGeneration = 0;
     this.fileExtensions = fileExtensions;
     this.bufferL = this.core._malloc(this.bufferSize * 4);
     this.bufferR = this.core._malloc(this.bufferSize * 4);
@@ -78,7 +74,7 @@ export default class SIDPlayer extends Player {
     super.setParameter(id, value);
   }
 
-  getSidMetadata(md5, generation) {
+  getSidMetadata(md5, loadSignal) {
     console.log("SIDPlayer: Fetching metadata for SID:", md5);
     const metadataUrl = `${API_BASE}/hvsc?sidHash=${md5}`;
 
@@ -88,11 +84,7 @@ export default class SIDPlayer extends Player {
     return axios.get(metadataUrl, {
       validateStatus: status => status === 404 || (status >= 200 && status < 300)
     }).then(response => {
-      if (response.status === 404) return;
-      // A newer load or a suspend may own the core/fields by now. These are
-      // shared per player, so an older response must be checked here, before it
-      // assigns; the check after the await in loadData runs too late.
-      if (generation !== this.loadGeneration) return;
+      if (loadSignal?.aborted || response.status === 404) return;
       console.log('SIDPlayer: Got metadata for SID:', response.data);
       const { lengths, name, author, copyright, image_url } = response.data;
       this.subtuneDurations = lengths.split(' ').map(parseSongLength);
@@ -110,20 +102,15 @@ export default class SIDPlayer extends Player {
       // in-time path does not emit a second state here.
       if (!this.stopped) {
         this.resetEndDetector();
-        this.emit('playerStateUpdate', {
-          ...this.getBasePlayerState(),
-          isStopped: false,
-        });
+        this.emit('playerStateUpdate', this.getBasePlayerState());
       }
     }).catch(e => {
-      console.warn('SIDPlayer: HVSC metadata unavailable, using defaults.', e?.message);
+      if (!loadSignal?.aborted) console.warn('SIDPlayer: HVSC metadata unavailable, using defaults.', e?.message);
     });
   }
 
   async loadData(data, filepath, persistedSettings, subtune = 0) {
-    // Claim this load. Anything still awaiting below checks it before touching
-    // the shared core, so a superseded load cannot restart the previous song.
-    const generation = ++this.loadGeneration;
+    const loadSignal = this.pendingLoad?.signal || this.beginLoad();
     // Hold any seek asked for while the metadata fetch below is in flight: this
     // load re-selects the sub-tune when it resumes, which would discard it --
     // and anything still held from an earlier load is dropped with it.
@@ -156,12 +143,12 @@ export default class SIDPlayer extends Player {
     const ptr = this.core._sid_get_song_md5();
     const md5 = this.core.UTF8ToString(ptr);
     await Promise.race([
-      this.getSidMetadata(md5, generation),
+      this.getSidMetadata(md5, loadSignal),
       new Promise(resolve => setTimeout(resolve, METADATA_TIMEOUT_MS)),
     ]);
     // A newer load took over while we fetched; it owns the core and the state
     // emit now, so stop here rather than resuming this song over the top of it.
-    if (generation !== this.loadGeneration) return;
+    if (loadSignal.aborted) return;
 
     this.core._sid_set_voice_mask(0);
     // Start on the requested sub-tune (each sub-tune is its own SongRef).
@@ -169,10 +156,7 @@ export default class SIDPlayer extends Player {
     this.resolveParamValues(persistedSettings);
     this.setTempo(persistedSettings.tempo || 1);
     this.resume();
-    this.emit('playerStateUpdate', {
-      ...this.getBasePlayerState(),
-      isStopped: false
-    });
+    this.emit('playerStateUpdate', this.getBasePlayerState());
   }
 
   processAudioInner(channels) {
@@ -263,10 +247,6 @@ export default class SIDPlayer extends Player {
     return this.subtuneDurations[this.getSubtune()];
   }
 
-  getMetadata() {
-    return this.metadata;
-  }
-
   isPlaying() {
     return !this.isPaused();
   }
@@ -303,19 +283,9 @@ export default class SIDPlayer extends Player {
     this.muteAudioDuringCall(this.audioNode, () => this.core._sid_set_position_ms(seekMs));
   }
 
-  // Bumping the generation invalidates an in-flight loadData: a newer song
-  // owns the core now, and a format switch reaches here (suspend) rather than
-  // this player's loadData, so the generation check inside loadData alone
-  // would let a superseded SID resume over the new song.
-  suspend() {
-    super.suspend();
-    this.loadGeneration++;
-  }
-
   stop() {
-    this.suspend();
+    super.stop();
     this.core._sid_stop();
     console.debug('SIDPlayer.stop()');
-    this.emit('playerStateUpdate', { isStopped: true });
   }
 }

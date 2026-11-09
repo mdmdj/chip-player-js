@@ -229,7 +229,7 @@ function TopCharts(props) {
           : filename;
         const href = item.path ? pathJoin(CATALOG_PREFIX, encodeURIComponent(item.path)) : null;
         const subtuneParam = subtune ? `&subtune=${subtune}` : '';
-        const url = item.song_id ? `/?play=${encodeURIComponent(item.song_id)}${subtuneParam}` : href;
+        const url = item.songId ? `/?play=${encodeURIComponent(item.songId)}${subtuneParam}` : href;
 
         return {
           ...item,
@@ -320,7 +320,7 @@ function TopCharts(props) {
 
                 return (
                   <div
-                    key={`${section.key}-${item.song_id || item.path}-${item.idx}`}
+                    key={`${section.key}-${item.songId || item.path}-${item.idx}`}
                     className={classNames.join(' ')}
                     onDoubleClick={handlePlayTrack(item.idx)}
                   >

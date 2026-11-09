@@ -53,6 +53,7 @@ export default class VGMPlayer extends Player {
   }
 
   async loadData(data, filepath, persistedSettings) {
+    const loadSignal = this.pendingLoad?.signal || this.beginLoad();
     const dataPtr = this.copyToHeap(data);
     const err = this.core._lvgm_load_data(this.vgmCtx, dataPtr, data.byteLength);
     this.core._free(dataPtr);
@@ -105,6 +106,7 @@ export default class VGMPlayer extends Player {
       // anything held from a previous load.
       this.beginAsyncLoad();
       await ensureEmscFileWithUrl(this.core, YRW801_ROM_PATH, `${SOUNDFONT_URL_PATH}/yrw801.rom`);
+      if (loadSignal.aborted) return;
     }
 
     this.core._lvgm_start(this.vgmCtx);
@@ -119,10 +121,7 @@ export default class VGMPlayer extends Player {
     this.core._lvgm_set_indefinite_playback(this.vgmCtx, !!this.params.indefinitePlayback);
     this.applyLoopCount(false);
     this.resume();
-    this.emit('playerStateUpdate', {
-      ...this.getBasePlayerState(),
-      isStopped: false
-    });
+    this.emit('playerStateUpdate', this.getBasePlayerState());
   }
 
   processAudioInner(channels) {
@@ -245,10 +244,6 @@ export default class VGMPlayer extends Player {
     return voiceGroups;
   }
 
-  getMetadata() {
-    return this.metadata;
-  }
-
   isPlaying() {
     return !this.isPaused();
   }
@@ -333,11 +328,6 @@ export default class VGMPlayer extends Player {
     return this.looping || !!this.params.indefinitePlayback || !!this.durationExtended;
   }
 
-  getVoiceName(index) {
-    // TODO: Add voice chip map like github.com/mmontag/chip-player-js/commit/a698e9b
-    if (this.vgmCtx) return this.core.UTF8ToString(this.core._lvgm_get_voice_name(this.vgmCtx, index));
-  }
-
   getVoiceMask() {
     if (this.vgmCtx) {
       const bitmask = this.core._lvgm_get_voice_mask(this.vgmCtx);
@@ -363,10 +353,9 @@ export default class VGMPlayer extends Player {
   }
 
   stop() {
-    this.suspend();
+    super.stop();
     if (this.vgmCtx) this.core._lvgm_stop(this.vgmCtx);
     console.debug('VGMPlayer.stop()');
-    this.emit('playerStateUpdate', { isStopped: true });
   }
 
   setParameter(id, value) {

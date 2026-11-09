@@ -29,7 +29,7 @@ Module.prototype._compile = function (content, filename) {
 
 const {
   songRef, songRefKey, songRefsEqual, songRefListsEqual, getMetadataUrlForFilepath, subtuneLabel,
-  listingToContext,
+  listingToContext, encodeFilepathSegments, getUrlFromFilepath,
 } = require('../src/util');
 
 const NSFE = 'famicompo/Castlevania III - The Dracula X Chronicles/09 Big Bat Man.nsf';
@@ -114,6 +114,13 @@ check('list equality is by content and order (the sequencer copies its context)'
   assert.ok(!songRefListsEqual(a, copy.slice(0, 2)), 'different lengths differ');
   assert.ok(songRefListsEqual([], []));
   assert.ok(!songRefListsEqual(null, []), 'null is not an empty list');
+});
+
+check('browse and share paths escape # and % per segment', () => {
+  // A bare '#' in a filename becomes a URL fragment in history/share links, so
+  // the song-folder landing must encode segments the same way Browse rows do.
+  assert.strictEqual(encodeFilepathSegments('Game #2/100%.nsf'), 'Game%20%232/100%25.nsf');
+  assert.ok(getUrlFromFilepath('Game #2.nsf').endsWith('/Game%20%232.nsf'));
 });
 
 check('the metadata URL carries the sub-tune only when asked', () => {

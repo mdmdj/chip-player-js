@@ -1450,6 +1450,32 @@ check('a loop that first programs a channel inside the region opens on program 0
     'the default must land before the region programs 40: ' + JSON.stringify(programs));
 });
 
+check('the expanded first seam restores the loop-start program', () => {
+  // The two-pass list crosses its first seam before the player ever calls
+  // loopJump(): the pass left program 40 selected, and the replayed loop has no
+  // program at its start, so the seam has to restore the default 0 itself.
+  const synth = stubSynth(true);
+  const p = makePlayer(synth);
+  p.load(parseBytes(buildMidi([
+    tempo(), ccAt(0, 110, 0),
+    noteOnAt(0, 0, 60), noteOffAt(TPQ, 0, 60),
+    programChangeAt(TPQ, 0, 40), noteOnAt(0, 0, 64), noteOffAt(TPQ, 0, 64),
+    ccAt(TPQ, 111, 0),
+  ])), true);
+  assert.ok(p.loop && p.firstSeamMs === p.loop.jumpMs, 'expected an expanded seam');
+  p.play(() => {});
+  p.setPosition(p.firstSeamMs - 30);
+  synth.log.length = 0;
+  p.processPlaySynth(0, 2048);
+  const programs = synth.log.filter(([kind]) => kind === 'prog').map(([, ch, program]) => [ch, program]);
+  const defaultAt = programs.findIndex(([ch, program]) => ch === 0 && program === 0);
+  const authoredAt = programs.findIndex(([ch, program]) => ch === 0 && program === 40);
+  assert.ok(defaultAt !== -1,
+    'the first expanded pass must restore program 0: ' + JSON.stringify(programs));
+  assert.ok(authoredAt === -1 || defaultAt < authoredAt,
+    'the default must land before the replayed region programs 40: ' + JSON.stringify(programs));
+});
+
 check('the wrap opens in the loop start state, defaulting what it does not author', () => {
   // Both merges: the loop start is the wrap target only when the file is not expanded,
   // so the collection point is the same there and one region earlier when it is.

@@ -1,10 +1,171 @@
 import MIDIEvents from './MIDIEvents';
 import MIDIFile from './MIDIFile';
 import { endLayersFor, songEndMs } from './endRule';
-const { EVENT_MIDI, EVENT_MIDI_CONTROLLER, EVENT_MIDI_NOTE_ON, EVENT_MIDI_NOTE_OFF } = MIDIEvents;
+const {
+  EVENT_MIDI, EVENT_MIDI_CONTROLLER, EVENT_MIDI_NOTE_ON, EVENT_MIDI_NOTE_OFF,
+  EVENT_MIDI_PROGRAM_CHANGE, EVENT_MIDI_PITCH_BEND,
+} = MIDIEvents;
 
 const CC_64_SUSTAIN = 64;
 const CC_66_SOSTENUTO = 66;
+const CC_BANK_SELECT_MSB = 0;
+const CC_BANK_SELECT_LSB = 32;
+const SEQUENCED_CONTROLLERS = [6, 38, 96, 97, 98, 99, 100, 101];
+
+// GM's default for every controller that has one (RP-015), used at a loop seam: a
+// controller the region writes but the loop start does not has no authored value to
+// restore, so the finished pass's last value would be the next pass's opening one.
+// Volume, pan, expression and the modulation/depth family are the audible ones. The
+// pedals are released separately, because a note whose NOTE_OFF already ran keeps
+// sounding under them; the sequenced RPN/NRPN family is meaningless without the pair it
+// addresses, so it is left to the file.
+export const GM_CC_DEFAULTS = {
+  1: 0,     // modulation
+  5: 0,     // portamento time
+  7: 100,   // volume
+  8: 64,    // balance
+  10: 64,   // pan
+  11: 127,  // expression
+  64: 0,    // damper
+  65: 0,    // portamento on/off
+  66: 0,    // sostenuto
+  67: 0,    // soft
+  71: 64, 72: 64, 73: 64, 74: 64, 75: 64, 76: 64, 77: 64, 78: 64,   // sound controllers
+  84: 0,    // portamento control
+  91: 40,   // reverb send
+  92: 0,    // tremolo
+  93: 0,    // chorus send
+  94: 0,    // celeste
+  95: 0,    // phaser
+};
+
+const usedChannelSet = (usedChannels) => {
+  if (usedChannels instanceof Set) return usedChannels;
+  const set = new Set();
+  for (let i = 0; i < (usedChannels?.length || 0); i++) {
+    if (usedChannels[i]) set.add(i);
+  }
+  return set;
+};
+
+// A channel the file never programs before the loop starts is on the MIDI default
+// program 0 at that point, but the synth is still holding whatever patch the finished
+// pass left. Say program 0 out loud for those channels (on their bank, or bank 0 when
+// the file never selected one before the loop).
+export function addLoopStartPrograms(eventList, usedChannels = []) {
+  const used = usedChannelSet(usedChannels);
+  const programChannels = new Set();
+  const bankChannels = new Set();
+  for (const event of eventList) {
+    if (event.subtype === EVENT_MIDI_PROGRAM_CHANGE) {
+      programChannels.add(event.channel);
+    } else if (event.subtype === EVENT_MIDI_CONTROLLER &&
+               (event.param1 === CC_BANK_SELECT_MSB || event.param1 === CC_BANK_SELECT_LSB)) {
+      bankChannels.add(event.channel);
+    }
+  }
+  const bankSelect = (channel, param1, param2) => ({
+    type: EVENT_MIDI,
+    channel, param1, param2, subtype: EVENT_MIDI_CONTROLLER, delta: 0,
+  });
+  for (const channel of used) {
+    if (programChannels.has(channel)) continue;
+    if (!bankChannels.has(channel)) {
+      eventList.push(bankSelect(channel, CC_BANK_SELECT_MSB, 0));
+      eventList.push(bankSelect(channel, CC_BANK_SELECT_LSB, 0));
+    }
+    eventList.push({
+      type: EVENT_MIDI,
+      channel, param1: 0, subtype: EVENT_MIDI_PROGRAM_CHANGE, delta: 0,
+    });
+  }
+  return eventList;
+}
+
+// The state a loop's resumed pass opens in, built from the file's own events
+// before the loop start. This is the same snapshot loopJump() applies at a live
+// wrap, materialised into the expanded two-pass list so playback, seeks and
+// Web MIDI scheduling all consume one representation.
+export function loopStartStateEvents(events, startMs, endMs, usedChannels = []) {
+  const eventMap = {};
+  const sequenced = [];
+  const bankInForce = new Map();
+  const bankAtProgram = new Map();
+  const noteBank = (channel, event) => {
+    const b = bankInForce.get(channel) || {};
+    b[event.param1] = event;
+    bankInForce.set(channel, b);
+  };
+  const beforeCcs = new Set();
+  for (const event of events) {
+    if (event.playTime >= startMs) break;
+    if (event.type !== EVENT_MIDI) continue;
+    if (event.subtype === EVENT_MIDI_PROGRAM_CHANGE) {
+      eventMap[`${event.subtype}-${event.channel}`] = event;
+      bankAtProgram.set(event.channel, Object.assign({}, bankInForce.get(event.channel)));
+    } else if (event.subtype === EVENT_MIDI_PITCH_BEND) {
+      eventMap[`${event.subtype}-${event.channel}`] = event;
+    } else if (event.subtype === EVENT_MIDI_CONTROLLER) {
+      beforeCcs.add(event.channel + ':' + event.param1);
+      if (SEQUENCED_CONTROLLERS.includes(event.param1)) {
+        sequenced.push(event);
+      } else {
+        eventMap[`${event.subtype}-${event.channel}-${event.param1}`] = event;
+        if (event.param1 === CC_BANK_SELECT_MSB || event.param1 === CC_BANK_SELECT_LSB) {
+          noteBank(event.channel, event);
+        }
+      }
+    }
+  }
+  const collected = Object.values(eventMap);
+  const isBankSelect = (e) => e.subtype === EVENT_MIDI_CONTROLLER &&
+    (e.param1 === CC_BANK_SELECT_MSB || e.param1 === CC_BANK_SELECT_LSB);
+  const isProgram = (e) => e.subtype === EVENT_MIDI_PROGRAM_CHANGE;
+  const bankSelect = (channel, param1, param2) => ({
+    type: EVENT_MIDI,
+    channel, param1, param2, subtype: EVENT_MIDI_CONTROLLER, delta: 0,
+  });
+  const banksForPrograms = [];
+  for (const [channel, b] of bankAtProgram) {
+    banksForPrograms.push(bankSelect(channel, CC_BANK_SELECT_MSB,
+      b[CC_BANK_SELECT_MSB] ? b[CC_BANK_SELECT_MSB].param2 : 0));
+    banksForPrograms.push(bankSelect(channel, CC_BANK_SELECT_LSB,
+      b[CC_BANK_SELECT_LSB] ? b[CC_BANK_SELECT_LSB].param2 : 0));
+  }
+  const programs = collected.filter(isProgram);
+  const pendingBanks = collected.filter((e) => {
+    if (!isBankSelect(e)) return false;
+    const b = bankAtProgram.get(e.channel);
+    if (!b) return true;
+    return e.param2 !== (b[e.param1] ? b[e.param1].param2 : 0);
+  });
+  const rest = collected.filter((e) => !isBankSelect(e) && !isProgram(e));
+  const used = usedChannelSet(usedChannels);
+  const centers = [];
+  for (const channel of used) {
+    centers.push({ type: EVENT_MIDI, subtype: EVENT_MIDI_PITCH_BEND, channel, param1: 0, param2: 64, delta: 0 });
+  }
+  // A controller written only inside the region has no authored start value; use
+  // its GM default, exactly as the live wrap does.
+  const regionCcs = new Map();
+  for (const event of events) {
+    if (event.playTime >= endMs) break;
+    if (event.playTime < startMs || event.type !== EVENT_MIDI ||
+        event.subtype !== EVENT_MIDI_CONTROLLER) continue;
+    regionCcs.set(event.channel + ':' + event.param1, [event.channel, event.param1]);
+  }
+  const gmDefaults = [];
+  for (const [key, [channel, param1]] of regionCcs) {
+    if (!used.has(channel) || beforeCcs.has(key) || GM_CC_DEFAULTS[param1] === undefined) continue;
+    gmDefaults.push({
+      type: EVENT_MIDI, subtype: EVENT_MIDI_CONTROLLER,
+      channel, param1, param2: GM_CC_DEFAULTS[param1], delta: 0,
+    });
+  }
+  const state = banksForPrograms.concat(programs, pendingBanks, rest, sequenced);
+  addLoopStartPrograms(state, used);
+  return centers.concat(state, gmDefaults);
+}
 // Loop-point controllers. N64 marks a CC102 (start) / CC103 (end) pair on
 // every track (CC104/105 counts are ignored -- Repeat One loops forever and
 // repeat-off plays the two expanded passes, the two-pass libvgm compromise);
@@ -416,9 +577,22 @@ MIDIFile.prototype.getLoopedEvents = function (tracks, loopCount = 2, range = nu
   // the song, highlighting the whole file as the loop region.
   const expandLoop = range != null && format !== 2;
   const channelsByTrack = {};
+  const noteChannels = new Set();
+  const passStarts = [];
   const capturePush = (trackIdx, srcElapsedLoops, ev) => {
     if (ev.channel !== undefined) {
       (channelsByTrack[trackIdx] || (channelsByTrack[trackIdx] = new Set())).add(ev.channel);
+    }
+    if (expandLoop && ev.type === EVENT_MIDI &&
+        ev.subtype === EVENT_MIDI_NOTE_ON && ev.param2 > 0) {
+      noteChannels.add(ev.channel);
+    }
+    // The merged list's pass boundary is where the replay starts. Remember the
+    // index before the first event of each pass so the loop-start snapshot can
+    // be spliced in ahead of it. A seam release from EventIterator has already
+    // been pushed by then, so the snapshot lands after the note/pedal cuts.
+    if (expandLoop && srcElapsedLoops > 0 && passStarts[srcElapsedLoops] == null) {
+      passStarts[srcElapsedLoops] = combinedEvents.length;
     }
     if (!expandLoop) return;
     if (loopStartMs == null && isLoopEvent(ev) &&
@@ -604,6 +778,21 @@ MIDIFile.prototype.getLoopedEvents = function (tracks, loopCount = 2, range = nu
   // file carries loop markers. The expanded list is a different animal -- the
   // iterator replays the body and the seam owns the crossings -- so it keeps its
   // own contract rather than this one.
+  // Materialise the loop-start state at every expanded pass boundary. Seeks,
+  // synth playback and Web MIDI scheduling all read this one list, so the seam
+  // is restored in one place instead of by player timers.
+  if (expandLoop && loopStartMs != null && loopEndMs != null && loopEndMs > loopStartMs) {
+    const state = loopStartStateEvents(combinedEvents, loopStartMs, loopEndMs, noteChannels);
+    const length = loopEndMs - loopStartMs;
+    for (let pass = passStarts.length - 1; pass >= 1; pass--) {
+      const idx = passStarts[pass];
+      if (idx == null) continue;
+      const seamMs = loopEndMs + (pass - 1) * length;
+      const block = state.map(e => ({ ...e, playTime: seamMs, delta: 0 }));
+      combinedEvents.splice(idx, 0, ...block);
+    }
+  }
+
   if (loopCount === 1) insertTrackEndReleases(combinedEvents);
 
   finishEventList(combinedEvents, layers, channelsByTrack);

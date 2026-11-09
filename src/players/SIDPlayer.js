@@ -29,7 +29,10 @@ export default class SIDPlayer extends Player {
   paramDefs = [
     {
       id: 'detectSongEnd',
-      label: (<span>Detect Song End While <span className='inline-icon icon-repeat'/>One</span>),
+      label: React.createElement('span', null,
+        'Detect Song End While ',
+        React.createElement('span', { className: 'inline-icon icon-repeat' }),
+        'One'),
       type: 'toggle',
       hint: DETECT_SONG_END_HINT,
       defaultValue: true,
@@ -102,7 +105,11 @@ export default class SIDPlayer extends Player {
       // in-time path does not emit a second state here.
       if (!this.stopped) {
         this.resetEndDetector();
-        this.emit('playerStateUpdate', this.getBasePlayerState());
+        this.durationMs = this.subtuneDurations[this.core._sid_get_subtune?.() || 0];
+        this.emit('playerStateUpdate', {
+          metadata: this.getMetadata(),
+          durationMs: this.durationMs,
+        });
       }
     }).catch(e => {
       if (!loadSignal?.aborted) console.warn('SIDPlayer: HVSC metadata unavailable, using defaults.', e?.message);

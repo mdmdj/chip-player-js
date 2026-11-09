@@ -25,7 +25,10 @@ export default class N64Player extends Player {
     },
     {
       id: 'detectSongEnd',
-      label: (<span>Detect Song End While <span className='inline-icon icon-repeat'/>One</span>),
+      label: React.createElement('span', null,
+        'Detect Song End While ',
+        React.createElement('span', { className: 'inline-icon icon-repeat' }),
+        'One'),
       type: 'toggle',
       hint: DETECT_SONG_END_HINT,
       defaultValue: true,

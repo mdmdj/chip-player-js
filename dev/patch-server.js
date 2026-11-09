@@ -65,11 +65,11 @@ const PATCHES = [
     name: 'api-port-injection',
     required: true,
     find:
-      `    .replace(/__NOSCRIPT_CONTENT__/g, noscriptContent || defaultNoscript);\n` +
+      `    .replace(/__NOSCRIPT_CONTENT__/g, () => noscriptContent || defaultNoscript);\n` +
       `\n` +
       `  res.send(finalHtml);`,
     replace:
-      `    .replace(/__NOSCRIPT_CONTENT__/g, noscriptContent || defaultNoscript);\n` +
+      `    .replace(/__NOSCRIPT_CONTENT__/g, () => noscriptContent || defaultNoscript);\n` +
       `\n` +
       `  // Local dev: tell the client which port this server is on, so a second dev\n` +
       `  // tree is reachable without rebuilding the bundle. Production never takes\n` +

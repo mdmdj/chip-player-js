@@ -27,7 +27,11 @@ Module.prototype._compile = function (content, filename) {
   return originalCompile.call(this, content, filename);
 };
 
+// Player.js touches window at module scope (requestIdleCallback shim).
+global.window = global.window || {};
+
 const Sequencer = require('../src/Sequencer').default;
+const Player = require('../src/players/Player').default;
 
 let passed = 0;
 let failed = 0;
@@ -53,23 +57,28 @@ class FakePlayer extends EventEmitter {
   }
   canPlay() { return true; }
   setLooping() {}
-  suspend() {}
+  // A load claims a cancellation signal (the base Player's beginLoad).
+  beginLoad() {
+    this.loadSignal = { aborted: false };
+    return this.loadSignal;
+  }
+  fetchCatalogMetadata() {}
   stop() {
+    // Stopping is not an end: the sequencer stops the player when switching
+    // songs. A real end announces itself with 'playerSongEnd'.
     this.stopped = true;
-    this.emit('playerStateUpdate', { isStopped: true });
   }
   getMetadata() { return {}; }
   getDurationMs() { return 1000; }
   getPositionMs() { return 0; }
   getTempo() { return 1; }
   getVoiceMask() { return []; }
-  getVoiceNames() { return []; }
   getVoiceGroups() { return []; }
   async loadData(data, filepath, persistedSettings, subtune = 0) {
     this.loads.push(`${filepath}#${subtune}`);
     this.stopped = false;
-    this.emit('playerStateUpdate', { isStopped: false, numSubtunes: 1, subtune });
-    this.stop();
+    this.emit('playerStateUpdate', { paused: false, numSubtunes: 1, subtune });
+    this.emit('playerSongEnd');
   }
 }
 
@@ -83,10 +92,11 @@ class ManualPlayer extends FakePlayer {
   async loadData(data, filepath, persistedSettings, subtune = 0) {
     this.loads.push(`${filepath}#${subtune}`);
     this.stopped = false;
-    this.emit('playerStateUpdate', { isStopped: false, numSubtunes: 1, subtune });
+    this.emit('playerStateUpdate', { paused: false, numSubtunes: 1, subtune });
   }
   endNow() {
-    this.stop();
+    this.stopped = true;
+    this.emit('playerSongEnd');
   }
 }
 
@@ -96,6 +106,25 @@ function makeSequencer(players) {
 }
 
 console.log('Sequencer sub-tune navigation (fake player)');
+check('a held seek is dropped when the load is replaced or the player stops', () => {
+  // The OPL4 path holds a seek until the first rendered block. If the user
+  // switches songs while the ROM download is pending, neither the old seek nor
+  // the async flag may reach the next song's first block.
+  const p = new Player({}, 44100);
+  p.beginLoad();
+  p.beginAsyncLoad();
+  assert.strictEqual(p.deferSeekUntilPlaying(1234), true);
+  p.beginLoad(); // replaced without a stop
+  assert.strictEqual(p.loadingAsync, false, 'beginLoad drops the async flag');
+  assert.strictEqual(p.deferredSeekMs, null, 'beginLoad drops the held seek');
+
+  p.beginAsyncLoad();
+  assert.strictEqual(p.deferSeekUntilPlaying(42), true);
+  p.stop();
+  assert.strictEqual(p.loadingAsync, false, 'stop drops the async flag');
+  assert.strictEqual(p.deferredSeekMs, null, 'stop drops the held seek');
+});
+
 check('a multi-subtune context plays each sub-tune once and advances', () => {
   const player = new FakePlayer();
   const seq = makeSequencer([player]);

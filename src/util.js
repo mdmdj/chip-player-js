@@ -173,14 +173,18 @@ export function getFilepathFromUrl(url) {
   return url.replace(CATALOG_PREFIX, '/').replace(MULTI_SLASH_REGEX, '/');
 }
 
-export function getUrlFromFilepath(filepath) {
+export function encodeFilepathSegments(filepath) {
   if (!filepath) return null;
   // in case it's already encoded
   try { filepath = decodeURIComponent(filepath); } catch {}
   // Encode each path segment so slashes stay separators (browsers name
-  // downloads from the last segment) while spaces/#/% are still escaped.
-  const encoded = filepath.split('/').map(encodeURIComponent).join('/');
-  return pathJoin(CATALOG_PREFIX, encoded);
+  // downloads from the last segment) while spaces/#/%/? are still escaped.
+  return filepath.split('/').map(encodeURIComponent).join('/');
+}
+
+export function getUrlFromFilepath(filepath) {
+  const encoded = encodeFilepathSegments(filepath);
+  return encoded ? pathJoin(CATALOG_PREFIX, encoded) : null;
 }
 
 export function getMetadataUrlForFilepath(filepath, subtune = null) {

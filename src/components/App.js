@@ -19,6 +19,7 @@ import {
   FORMATS,
 } from '../config';
 import {
+  encodeFilepathSegments,
   ensureEmscFileWithData,
   isSongFolder,
   listingToContext,
@@ -258,7 +259,7 @@ class App extends React.Component {
       // requested sub-tune selected, rather than on the parent directory.
       if (isSongFolder(window.__chipConfig)) {
         this.fetchDirectory(playPath).then(() => {
-          this.props.history.replace(`${pathJoin('/browse', playPath)}${search}`);
+          this.props.history.replace(`${pathJoin('/browse', encodeFilepathSegments(playPath))}${search}`);
           const folderContext = this.playContexts[playPath] || [];
           const target = subtune ?? 0;
           const index = folderContext.findIndex(ref => ref.path === playPath && ref.subtune === target);
@@ -270,7 +271,7 @@ class App extends React.Component {
         // Navigate to song's containing folder. History comes from withRouter().
         const dirname = pathe.dirname(playPath);
         this.fetchDirectory(dirname).then(() => {
-          this.props.history.replace(`${pathJoin('/browse', dirname)}${search}`);
+          this.props.history.replace(`${pathJoin('/browse', encodeFilepathSegments(dirname))}${search}`);
           const context = this.playContexts[dirname] || [];
           // A directory context carries every sub-tune now (listingToContext
           // expands song folders), so match the whole SongRef; fall back to the

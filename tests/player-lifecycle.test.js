@@ -53,10 +53,14 @@ test('catalog metadata enriches player state and ignores superseded or stopped r
 
     assert.equal(updates.length, 1);
     assert.deepEqual(updates[0], {
-      metadata: { title: 'Song', imageUrl: 'http://localhost:8080/catalog/dir%2Fcover.png' },
+      // getUrlFromFilepath encodes per path segment (downloads keep their names).
+      metadata: { title: 'Song', imageUrl: 'http://localhost:8080/catalog/dir/cover.png' },
       infoTexts: ['Embedded', 'Catalog text'],
       md5: 'abc',
       songId: 42,
+      // The sub-tune fields ride the same state update (a sub-tune is a song).
+      subtuneCount: null,
+      subtuneTitle: null,
     });
     assert.deepEqual(player.getBasePlayerState().infoTexts, ['Embedded', 'Catalog text']);
   } finally {
@@ -75,6 +79,9 @@ test('late SID metadata cannot overwrite a newer song or publish after stop', as
     player.on('playerStateUpdate', state => updates.push(state));
     player.getSidMetadata('old', player.beginLoad());
     player.getSidMetadata('new', player.beginLoad());
+    // loadData resumes only once its metadata race is done, so a late response
+    // publishes only while the player is not stopped.
+    player.resume();
     pending[1]({ status: 200, data: { lengths: '2:00', name: 'New', author: 'B', copyright: '2' } });
     await new Promise(resolve => setImmediate(resolve));
     pending[0]({ status: 200, data: { lengths: '1:00', name: 'Old', author: 'A', copyright: '1' } });

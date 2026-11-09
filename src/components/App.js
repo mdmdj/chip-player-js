@@ -457,25 +457,18 @@ class App extends React.Component {
       // one songId, and the catalog metadata for the next one can land before
       // its player state does (SID waits on HVSC metadata). Track the full
       // SongRef, and only start a new timer when that identity changes.
-      const currRef = this.sequencer.getCurrSongRef();
-      const currRefKey = currRef ? songRefKey(currRef) : null;
       if (sequencerState.songRef) {
         const refKey = songRefKey(sequencerState.songRef);
         if (refKey !== this.playbackRefKey) {
           this.playbackRefKey = refKey;
-          // A metadata update may already have armed this exact identity before
-          // the load's player state arrived; keep that timer. A different song
-          // (or sub-tune) invalidates it.
-          if (this.playbackKey && !this.playbackKey.startsWith(`${refKey}|`)) {
-            this.playbackKey = null;
-            clearTimeout(this.playbackTimer);
-          }
+          this.playbackKey = null;
+          clearTimeout(this.playbackTimer);
         }
       }
-      if (sequencerState.songId && currRef) {
+      if (sequencerState.songId) {
         const songId = sequencerState.songId;
-        const subtune = currRef.subtune ?? 0;
-        const playbackKey = `${currRefKey}|${songId}`;
+        const subtune = this.sequencer.getCurrSongRef()?.subtune ?? 0;
+        const playbackKey = `${songId}:${subtune}`;
         if (playbackKey !== this.playbackKey) {
           this.playbackKey = playbackKey;
           clearTimeout(this.playbackTimer);

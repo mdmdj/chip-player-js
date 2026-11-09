@@ -609,6 +609,21 @@ check('a Web MIDI seek into the ending does not rewind either', () => {
     `the first callback must not rewind (${Math.round(wAt)} -> ${Math.round(w.elapsedTime)})`);
 });
 
+check('an MSB-only pending bank stays MSB-only', () => {
+  // Adding a default LSB would turn bank 3 into bank 384 on a synth that
+  // resolves the pair.
+  const p = makePlayer(stubSynth(true));
+  p.load(parseBytes(buildMidi([
+    tempo(), ccAt(0, 0, 1), programChangeAt(0, 0, 5), ccAt(0, 0, 3),
+    ccAt(TPQ, 110, 0), noteOnAt(0, 0, 60), noteOffAt(TPQ, 0, 60), cc(111),
+  ])), false);
+  const name = (e) => e.subtype === MIDIEvents.EVENT_MIDI_PROGRAM_CHANGE ? `P${e.channel}:${e.param1}`
+    : (e.param1 === 0 || e.param1 === 32) ? `B${e.channel}:${e.param1}=${e.param2}` : null;
+  const collected = p.collectStateEvents(0, p.loop.startMs).eventList.map(name).filter(Boolean);
+  assert.deepStrictEqual(collected, ['B0:0=1', 'B0:32=0', 'P0:5', 'B0:0=3'],
+    'the program bank is a pair, but the MSB-only pending selection must not acquire an LSB: ' + JSON.stringify(collected));
+});
+
 check('a pending bank change replays both bank bytes', () => {
   // Only MSB changes after the program; the pair is still a new bank. Replaying
   // MSB alone leaves a synth that resolves MSB/LSB on an incomplete bank.

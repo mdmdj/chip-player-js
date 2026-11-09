@@ -160,6 +160,7 @@ function AppFooter(props) {
                 path: songPath,
                 subtune: songRef?.subtune ?? 0,
                 songId: songId,
+                title,
               }}/>}
             <div className="SongDetails-title">
               {songPath ?

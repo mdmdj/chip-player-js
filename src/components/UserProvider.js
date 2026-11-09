@@ -169,7 +169,7 @@ const UserProvider = ({ children }) => {
     }
   };
 
-  const handleToggleFavorite = async (path, subtune = 0, songId) => {
+  const handleToggleFavorite = async (path, subtune = 0, songId, title) => {
     if (user) {
       // Invalidate any read in flight: this toggle's optimistic state is newer
       // than anything a GET issued before it can report. The fallback refresh
@@ -198,7 +198,7 @@ const UserProvider = ({ children }) => {
         if (isFavorite) {
           await removeFavorite(fave);
         } else {
-          logAddFavorite({ songId: fave.songId, path: fave.path });
+          logAddFavorite({ songId: fave.songId, path: fave.path, title });
           addResult = await addFavorite(fave);
         }
       } catch (e) {

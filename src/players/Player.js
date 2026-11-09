@@ -105,6 +105,11 @@ export default class Player extends EventEmitter {
     this.pendingLoad = new AbortController();
     this.catalogMeta = {};
     this.catalogMetaPromise = null;
+    // A held seek belongs to the load that issued it. Clear it here as well as
+    // in stop(): a replaced load may not have been stopped first, and the next
+    // player's first block must not replay a seek from the previous song.
+    this.loadingAsync = false;
+    this.deferredSeekMs = null;
     return this.pendingLoad.signal;
   }
 
@@ -165,6 +170,11 @@ export default class Player extends EventEmitter {
     }
     this.catalogMeta = {};
     this.catalogMetaPromise = null;
+    // An async load can leave a seek held for its first rendered block. If the
+    // song is stopped or replaced before that block, the seek belongs to the
+    // old load and must not be applied to the next song.
+    this.loadingAsync = false;
+    this.deferredSeekMs = null;
     this.stopped = true;
     this.paused = true;
     this.silenceSamplesRemaining = 0;

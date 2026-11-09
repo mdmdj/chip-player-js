@@ -54,23 +54,15 @@ const AppHeader = ({ isMidi }) => {
                  name="visualizer-enabled"/>
           <label htmlFor="vis-off" className="inline">Off</label>
         </h3>
-        {!isMidi &&
+        {showVisualizer && !isMidi &&
         <div className="Visualizer-renderer-toggle">
-          <span>Renderer:</span>{' '}
-          <label className="inline">
-            <input onChange={handleRendererChange}
-                   type="radio"
-                   value="spectrogram"
-                   checked={renderer === 'spectrogram'}
-                   name="visualizer-renderer"/> Spectrogram
-          </label>
-          <label className="inline">
-            <input onChange={handleRendererChange}
-                   type="radio"
-                   value="milkdrop"
-                   checked={renderer === 'milkdrop'}
-                   name="visualizer-renderer"/> MilkDrop
-          </label>
+          <label htmlFor="visualizer-renderer">Renderer:</label>{' '}
+          <select id="visualizer-renderer"
+                  value={renderer}
+                  onChange={handleRendererChange}>
+            <option value="spectrogram">Spectrogram</option>
+            <option value="milkdrop">MilkDrop</option>
+          </select>
         </div>
         }
       </div>

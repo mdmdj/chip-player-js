@@ -27,7 +27,11 @@ Module.prototype._compile = function (content, filename) {
   return originalCompile.call(this, content, filename);
 };
 
+// Player.js touches window at module scope (requestIdleCallback shim).
+global.window = global.window || {};
+
 const Sequencer = require('../src/Sequencer').default;
+const Player = require('../src/players/Player').default;
 
 let passed = 0;
 let failed = 0;
@@ -102,6 +106,25 @@ function makeSequencer(players) {
 }
 
 console.log('Sequencer sub-tune navigation (fake player)');
+check('a held seek is dropped when the load is replaced or the player stops', () => {
+  // The OPL4 path holds a seek until the first rendered block. If the user
+  // switches songs while the ROM download is pending, neither the old seek nor
+  // the async flag may reach the next song's first block.
+  const p = new Player({}, 44100);
+  p.beginLoad();
+  p.beginAsyncLoad();
+  assert.strictEqual(p.deferSeekUntilPlaying(1234), true);
+  p.beginLoad(); // replaced without a stop
+  assert.strictEqual(p.loadingAsync, false, 'beginLoad drops the async flag');
+  assert.strictEqual(p.deferredSeekMs, null, 'beginLoad drops the held seek');
+
+  p.beginAsyncLoad();
+  assert.strictEqual(p.deferSeekUntilPlaying(42), true);
+  p.stop();
+  assert.strictEqual(p.loadingAsync, false, 'stop drops the async flag');
+  assert.strictEqual(p.deferredSeekMs, null, 'stop drops the held seek');
+});
+
 check('a multi-subtune context plays each sub-tune once and advances', () => {
   const player = new FakePlayer();
   const seq = makeSequencer([player]);

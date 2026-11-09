@@ -587,13 +587,17 @@ MIDIPlayer.prototype.collectStateEvents = function (fromIdx, toMs) {
   // A *forward* seek collects from the current event, so the bank a channel is already
   // on lives before `fromIdx`. Without this seed a program change inside the range whose
   // bank was selected earlier looks like it has none, and the default-bank rule below
-  // claims bank 0 for a channel the file had on another. The wrap collects from 0, so
-  // this loop is empty there.
+  // claims bank 0 for a channel the file had on another. The same is true of pitch bend:
+  // panic() centers the wheel, so a forward seek must restore the last bend before the
+  // target even when that bend lives before `fromIdx`. The wrap collects from 0, so this
+  // loop is empty there.
   for (let i = 0; i < fromIdx; i++) {
     const e = this.events[i];
     if (e.subtype === MIDIEvents.EVENT_MIDI_CONTROLLER &&
         (e.param1 === CC_BANK_SELECT_MSB || e.param1 === CC_BANK_SELECT_LSB)) {
       noteBank(e.channel, e);
+    } else if (e.subtype === MIDIEvents.EVENT_MIDI_PITCH_BEND) {
+      eventMap[`${e.subtype}-${e.channel}`] = e;
     }
   }
   let pos = fromIdx;
@@ -701,6 +705,34 @@ MIDIPlayer.prototype.loopJump = function () {
   // finished pass leaves behind that it cannot restore -- notes still ringing, and a
   // value no controller covers -- are ended explicitly at the boundary below.
   const { eventList } = this.collectStateEvents(0, loop.startMs);
+  // A channel the file never programs before the loop starts is on the MIDI default
+  // program 0 at that point, but the synth is still holding whatever patch the finished
+  // pass left. Say program 0 out loud for those channels (on their bank, or bank 0 when
+  // the file never selected one before the loop). Without this, a loop with no intro
+  // reopens on the program it switched to inside the region.
+  const programChannels = new Set();
+  const bankChannels = new Set();
+  for (const event of eventList) {
+    if (event.subtype === MIDIEvents.EVENT_MIDI_PROGRAM_CHANGE) {
+      programChannels.add(event.channel);
+    } else if (event.subtype === MIDIEvents.EVENT_MIDI_CONTROLLER &&
+               (event.param1 === CC_BANK_SELECT_MSB || event.param1 === CC_BANK_SELECT_LSB)) {
+      bankChannels.add(event.channel);
+    }
+  }
+  const bankSelect = (channel, param1, param2) => ({
+    channel, param1, param2, subtype: MIDIEvents.EVENT_MIDI_CONTROLLER,
+  });
+  for (let channel = 0; channel < 16; channel++) {
+    if (!this.channelsInUse[channel] || programChannels.has(channel)) continue;
+    if (!bankChannels.has(channel)) {
+      eventList.push(bankSelect(channel, CC_BANK_SELECT_MSB, 0));
+      eventList.push(bankSelect(channel, CC_BANK_SELECT_LSB, 0));
+    }
+    eventList.push({
+      channel, param1: 0, subtype: MIDIEvents.EVENT_MIDI_PROGRAM_CHANGE,
+    });
+  }
   if (this.useWebMIDI) {
     // These messages belong at the band end, not at the last event the
     // scheduler sent: the last in-band event can sit a whole rest before the

@@ -8,6 +8,8 @@ const FavoriteButton = ({ item }) => {
     handleToggleFavorite: toggleFavorite,
   } = useContext(UserContext);
 
+  const { path, songId, subtune = 0, title } = item;
+
   const handleClick = useCallback((e) => {
     if (!user) {
       // TODO: prompt user "Login to save favorites" with ToastManager.
@@ -15,10 +17,10 @@ const FavoriteButton = ({ item }) => {
     }
     e.preventDefault();
     e.stopPropagation();
-    toggleFavorite(item);
-  }, [toggleFavorite, item, user]);
+    toggleFavorite(path, subtune, songId, title);
+  }, [toggleFavorite, path, subtune, songId, title, user]);
 
-  const isFavorite = faves.find(fave => fave.path === item?.path);
+  const isFavorite = faves.find(fave => fave.path === path && (fave.subtune || 0) === subtune);
   const className = `FavoriteButton ${isFavorite ? 'isFavorite' : ''}`;
 
   return (

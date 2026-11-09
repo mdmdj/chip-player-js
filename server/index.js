@@ -22,7 +22,7 @@ const axiosRetry = require('axios-retry').default;
 const { XMLParser } = require('fast-xml-parser');
 
 const { dbStatements } = require('./database.js');
-const { resolveDirectoryMetadata } = require('./directory-metadata');
+const { resolveDirectoryMetadata, escapeHtml, safeJsonLd } = require('./directory-metadata');
 const { requireAuth, optionalAuth } = require('./middleware/auth.js');
 const { validate } = require('./middleware/validate');
 const { SettingsSchema, FavoriteSchema, PlaybackSchema } = require('./schemas');
@@ -390,7 +390,8 @@ function toSongRefs(rows) {
 }
 
 router.get('/random', (req, res) => {
-  const limit = parseInt(req.query.limit, 10) || 1;
+  const parsedLimit = parseInt(req.query.limit, 10);
+  const limit = Math.min(Math.max(isNaN(parsedLimit) ? 1 : parsedLimit, 1), 100);
   const items = toSongRefs(getShuffleStmt.all('', '%', limit));
   res.json({
     items: items,
@@ -412,8 +413,10 @@ function escapeLike(value) {
  * shuffles as itself (all of its sub-tunes, if it has any).
  */
 router.get('/shuffle', (req, res) => {
-  const limit = parseInt(req.query.limit, 10) || 100;
-  const reqPath = (req.query.path || '').replace(/^\/+|\/+$/g, '');
+  const parsedLimit = parseInt(req.query.limit, 10);
+  const limit = Math.min(Math.max(isNaN(parsedLimit) ? 100 : parsedLimit, 1), 500);
+  const rawPath = Array.isArray(req.query.path) ? req.query.path[0] : (req.query.path || '');
+  const reqPath = rawPath.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
   const items = toSongRefs(getShuffleStmt.all(
     reqPath,
     reqPath === '' ? '%' : `${escapeLike(reqPath)}/%`,
@@ -720,6 +723,12 @@ const topCache = new LRUCache({
   ttl: 1000 * 60 * 60, // 60 minutes
 });
 
+const formatTopItem = ({ song_id, file_size, ...rest }) => ({
+  ...rest,
+  songId: song_id,
+  size: file_size,
+});
+
 // A copy of the NES audio hardware-test suite is kept alongside the catalog as a
 // local fixture for the expansion-chip work. Its files are one-second tests of a
 // single chip's behavior, not tunes, and engine work put 11 plays on one of them --
@@ -755,7 +764,7 @@ router.get('/top', optionalAuth, (req, res) => {
       return res.json(cached);
     }
 
-    const items = chartItems(getTopFavoritesStmt.all(overFetch, overFetch), limit);
+    const items = chartItems(getTopFavoritesStmt.all(overFetch, limit), limit).map(formatTopItem);
     const responseData = {
       items,
       total: items.length,
@@ -768,7 +777,7 @@ router.get('/top', optionalAuth, (req, res) => {
     if (!req.userId) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
-    const items = chartItems(getUserTopStmt.all(req.userId, sinceTimestamp, overFetch, overFetch), limit);
+    const items = chartItems(getUserTopStmt.all(req.userId, sinceTimestamp, overFetch, limit), limit).map(formatTopItem);
     return res.json({
       items,
       total: items.length,
@@ -781,7 +790,7 @@ router.get('/top', optionalAuth, (req, res) => {
     return res.json(cached);
   }
 
-  const items = chartItems(getGlobalTopStmt.all(sinceTimestamp, overFetch, overFetch), limit);
+  const items = chartItems(getGlobalTopStmt.all(sinceTimestamp, overFetch, limit), limit).map(formatTopItem);
   const responseData = {
     items,
     total: items.length,
@@ -980,13 +989,13 @@ app.get(clientRoutes, cache1Hour, async (req, res) => {
   const defaultNoscript = 'You need to enable JavaScript to run this app.';
 
   const finalHtml = html
-    .replace(/__TITLE__/g, title)
-    .replace(/__DESCRIPTION__/g, description)
-    .replace(/__URL__/g, url)
-    .replace(/__IMAGE__/g, previewImage)
-    .replace(/<chip-config><\/chip-config>/g, scriptTag)
-    .replace(/__SCHEMA_JSON_LD__/g, schemaJsonLd || '')
-    .replace(/__NOSCRIPT_CONTENT__/g, noscriptContent || defaultNoscript);
+    .replace(/__TITLE__/g, () => escapeHtml(title))
+    .replace(/__DESCRIPTION__/g, () => escapeHtml(description))
+    .replace(/__URL__/g, () => escapeHtml(url))
+    .replace(/__IMAGE__/g, () => escapeHtml(previewImage))
+    .replace(/<chip-config><\/chip-config>/g, () => scriptTag)
+    .replace(/__SCHEMA_JSON_LD__/g, () => safeJsonLd(schemaJsonLd))
+    .replace(/__NOSCRIPT_CONTENT__/g, () => noscriptContent || defaultNoscript);
 
   res.send(finalHtml);
 });

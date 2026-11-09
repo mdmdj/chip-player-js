@@ -45,10 +45,13 @@ export function startRefreshProbe() {
 
   const intervals = [];
   let last = null;
+  const started = performance.now();
   const sample = (timestamp) => {
     if (last !== null) intervals.push(timestamp - last);
     last = timestamp;
-    if (intervals.length < 90) {
+    // Bound the probe in wall-clock time, not just frame count: a slow scene
+    // must still produce a target (the fastest interval is clipped to >=60 Hz).
+    if (intervals.length < 60 && performance.now() - started < 800) {
       requestAnimationFrame(sample);
       return;
     }

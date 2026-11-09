@@ -622,9 +622,10 @@ check('an LSB-only program bank restores the default MSB', () => {
     'an LSB-only program bank needs MSB 0: ' + JSON.stringify(collected));
 });
 
-check('an MSB-only pending bank stays MSB-only', () => {
-  // Adding a default LSB would turn bank 3 into bank 384 on a synth that
-  // resolves the pair.
+check('an MSB-only bank clears the previous LSB first', () => {
+  // ADLMIDI/Web MIDI keep MSB and LSB separately; clear LSB before MSB so an
+  // MSB-only bank does not inherit the finished pass's LSB. FluidLite still
+  // reads the MSB-only selection on its own.
   const p = makePlayer(stubSynth(true));
   p.load(parseBytes(buildMidi([
     tempo(), ccAt(0, 0, 1), programChangeAt(0, 0, 5), ccAt(0, 0, 3),
@@ -633,8 +634,8 @@ check('an MSB-only pending bank stays MSB-only', () => {
   const name = (e) => e.subtype === MIDIEvents.EVENT_MIDI_PROGRAM_CHANGE ? `P${e.channel}:${e.param1}`
     : (e.param1 === 0 || e.param1 === 32) ? `B${e.channel}:${e.param1}=${e.param2}` : null;
   const collected = p.collectStateEvents(0, p.loop.startMs).eventList.map(name).filter(Boolean);
-  assert.deepStrictEqual(collected, ['B0:0=1', 'P0:5', 'B0:0=3'],
-    'an MSB-only program bank stays MSB-only: ' + JSON.stringify(collected));
+  assert.deepStrictEqual(collected, ['B0:32=0', 'B0:0=1', 'P0:5', 'B0:32=0', 'B0:0=3'],
+    'an MSB-only bank clears LSB first: ' + JSON.stringify(collected));
 });
 
 check('a pending bank change replays both bank bytes', () => {

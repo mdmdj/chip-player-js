@@ -92,6 +92,12 @@ function MIDIPlayer(options) {
   // pass (the slider band); wrapping there instead of the loop start keeps
   // the head cycling in the band, like the libvgm Repeat One.
   this.loop = null;
+  // With the two-pass expansion, the first seam (end of pass 1 / start of pass
+  // 2) is part of the event list, so loopJump() cannot restore the loop-start
+  // state there. firstSeamMs marks it; the first render past it applies the
+  // same state restore once.
+  this.firstSeamMs = null;
+  this.seamStateRestored = false;
   this.looping = false;
   // Note-on pitches still ringing per channel, for a clean loop wrap.
   this.activeNotes = new Map();
@@ -112,6 +118,8 @@ MIDIPlayer.prototype.load = function (midiFile, useTrackLoops = false) {
   this.position = 0;
   this.elapsedTime = 0;
   this.loop = null;
+  this.firstSeamMs = null;
+  this.seamStateRestored = false;
   this.activeNotes.clear();
   this.loopRegionLeft = false;
   // Same expanded list the piano roll parses, so audio and roll agree.
@@ -147,6 +155,9 @@ MIDIPlayer.prototype.load = function (midiFile, useTrackLoops = false) {
     }
     const wrapDefaults = [...regionCcs].filter(([k]) => !beforeCcs.has(k)).map(([, v]) => v);
     this.loop = { startMs, lengthMs, jumpMs, jumpIndex, endMs, endIndex, wrapDefaults };
+    // For the expanded list, jumpMs is the start of the second pass: the seam
+    // between the two materialised passes.
+    this.firstSeamMs = useTrackLoops ? jumpMs : null;
   }
   this.summarizeMidiEvents();
 };
@@ -208,6 +219,11 @@ MIDIPlayer.prototype.processPlaySynth = function (buffer, bufferSize) {
 
     if (!this.paused) {
       this.elapsedTime += msPerBatch;
+      if (this.firstSeamMs != null && !this.seamStateRestored &&
+          this.elapsedTime >= this.firstSeamMs) {
+        this.restoreLoopStartState();
+        this.seamStateRestored = true;
+      }
       // Wrap as soon as the clock reaches the band end, inside this batch, so the
       // new pass starts in this same output buffer rather than a whole buffer
       // late (which shows as a gap, or the old pass's held sound, each wrap).
@@ -338,6 +354,12 @@ MIDIPlayer.prototype.processPlay = function () {
   let event = this.events[this.position];
   let wraps = 0;
   for (;;) {
+    if (this.firstSeamMs != null && !this.seamStateRestored &&
+        event && event.playTime >= this.firstSeamMs) {
+      this.restoreLoopStartState(Math.max(
+        this.wallTimeFor(this.firstSeamMs), this.lastProcessPlayTimestamp));
+      this.seamStateRestored = true;
+    }
     // Wrap and reschedule the new pass in this same invocation, so events at
     // the band start are not a whole callback late. The wrap fires as soon as
     // the look-ahead window reaches the band end, not when the clock does:
@@ -683,33 +705,21 @@ MIDIPlayer.prototype.setPosition = function (ms) {
   // it the pass plays on and wraps as usual. Clearing it outright rewound a
   // listener who sought into the ending. See loopRegionLeft.
   this.loopRegionLeft = !!(this.loop && !this.isAuditioning && ms > this.loop.endMs);
+  // A seek past the first expanded seam already restored the target's state
+  // through collectStateEvents(); a seek back before it must arm the seam again.
+  this.seamStateRestored = this.firstSeamMs != null && ms >= this.firstSeamMs;
 };
 
 // Repeat-One wrap to the wrap target (the slider band's start). No
 // panic: the loop is authored to continue, so program/controller state is
 // restored silently and only notes still ringing from the finished pass are
 // cut — the closest a JS event loop gets to a native engine loop.
-MIDIPlayer.prototype.loopJump = function () {
-  const loop = this.loop;
-  if (!loop) return;
-  const ringing = [...this.activeNotes.keys()];
-  this.activeNotes.clear();
-  // The state the resumed pass should open in is the state the loop's own events were
-  // authored in: the loop start, not the wrap target. Expanded they differ -- the wrap
-  // target is one region later, and the events queued from it are the region's own first
-  // events -- so taking the state there hands the next pass the state the region ENDED
-  // in, and a fade, pan or bend written inside the region reopens at its old end value.
-  // (Not expanded they are the same point. A seek is deliberately incremental instead:
-  // there the live state IS the state at the target.) Nothing in the list can stand for
-  // a value the file never authored before the loop start, so the two things the
-  // finished pass leaves behind that it cannot restore -- notes still ringing, and a
-  // value no controller covers -- are ended explicitly at the boundary below.
-  const { eventList } = this.collectStateEvents(0, loop.startMs);
-  // A channel the file never programs before the loop starts is on the MIDI default
-  // program 0 at that point, but the synth is still holding whatever patch the finished
-  // pass left. Say program 0 out loud for those channels (on their bank, or bank 0 when
-  // the file never selected one before the loop). Without this, a loop with no intro
-  // reopens on the program it switched to inside the region.
+// A channel the file never programs before the loop starts is on the MIDI default
+// program 0 at that point, but the synth is still holding whatever patch the finished
+// pass left. Say program 0 out loud for those channels (on their bank, or bank 0 when
+// the file never selected one before the loop). Without this, a loop with no intro
+// reopens on the program it switched to inside the region.
+MIDIPlayer.prototype.addLoopStartPrograms = function (eventList) {
   const programChannels = new Set();
   const bankChannels = new Set();
   for (const event of eventList) {
@@ -733,6 +743,61 @@ MIDIPlayer.prototype.loopJump = function () {
       channel, param1: 0, subtype: MIDIEvents.EVENT_MIDI_PROGRAM_CHANGE,
     });
   }
+  return eventList;
+};
+
+// Restore the authored state at the loop start without moving the transport. Used
+// at the first expanded seam, where the second pass is already in the event list;
+// loopJump() does the equivalent for a live Repeat One wrap.
+MIDIPlayer.prototype.restoreLoopStartState = function (timestamp = null) {
+  if (!this.loop) return;
+  const { eventList } = this.collectStateEvents(0, this.loop.startMs);
+  this.addLoopStartPrograms(eventList);
+  if (this.useWebMIDI) {
+    const ts = timestamp == null
+      ? Math.max(this.wallTimeFor(this.loop.startMs), this.lastProcessPlayTimestamp)
+      : timestamp;
+    // The collected list carries only authored bends; clear the rest, then let
+    // the authored ones override.
+    for (let channel = 0; channel < 16; channel++) {
+      this.send([(MIDIEvents.EVENT_MIDI_PITCH_BEND << 4) + channel, 0, 64], ts);
+    }
+    for (const event of eventList) {
+      let message = null;
+      if (event.subtype === MIDIEvents.EVENT_MIDI_PROGRAM_CHANGE) {
+        message = [(event.subtype << 4) + event.channel, event.param1];
+      } else if (event.subtype === MIDIEvents.EVENT_MIDI_PITCH_BEND) {
+        message = [(event.subtype << 4) + event.channel, event.param1, event.param2];
+      } else if (event.subtype === MIDIEvents.EVENT_MIDI_CONTROLLER) {
+        message = [(event.subtype << 4) + event.channel, event.param1, event.param2];
+      }
+      if (message) this.send(message, ts);
+    }
+  } else if (this.synth) {
+    for (let channel = 0; channel < 16; channel++) {
+      this.synth.pitchBend(channel, 8192);
+    }
+    this.setPositionSynth(eventList);
+  }
+};
+
+MIDIPlayer.prototype.loopJump = function () {
+  const loop = this.loop;
+  if (!loop) return;
+  const ringing = [...this.activeNotes.keys()];
+  this.activeNotes.clear();
+  // The state the resumed pass should open in is the state the loop's own events were
+  // authored in: the loop start, not the wrap target. Expanded they differ -- the wrap
+  // target is one region later, and the events queued from it are the region's own first
+  // events -- so taking the state there hands the next pass the state the region ENDED
+  // in, and a fade, pan or bend written inside the region reopens at its old end value.
+  // (Not expanded they are the same point. A seek is deliberately incremental instead:
+  // there the live state IS the state at the target.) Nothing in the list can stand for
+  // a value the file never authored before the loop start, so the two things the
+  // finished pass leaves behind that it cannot restore -- notes still ringing, and a
+  // value no controller covers -- are ended explicitly at the boundary below.
+  const { eventList } = this.collectStateEvents(0, loop.startMs);
+  this.addLoopStartPrograms(eventList);
   if (this.useWebMIDI) {
     // These messages belong at the band end, not at the last event the
     // scheduler sent: the last in-band event can sit a whole rest before the
@@ -809,6 +874,7 @@ MIDIPlayer.prototype.loopJump = function () {
   // start is queued for the boundary instead of being sent already late.
   this.elapsedTime = loop.jumpMs + (this.elapsedTime - loop.endMs);
   this.position = loop.jumpIndex;
+  this.seamStateRestored = true;
 };
 
 MIDIPlayer.prototype.getChannelInUse = function (ch) {

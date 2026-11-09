@@ -437,6 +437,8 @@ class App extends React.Component {
 
     if (ejected) {
       clearTimeout(this.playbackTimer);
+      this.playbackKey = null;
+      this.playbackRefKey = null;
       this.setState(INITIAL_PLAYBACK_STATE);
       // TODO: Disabled to support scroll restoration.
       // updateQueryString({ play: undefined });
@@ -450,15 +452,35 @@ class App extends React.Component {
         }
       }
     } else {
-      // The player owns the catalog metadata request; its songId arrives with
-      // player state once that request lands. Log a play only for the song
-      // still playing five seconds later.
-      if (sequencerState.songId && sequencerState.songId !== this.state.songId) {
-        const { songId } = sequencerState;
-        clearTimeout(this.playbackTimer);
-        this.playbackTimer = setTimeout(() => {
-          if (this.state.songId === songId) {
-            const { metadata, subtune, durationMs, songPath } = this.state;
+      // A play is per song *and* sub-tune, not per file: sibling sub-tunes share
+      // one songId, and the catalog metadata for the next one can land before
+      // its player state does (SID waits on HVSC metadata). Track the full
+      // SongRef, and only start a new timer when that identity changes.
+      const currRef = this.sequencer.getCurrSongRef();
+      const currRefKey = currRef ? songRefKey(currRef) : null;
+      if (sequencerState.songRef) {
+        const refKey = songRefKey(sequencerState.songRef);
+        if (refKey !== this.playbackRefKey) {
+          this.playbackRefKey = refKey;
+          // A metadata update may already have armed this exact identity before
+          // the load's player state arrived; keep that timer. A different song
+          // (or sub-tune) invalidates it.
+          if (this.playbackKey && !this.playbackKey.startsWith(`${refKey}|`)) {
+            this.playbackKey = null;
+            clearTimeout(this.playbackTimer);
+          }
+        }
+      }
+      if (sequencerState.songId && currRef) {
+        const songId = sequencerState.songId;
+        const subtune = currRef.subtune ?? 0;
+        const playbackKey = `${currRefKey}|${songId}`;
+        if (playbackKey !== this.playbackKey) {
+          this.playbackKey = playbackKey;
+          clearTimeout(this.playbackTimer);
+          this.playbackTimer = setTimeout(() => {
+            if (this.playbackKey !== playbackKey) return;
+            const { metadata, durationMs, songPath } = this.state;
             postWithOptionalAuth(this.props.userContext.user, `${API_BASE}/playback`, { songId, subtune, durationMs: 5000 });
             const { title } = titlesFromMetadata(metadata || {});
             logPlaySong({
@@ -472,8 +494,8 @@ class App extends React.Component {
               durationMs,
               playbackSource: songPath?.startsWith('local/') ? 'local' : 'catalog',
             });
-          }
-        }, 5000);
+          }, 5000);
+        }
       }
 
       if ('mediaSession' in navigator) {

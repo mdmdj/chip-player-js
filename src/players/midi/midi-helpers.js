@@ -78,6 +78,9 @@ export function pendingBankEvents(collected, bankAtProgram, bankInForce, bankSel
     const msb = force[CC_BANK_SELECT_MSB];
     const lsb = force[CC_BANK_SELECT_LSB];
     if (msb) {
+      // Same LSB-clear order as bankForProgramEvents: keep an MSB-only
+      // selection from inheriting the finished pass's LSB on ADLMIDI/Web MIDI.
+      if (!lsb) out.push(bankSelect(event.channel, CC_BANK_SELECT_LSB, 0));
       out.push(bankSelect(event.channel, CC_BANK_SELECT_MSB, msb.param2));
     } else if (lsb) {
       // LSB-only: the MSB defaults to 0. Sending LSB against the finished
@@ -100,6 +103,10 @@ export function bankForProgramEvents(channel, bank, bankSelect) {
   const lsb = bank && bank[CC_BANK_SELECT_LSB];
   const out = [];
   if (msb) {
+    // Clear LSB first: ADLMIDI and raw Web MIDI store the two bytes
+    // separately, so an MSB-only program would otherwise inherit the finished
+    // pass's LSB. FluidLite still reads the MSB-only selection as its own bank.
+    if (!lsb) out.push(bankSelect(channel, CC_BANK_SELECT_LSB, 0));
     out.push(bankSelect(channel, CC_BANK_SELECT_MSB, msb.param2));
   } else if (lsb) {
     out.push(bankSelect(channel, CC_BANK_SELECT_MSB, 0));

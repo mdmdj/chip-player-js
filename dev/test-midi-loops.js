@@ -1424,6 +1424,30 @@ check('a forward seek restores a pitch bend from before the current position', (
   'the bend before the seek target must be restored: ' + JSON.stringify(synth.log));
 });
 
+check('a seek into the expanded second pass uses the seam state', () => {
+  // The first pass's program 40 must not be mistaken for the state at 2.8s:
+  // the expanded seam at 2.5s resets the channel to the loop start's program 0.
+  const synth = stubSynth(true);
+  const p = makePlayer(synth);
+  p.load(parseBytes(buildMidi([
+    tempo(), programChangeAt(0, 0, 0), noteOnAt(0, 0, 60), noteOffAt(TPQ, 0, 60),
+    ccAt(TPQ, 110, 0),             // loop start, 1000ms
+    programChangeAt(TPQ, 0, 40),   // first pass, 1500ms
+    noteOnAt(0, 0, 64), noteOffAt(TPQ, 0, 64),
+    ccAt(TPQ, 111, 0),             // loop end / seam, 2500ms
+    noteOnAt(TPQ * 2, 0, 72), noteOffAt(TPQ, 0, 72), // outro coverage
+  ])), true);
+  assert.ok(p.loop && p.firstSeamMs === p.loop.jumpMs, 'expected an expanded seam');
+  p.play(() => {});
+  synth.log.length = 0;
+  p.setPosition(2800);
+  const programs = synth.log.filter(([kind]) => kind === 'prog').map(([, ch, program]) => [ch, program]);
+  assert.ok(programs.some(([ch, program]) => ch === 0 && program === 0),
+    'the seek must restore the loop-start program: ' + JSON.stringify(programs));
+  assert.ok(!programs.some(([ch, program]) => ch === 0 && program === 40),
+    'the first pass program must not survive into the second: ' + JSON.stringify(programs));
+});
+
 check('Web MIDI does not queue the expanded seam reset before its window', () => {
   // The seam reset belongs to the same look-ahead budget as the events; queueing
   // it from a long rest would leave program/controller messages in the output

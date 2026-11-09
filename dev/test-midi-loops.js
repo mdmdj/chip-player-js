@@ -640,6 +640,21 @@ check('a pending bank change replays both bank bytes', () => {
     'the pending pair keeps both latest bytes: ' + JSON.stringify(collected));
 });
 
+check('an LSB-only pending bank restores the default MSB', () => {
+  // LSB 2 before the loop, MSB 3 inside it: the loop-start state has no MSB,
+  // so replaying LSB alone would take the finished pass's MSB and select 386.
+  const p = makePlayer(stubSynth(true));
+  p.load(parseBytes(buildMidi([
+    tempo(), ccAt(0, 32, 2), noteOnAt(0, 0, 60), noteOffAt(TPQ, 0, 60),
+    ccAt(TPQ, 110, 0), ccAt(TPQ, 0, 3), noteOnAt(0, 0, 64), noteOffAt(TPQ, 0, 64), ccAt(TPQ, 111, 0),
+  ])), false);
+  const name = (e) => e.subtype === MIDIEvents.EVENT_MIDI_PROGRAM_CHANGE ? `P${e.channel}:${e.param1}`
+    : (e.param1 === 0 || e.param1 === 32) ? `B${e.channel}:${e.param1}=${e.param2}` : null;
+  const collected = p.collectStateEvents(0, p.loop.startMs).eventList.map(name).filter(Boolean);
+  assert.deepStrictEqual(collected, ['B0:0=0', 'B0:32=2'],
+    'an LSB-only bank must restore MSB 0: ' + JSON.stringify(collected));
+});
+
 check('a wrap replays bank select before the program that uses it', () => {
   // Bank select applies to the *next* program change, and the collected list is in
   // first-seen order -- so a channel that picks a program before it ever picks a

@@ -142,7 +142,14 @@ function Settings(props) {
       </span>
       {milkdropActive &&
         <React.Fragment>
-          <h3>MilkDrop</h3>
+          <h3>MilkDrop
+            <span className='MilkDrop-credit'>
+              Powered by{' '}
+              <a href='https://github.com/jberg/butterchurn'
+                 target='_blank'
+                 rel='noopener noreferrer'>Butterchurn</a>
+            </span>
+          </h3>
           <span className='PlayerParams-param'>
             <label htmlFor='milkdropMesh' title='Simulation mesh resolution. Lower is faster.' className="PlayerParams-label-wide">
               Mesh:{' '}
@@ -177,12 +184,6 @@ function Settings(props) {
               <span className='MilkDrop-fps-target'> / ~{refresh} Hz</span>
             }
           </span>
-          <div className='MilkDrop-credit'>
-            Powered by{' '}
-            <a href='https://github.com/jberg/butterchurn'
-               target='_blank'
-               rel='noopener noreferrer'>Butterchurn</a>
-          </div>
         </React.Fragment>
       }
     </div>

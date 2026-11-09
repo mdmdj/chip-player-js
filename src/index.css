@@ -571,7 +571,7 @@ button.IconButton {
 .MilkDrop-fps-value.bad { color: #ff6b6b; }
 .MilkDrop-fps-value.idle { color: var(--neutral2); }
 .MilkDrop-fps-target { color: var(--neutral2); }
-.MilkDrop-credit { margin-left: var(--charW1); color: var(--neutral2); }
+.MilkDrop-credit { margin-top: var(--charH); color: var(--neutral2); }
 .MilkDrop-credit a { color: var(--clickable); }
 .PresetNav-row { display: flex; align-items: center; justify-content: flex-end; gap: var(--charW1); }
 .Preset-glyph { display: inline-flex; align-items: center; color: var(--clickable); }

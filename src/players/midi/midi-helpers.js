@@ -832,10 +832,14 @@ MIDIFile.prototype.getLoopedEvents = function (tracks, loopCount = 2, range = nu
   // file carries loop markers. The expanded list is a different animal -- the
   // iterator replays the body and the seam owns the crossings -- so it keeps its
   // own contract rather than this one.
+  // A CC103-only loop has an implicit start at zero. Normalise it before the
+  // snapshot: with loopStartMs still null this block was skipped and the second
+  // pass kept the finished pass's volume/program state.
+  if (expandLoop && loopStartMs == null) loopStartMs = 0;
   // Materialise the loop-start state at every expanded pass boundary. Seeks,
   // synth playback and Web MIDI scheduling all read this one list, so the seam
   // is restored in one place instead of by player timers.
-  if (expandLoop && loopStartMs != null && loopEndMs != null && loopEndMs > loopStartMs) {
+  if (expandLoop && loopEndMs != null && loopEndMs > loopStartMs) {
     const state = loopStartStateEvents(combinedEvents, loopStartMs, loopEndMs, noteChannels);
     const length = loopEndMs - loopStartMs;
     for (let pass = passStarts.length - 1; pass >= 1; pass--) {
@@ -870,7 +874,6 @@ MIDIFile.prototype.getLoopedEvents = function (tracks, loopCount = 2, range = nu
   // boundary. Have not identified a file that reproduces it yet; it needs a
   // lone-CC111 file whose last event is padding after its last sounding one.
 
-  if (expandLoop && loopStartMs == null) loopStartMs = 0;
   if (!expandLoop || loopEndMs == null || loopEndMs <= loopStartMs) {
     loopStartMs = null;
     loopEndMs = null;

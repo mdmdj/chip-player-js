@@ -110,7 +110,7 @@ export const summary = {
       heading: 'Repeat One Loops the Intended Region',
       body: [
         '<strong>One Repeat One, across formats.</strong> Where the engine exposes the region the composer wrote, it loops it: VGM/VGZ, MDX, MIDI (CC 102/103, CC 110/111), and MOD/XM/IT/S3M (learned from playback, because libxmp exposes no loop position up front).',
-        '<strong>Where there is no region, a tail detector restarts a finished one:</strong> NSFE, SID and N64.',
+        '<strong>Where there is no region, a tail detector restarts a finished one:</strong> NSFE, SID, N64 and GSF.',
         '<strong>Toggling never moves the transport.</strong> The playhead is continuous across the toggle, and leaving a deep repeat plays out the rest of the pass and the fade instead of cutting the song. The region is drawn on the timeline; the band math is on the base player, and engine policy stays in each engine’s player.',
         '<strong>V2M is the one fallback:</strong> no region and no loop API, so it plays the song and starts it again, as before.',
       ],

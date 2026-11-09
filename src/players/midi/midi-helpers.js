@@ -75,11 +75,17 @@ export function pendingBankEvents(collected, bankAtProgram, bankInForce, bankSel
     // both (even when only one changed) so a synth that resolves MSB/LSB does
     // not see an incomplete bank. If it only ever selected MSB, adding LSB 0
     // would change the bank on such a synth.
-    if (force[CC_BANK_SELECT_MSB]) {
-      out.push(bankSelect(event.channel, CC_BANK_SELECT_MSB, force[CC_BANK_SELECT_MSB].param2));
+    const msb = force[CC_BANK_SELECT_MSB];
+    const lsb = force[CC_BANK_SELECT_LSB];
+    if (msb) {
+      out.push(bankSelect(event.channel, CC_BANK_SELECT_MSB, msb.param2));
+    } else if (lsb) {
+      // LSB-only: the MSB defaults to 0. Sending LSB against the finished
+      // pass's MSB would select a bank the file never asked for.
+      out.push(bankSelect(event.channel, CC_BANK_SELECT_MSB, 0));
     }
-    if (force[CC_BANK_SELECT_LSB]) {
-      out.push(bankSelect(event.channel, CC_BANK_SELECT_LSB, force[CC_BANK_SELECT_LSB].param2));
+    if (lsb) {
+      out.push(bankSelect(event.channel, CC_BANK_SELECT_LSB, lsb.param2));
     }
   }
   return out;

@@ -108,26 +108,31 @@ export default class Player extends EventEmitter {
     return this.pendingLoad.signal;
   }
 
-  fetchCatalogMetadata(filepath, loadSignal = this.pendingLoad?.signal) {
+  fetchCatalogMetadata(filepath, loadSignal = this.pendingLoad?.signal, subtune = 0) {
     if (!filepath || filepath.startsWith('local/')) {
       return Promise.resolve({});
     }
     if (this.catalogMetaPromise) {
       return this.catalogMetaPromise;
     }
-    const metadataUrl = getMetadataUrlForFilepath(filepath);
+    const metadataUrl = getMetadataUrlForFilepath(filepath, subtune);
     this.catalogMetaPromise = axios.get(metadataUrl, {
         fetch: (url, options) => fetch(url, { ...options, signal: loadSignal }),
       })
       .then(response => {
         if (loadSignal?.aborted) return {};
-        const { imageUrl: imagePath, infoTexts = [], md5 = null, songId = null, soundfont = null } = response.data || {};
+        const {
+          imageUrl: imagePath, infoTexts = [], md5 = null, songId = null, soundfont = null,
+          subtuneCount = null, subtuneTitle = null,
+        } = response.data || {};
         this.catalogMeta = {
           imageUrl: imagePath ? getUrlFromFilepath(imagePath) : null,
           infoTexts,
           md5,
           songId,
           soundfont,
+          subtuneCount,
+          subtuneTitle,
         };
         if (!this.stopped) {
           this.emit('playerStateUpdate', this.getCatalogState());
@@ -345,6 +350,8 @@ export default class Player extends EventEmitter {
       infoTexts: [...this.getInfoTexts(), ...(this.catalogMeta?.infoTexts || [])],
       md5: this.catalogMeta?.md5 || null,
       songId: this.catalogMeta?.songId || null,
+      subtuneCount: this.catalogMeta?.subtuneCount ?? null,
+      subtuneTitle: this.catalogMeta?.subtuneTitle ?? null,
     };
   }
 
@@ -462,19 +469,6 @@ export default class Player extends EventEmitter {
       this.trailingSilenceSamples = 0;
       endAction();
     }
-  }
-
-  suspend() {
-    this.stopped = true;
-    this.paused = true;
-    this.silenceSamplesRemaining = 0;
-    this.onSilenceEnd = null;
-    this.trailingSilenceSamples = 0;
-    // A suspended player is not loading anything any more, and a seek it was
-    // still holding was asked for by the load that just got cancelled -- it
-    // must not survive into the next song.
-    this.loadingAsync = false;
-    this.deferredSeekMs = null;
   }
 
   // Called at the top of a load that waits on something before playback starts

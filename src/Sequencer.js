@@ -255,7 +255,7 @@ export default class Sequencer extends EventEmitter {
     this.player = player;
     this.player.setLooping(this.repeat === REPEAT_ONE);
     const loadSignal = player.beginLoad();
-    player.fetchCatalogMetadata(filepath, loadSignal);
+    player.fetchCatalogMetadata(filepath, loadSignal, subtune);
 
     if (filepath.startsWith('local/')) {
       const buffer = this.localFilesManager.read(filepath);

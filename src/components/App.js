@@ -1,5 +1,4 @@
 import React, { useContext } from 'react';
-import axios from 'redaxios';
 import autoBindReact from 'auto-bind/react';
 import isMobile from 'ismobilejs';
 import clamp from 'lodash/clamp';
@@ -21,8 +20,6 @@ import {
 } from '../config';
 import {
   ensureEmscFileWithData,
-  getMetadataUrlForFilepath,
-  getUrlFromFilepath,
   isSongFolder,
   listingToContext,
   pathJoin,
@@ -83,10 +80,8 @@ const INITIAL_PLAYBACK_STATE = {
   infoTexts: [],
   songPath: null,
   songRef: null,
-  songTitleKey: null,
   songId: null,
   md5: null,
-  imageUrl: null,
   subtuneCount: null,
   subtuneTitle: null,
   paramDefs: [],
@@ -455,76 +450,30 @@ class App extends React.Component {
         }
       }
     } else {
-      const songPath = this.sequencer.getCurrSongPath();
-      const currSongRef = this.sequencer.getCurrSongRef();
-      const songTitleKey = songRefKey(currSongRef);
-      // TODO: this is messy. imageUrl comes asynchronously from the /metadata request.
-      //       Title, artist, etc. come synchronously from player.getMetadata().
-      //       ...but these are also emitted with playerStateUpdate.
-      //       It would be better to incorporate imageUrl into playerStateUpdate.
-      if (!songPath) {
-        this.setState({ imageUrl: null });
-      } else if (songTitleKey !== this.state.songTitleKey) {
-        // Mark this song as loading so a burst of player state updates doesn't
-        // fire duplicate metadata requests.
-        this.setState({ songTitleKey, subtuneCount: null, subtuneTitle: null });
-        const metadataUrl = getMetadataUrlForFilepath(songPath, currSongRef?.subtune);
-        // XXX: fix this later
-        // if (url.indexOf("%2") > -1 || url.indexOf("#") > -1) {
-        //   console.warn("handleSequencerStateUpdate() url:", url);
-        //   console.warn("handleSequencerStateUpdate() metadataUrl:", metadataUrl);
-        // }
-        // TODO: Disabled to support scroll restoration.
-        // const filepath = url.replace(CATALOG_PREFIX, '');
-        // updateQueryString({ play: filepath, t: undefined });
-        // TODO: move fetch metadata to Player when it becomes event emitter
-        axios.get(metadataUrl).then(response => {
-          if (songTitleKey !== this.state.songTitleKey) return; // song changed while loading
-          const { imageUrl: imagePath, infoTexts, md5, songId, subtuneTitle, subtuneCount } = response.data;
-          const imageUrl = imagePath ? getUrlFromFilepath(imagePath) : null;
-          const newInfoTexts = [...this.state.infoTexts, ...infoTexts ];
-          const newShowInfo = this.state.showInfo && newInfoTexts.length > 0;
-          this.setState({
-            imageUrl, infoTexts: newInfoTexts, md5, showInfo: newShowInfo, songId,
-            subtuneCount: subtuneCount ?? null,
-            subtuneTitle: subtuneTitle ?? null,
-          });
-
-          // Playback logging
-          clearTimeout(this.playbackTimer);
-          this.playbackTimer = setTimeout(() => {
-            // If still playing this song after 5 seconds, log a playback.
-            if (this.state.songId === songId && this.state.songTitleKey === songTitleKey) {
-              const subtune = currSongRef?.subtune ?? 0;
-              postWithOptionalAuth(this.props.userContext.user, `${API_BASE}/playback`, { songId, subtune, durationMs: 5000 });
-              const { metadata } = this.state;
-              const { title: playTitle } = titlesFromMetadata(metadata || {});
-              logPlaySong({
-                songId,
-                songPath,
-                title: playTitle || metadata?.title,
-                artist: metadata?.artist,
-                game: metadata?.game,
-                system: metadata?.system,
-                subtune,
-                durationMs: this.state.durationMs,
-                playbackSource: songPath?.startsWith('local/') ? 'local' : 'catalog',
-              });
-            }
-          }, 5000);
-
-          if ('mediaSession' in navigator) {
-            // Clear artwork if imageUrl is null.
-            navigator.mediaSession.metadata.artwork = (imageUrl == null) ? [] : [{
-              src: imageUrl,
-              sizes: '512x512',
-            }];
-            this.updateMediaSessionPositionState();
+      // The player owns the catalog metadata request; its songId arrives with
+      // player state once that request lands. Log a play only for the song
+      // still playing five seconds later.
+      if (sequencerState.songId && sequencerState.songId !== this.state.songId) {
+        const { songId } = sequencerState;
+        clearTimeout(this.playbackTimer);
+        this.playbackTimer = setTimeout(() => {
+          if (this.state.songId === songId) {
+            const { metadata, subtune, durationMs, songPath } = this.state;
+            postWithOptionalAuth(this.props.userContext.user, `${API_BASE}/playback`, { songId, subtune, durationMs: 5000 });
+            const { title } = titlesFromMetadata(metadata || {});
+            logPlaySong({
+              songId,
+              songPath,
+              title: title || metadata?.title,
+              artist: metadata?.artist,
+              game: metadata?.game,
+              system: metadata?.system,
+              subtune,
+              durationMs,
+              playbackSource: songPath?.startsWith('local/') ? 'local' : 'catalog',
+            });
           }
-        }).catch(e => {
-          if (songTitleKey !== this.state.songTitleKey) return; // song changed while loading
-          this.setState({ imageUrl: null });
-        });
+        }, 5000);
       }
 
       if ('mediaSession' in navigator) {
@@ -1023,13 +972,12 @@ class App extends React.Component {
   }
 
   render() {
-    // TODO: Consolidate imageUrl under metadata.
     const metadata = this.state.metadata;
     const { title: metadataTitle, subtitle } = titlesFromMetadata(metadata);
     // A sub-tune's label from the catalog takes precedence over the player's
     // generic track title.
     const title = this.state.subtuneTitle || metadataTitle;
-    const imageUrl = metadata.imageUrl || this.state.imageUrl;
+    const { imageUrl } = metadata;
     const currContext = this.sequencer?.getCurrContext();
     const currIdx = this.sequencer?.getCurrIdx();
     const search = { search: window.location.search };

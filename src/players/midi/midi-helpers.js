@@ -71,10 +71,16 @@ export function pendingBankEvents(collected, bankAtProgram, bankInForce, bankSel
     if (seen.has(event.channel)) continue;
     seen.add(event.channel);
     const force = bankInForce.get(event.channel) || {};
-    out.push(bankSelect(event.channel, CC_BANK_SELECT_MSB,
-      force[CC_BANK_SELECT_MSB] ? force[CC_BANK_SELECT_MSB].param2 : 0));
-    out.push(bankSelect(event.channel, CC_BANK_SELECT_LSB,
-      force[CC_BANK_SELECT_LSB] ? force[CC_BANK_SELECT_LSB].param2 : 0));
+    // Replay the bytes the file actually selected. If it chose a pair, send
+    // both (even when only one changed) so a synth that resolves MSB/LSB does
+    // not see an incomplete bank. If it only ever selected MSB, adding LSB 0
+    // would change the bank on such a synth.
+    if (force[CC_BANK_SELECT_MSB]) {
+      out.push(bankSelect(event.channel, CC_BANK_SELECT_MSB, force[CC_BANK_SELECT_MSB].param2));
+    }
+    if (force[CC_BANK_SELECT_LSB]) {
+      out.push(bankSelect(event.channel, CC_BANK_SELECT_LSB, force[CC_BANK_SELECT_LSB].param2));
+    }
   }
   return out;
 }

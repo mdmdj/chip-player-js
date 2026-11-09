@@ -354,12 +354,6 @@ MIDIPlayer.prototype.processPlay = function () {
   let event = this.events[this.position];
   let wraps = 0;
   for (;;) {
-    if (this.firstSeamMs != null && !this.seamStateRestored &&
-        event && event.playTime >= this.firstSeamMs) {
-      this.restoreLoopStartState(Math.max(
-        this.wallTimeFor(this.firstSeamMs), this.lastProcessPlayTimestamp));
-      this.seamStateRestored = true;
-    }
     // Wrap and reschedule the new pass in this same invocation, so events at
     // the band start are not a whole callback late. The wrap fires as soon as
     // the look-ahead window reaches the band end, not when the clock does:
@@ -376,6 +370,16 @@ MIDIPlayer.prototype.processPlay = function () {
       break; // the look-ahead window has not reached the band end yet
     }
     if (!(this.events[this.position] && event.playTime < this.elapsedTime + BUFFER_AHEAD)) break;
+    // Restore the expanded seam only once the look-ahead reaches it: queueing
+    // it before the window check put program/controller resets seconds ahead
+    // when the loop start follows a long rest, where a song switch could not
+    // cancel them.
+    if (this.firstSeamMs != null && !this.seamStateRestored &&
+        event.playTime >= this.firstSeamMs) {
+      this.restoreLoopStartState(Math.max(
+        this.wallTimeFor(this.firstSeamMs), this.lastProcessPlayTimestamp));
+      this.seamStateRestored = true;
+    }
     message = null;
     delay = 0;
     if (event.type === MIDIEvents.EVENT_SYSEX || event.type === MIDIEvents.EVENT_DIVSYSEX) {
@@ -474,6 +478,13 @@ MIDIPlayer.prototype.resume = function () {
 };
 
 MIDIPlayer.prototype.stop = function () {
+  // Web MIDI has no "unsend": queued messages stay in the output even after
+  // the player moves on, so a reset queued near a seam could land on the next
+  // song. clear() is optional in the API; the look-ahead below keeps what we
+  // queue close to the clock when it is absent.
+  if (this.useWebMIDI && this.output && typeof this.output.clear === 'function') {
+    this.output.clear();
+  }
   this.paused = true;
   this.activeNotes.clear();
   this.panic();
@@ -773,6 +784,7 @@ MIDIPlayer.prototype.restoreLoopStartState = function (timestamp = null) {
       }
       if (message) this.send(message, ts);
     }
+    this.lastSendTimestamp = Math.max(this.lastSendTimestamp, ts);
   } else if (this.synth) {
     for (let channel = 0; channel < 16; channel++) {
       this.synth.pitchBend(channel, 8192);

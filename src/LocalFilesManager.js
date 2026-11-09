@@ -46,7 +46,7 @@ export default class LocalFilesManager {
             // Files sub-tune cache keys on the file's identity, and whole seconds
             // would let a same-size replacement inside one second reuse the
             // previous header (see localFilesSubtunes.js).
-            mtimeMs: Date.parse(mtime),
+            mtimeMs: mtime.getTime(),
             path: fullPath,
           };
         });

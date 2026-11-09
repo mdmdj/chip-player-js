@@ -498,6 +498,7 @@ router.get('/browse', cache1Hour, async (req, res) => {
         return {
           path: normalizedPath ? `${normalizedPath}/${child.path}` : child.path,
           type: isSongFolder ? 'songfolder' : child.type,
+          songId: child.song_id,
           size: child.size,
           // Prefer the parsed release date over the file system mtime.
           mtime: toUnixSeconds(child.release_date || child.mtime),
@@ -524,7 +525,7 @@ router.get('/browse', cache1Hour, async (req, res) => {
           path: normalizedPath,
           type: 'file',
           name: sub.title || `Tune ${sub.subtune + 1}`,
-          song_id: song ? song.song_id : null,
+          songId: song ? song.song_id : null,
           subtune: sub.subtune,
           durationMs: sub.length_ms,
           size: song ? song.file_size : 0,

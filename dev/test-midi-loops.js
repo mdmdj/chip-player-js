@@ -1470,6 +1470,23 @@ check('a forward seek restores a pitch bend from before the current position', (
   'the bend before the seek target must be restored: ' + JSON.stringify(synth.log));
 });
 
+check('a CC103-only expanded loop restores the implicit start state', () => {
+  // No start marker means the loop starts at 0; normalization must happen
+  // before the snapshot or the block is skipped and the second pass opens with
+  // the volume the first pass ended on.
+  const bytes = buildMidi([
+    tempo(), noteOnAt(0, 0, 60), noteOffAt(TPQ, 0, 60),
+    ccAt(TPQ, 7, 0),   // volume 0 inside the first pass
+    ccAt(TPQ, 103),    // loop end only; start is implicit 0
+  ]);
+  const { events, loopEndMs, loopStartMs } = parseBytes(bytes).getPlaybackEvents(true);
+  assert.ok(loopEndMs > 0 && (loopStartMs || 0) === 0, 'expected an implicit start at 0');
+  const seam = events.filter(e => e.subtype === MIDIEvents.EVENT_MIDI_CONTROLLER &&
+    e.param1 === 7 && Math.abs(e.playTime - loopEndMs) < 1);
+  assert.ok(seam.some(e => e.param2 === 100),
+    'the seam must restore the GM volume default: ' + JSON.stringify(seam));
+});
+
 check('the expanded seam releases the previous pass\'s pedals', () => {
   // Sustain is on inside the region and off at its start. The seam's own
   // release/re-arm carries the finished pass's value, so the starting state

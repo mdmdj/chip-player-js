@@ -1,6 +1,6 @@
 import autoBind from 'auto-bind';
 import MIDIEvents from './midi/MIDIEvents';
-import { GM_CC_DEFAULTS, addLoopStartPrograms, pendingBankEvents } from './midi/midi-helpers';
+import { GM_CC_DEFAULTS, addLoopStartPrograms, bankForProgramEvents, pendingBankEvents } from './midi/midi-helpers';
 
 /**
  * The MIDIFilePlayer is the engine that parses MIDI file data, and fires
@@ -626,8 +626,7 @@ MIDIPlayer.prototype.collectStateEvents = function (fromIdx, toMs) {
   });
   const banksForPrograms = [];
   for (const [channel, b] of bankAtProgram) {
-    banksForPrograms.push(bankSelect(channel, CC_BANK_SELECT_MSB, b[CC_BANK_SELECT_MSB] ? b[CC_BANK_SELECT_MSB].param2 : 0));
-    banksForPrograms.push(bankSelect(channel, CC_BANK_SELECT_LSB, b[CC_BANK_SELECT_LSB] ? b[CC_BANK_SELECT_LSB].param2 : 0));
+    banksForPrograms.push(...bankForProgramEvents(channel, b, bankSelect));
   }
   const programs = collected.filter(isProgram);
   // A collected bank select that differs from the one its program was authored with

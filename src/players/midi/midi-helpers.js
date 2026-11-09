@@ -91,6 +91,27 @@ export function pendingBankEvents(collected, bankAtProgram, bankInForce, bankSel
   return out;
 }
 
+// Rebuild the bank a program was authored with, preserving whether the file
+// selected MSB alone, LSB alone, a pair, or no bank at all. Sending a
+// synthesized LSB 0 after an MSB-only selection turns bank 3 into 384 on
+// FluidLite; sending an MSB-less LSB would inherit the finished pass's MSB.
+export function bankForProgramEvents(channel, bank, bankSelect) {
+  const msb = bank && bank[CC_BANK_SELECT_MSB];
+  const lsb = bank && bank[CC_BANK_SELECT_LSB];
+  const out = [];
+  if (msb) {
+    out.push(bankSelect(channel, CC_BANK_SELECT_MSB, msb.param2));
+  } else if (lsb) {
+    out.push(bankSelect(channel, CC_BANK_SELECT_MSB, 0));
+  }
+  if (lsb) out.push(bankSelect(channel, CC_BANK_SELECT_LSB, lsb.param2));
+  if (!msb && !lsb) {
+    out.push(bankSelect(channel, CC_BANK_SELECT_MSB, 0));
+    out.push(bankSelect(channel, CC_BANK_SELECT_LSB, 0));
+  }
+  return out;
+}
+
 export function addLoopStartPrograms(eventList, usedChannels = []) {
   const used = usedChannelSet(usedChannels);
   const programChannels = new Set();
@@ -166,10 +187,7 @@ export function loopStartStateEvents(events, startMs, endMs, usedChannels = []) 
   });
   const banksForPrograms = [];
   for (const [channel, b] of bankAtProgram) {
-    banksForPrograms.push(bankSelect(channel, CC_BANK_SELECT_MSB,
-      b[CC_BANK_SELECT_MSB] ? b[CC_BANK_SELECT_MSB].param2 : 0));
-    banksForPrograms.push(bankSelect(channel, CC_BANK_SELECT_LSB,
-      b[CC_BANK_SELECT_LSB] ? b[CC_BANK_SELECT_LSB].param2 : 0));
+    banksForPrograms.push(...bankForProgramEvents(channel, b, bankSelect));
   }
   const programs = collected.filter(isProgram);
   const pendingBanks = pendingBankEvents(collected, bankAtProgram, bankInForce, bankSelect);

@@ -52,6 +52,33 @@ const usedChannelSet = (usedChannels) => {
 // program 0 at that point, but the synth is still holding whatever patch the finished
 // pass left. Say program 0 out loud for those channels (on their bank, or bank 0 when
 // the file never selected one before the loop).
+// A pending bank selection is a pair, not two independent bytes: a file can
+// change only MSB (or only LSB) from the bank a program was authored with, and
+// a synth that resolves the pair (FluidLite) will take MSB alone as a complete
+// bank. When either byte differs, replay both latest bytes in MSB/LSB order.
+export function pendingBankEvents(collected, bankAtProgram, bankInForce, bankSelect) {
+  const out = [];
+  const seen = new Set();
+  for (const event of collected) {
+    if (event.subtype !== EVENT_MIDI_CONTROLLER ||
+        (event.param1 !== CC_BANK_SELECT_MSB && event.param1 !== CC_BANK_SELECT_LSB)) {
+      continue;
+    }
+    const authored = bankAtProgram.get(event.channel);
+    if (authored && event.param2 === (authored[event.param1] ? authored[event.param1].param2 : 0)) {
+      continue;
+    }
+    if (seen.has(event.channel)) continue;
+    seen.add(event.channel);
+    const force = bankInForce.get(event.channel) || {};
+    out.push(bankSelect(event.channel, CC_BANK_SELECT_MSB,
+      force[CC_BANK_SELECT_MSB] ? force[CC_BANK_SELECT_MSB].param2 : 0));
+    out.push(bankSelect(event.channel, CC_BANK_SELECT_LSB,
+      force[CC_BANK_SELECT_LSB] ? force[CC_BANK_SELECT_LSB].param2 : 0));
+  }
+  return out;
+}
+
 export function addLoopStartPrograms(eventList, usedChannels = []) {
   const used = usedChannelSet(usedChannels);
   const programChannels = new Set();
@@ -133,12 +160,7 @@ export function loopStartStateEvents(events, startMs, endMs, usedChannels = []) 
       b[CC_BANK_SELECT_LSB] ? b[CC_BANK_SELECT_LSB].param2 : 0));
   }
   const programs = collected.filter(isProgram);
-  const pendingBanks = collected.filter((e) => {
-    if (!isBankSelect(e)) return false;
-    const b = bankAtProgram.get(e.channel);
-    if (!b) return true;
-    return e.param2 !== (b[e.param1] ? b[e.param1].param2 : 0);
-  });
+  const pendingBanks = pendingBankEvents(collected, bankAtProgram, bankInForce, bankSelect);
   const rest = collected.filter((e) => !isBankSelect(e) && !isProgram(e));
   const used = usedChannelSet(usedChannels);
   // Release both pedal families before restoring the starting values: the

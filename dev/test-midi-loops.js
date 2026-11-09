@@ -1424,6 +1424,30 @@ check('a forward seek restores a pitch bend from before the current position', (
   'the bend before the seek target must be restored: ' + JSON.stringify(synth.log));
 });
 
+check('the expanded seam releases the previous pass\'s pedals', () => {
+  // Sustain is on inside the region and off at its start. The seam's own
+  // release/re-arm carries the finished pass's value, so the starting state
+  // has to land after it and both pedals have to be lifted first.
+  const synth = stubSynth(true);
+  const p = makePlayer(synth);
+  p.load(parseBytes(buildMidi([
+    tempo(), noteOnAt(0, 0, 60), noteOffAt(TPQ, 0, 60),
+    ccAt(TPQ, 110, 0),                       // loop start, 1000ms
+    noteOnAt(0, 0, 64), ccAt(TPQ, 64, 127),  // sustain on, 1500ms
+    noteOffAt(TPQ, 0, 64), ccAt(TPQ, 111, 0),// loop end, 2500ms
+  ])), true);
+  assert.ok(p.loop && p.loop.jumpMs > 0, 'expected an expanded seam');
+  p.play(() => {});
+  p.setPosition(p.loop.jumpMs - 30);
+  synth.log.length = 0;
+  p.processPlaySynth(0, 2048);
+  const sustain = synth.log.filter(([kind, ch, cc]) => kind === 'cc' && ch === 0 && cc === 64);
+  assert.ok(sustain.length > 0, 'expected sustain traffic at the seam');
+  assert.strictEqual(sustain[sustain.length - 1][3], 0,
+    'the pass must open with the loop-start pedal value, not the finished pass\'s: '
+      + JSON.stringify(sustain));
+});
+
 check('a seek into the expanded second pass uses the seam state', () => {
   // The first pass's program 40 must not be mistaken for the state at 2.8s:
   // the expanded seam at 2.5s resets the channel to the loop start's program 0.

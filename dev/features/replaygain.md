@@ -208,3 +208,29 @@ node dev/test-loudness-server.js     # HTTP route (skips if no dev server)
 
 The catalog harness snapshots `catalog.db` and never writes the live one. The
 server harness skips when the dev server or scanned rows are absent.
+
+## Upstream catch-up (2026-11-09)
+
+`feature/replaygain` was merged up to the current
+`feature/subtunes-as-first-class` (`90a3c1d24`, which includes upstream master
+`9455a8bc8`) at `2a1b59650`.
+
+The merge followed upstream's refactors rather than preserving the old shapes:
+
+- `App`: the handler now uses `ejected` / `INITIAL_PLAYBACK_STATE` and the
+  player-owned catalog metadata. ReplayGain hooks into the new sequencer-state
+  handler and still uses `sequencer.getCurrSongBuffer()` for local scans.
+- `server/index.js`: `/loudness` now handles array query values, backslashes and
+  trailing slashes like `/browse` and `/metadata`; the route is still a
+  hand-carry because the file is path-listed.
+- The scanner keeps the local catalog base out of the path-listed
+  `src/config/index.js`; `scripts/loudness-node-require.js` overrides the loaded
+  module's exports instead.
+- The overlay took the feature's SID `loadSignal` lifecycle and GME
+  `getDisplayPositionMs` over stale obsolete dev deltas; the updated dev patch
+  and sequencer harness came from `dev/overlay-subtunes`.
+
+Validation on the merged tree: `dev/run-tests.sh` 31 passed / 1 skipped / 0
+failed, and upstream's player lifecycle suite passes 14/14 from a clean
+`feature/replaygain` checkout. Upstream's favorite-representation test needs its
+catalog fixture, which this worktree's sample catalog does not contain.

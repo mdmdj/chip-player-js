@@ -1,6 +1,7 @@
 import React, { PureComponent } from 'react';
 import butterchurn from 'butterchurn';
 import butterchurnPresets from 'butterchurn-presets';
+import { reportVisualizerFps, startRefreshProbe } from './fps';
 
 // MilkDrop-style visuals via Butterchurn, a WebGL implementation of Milkdrop.
 // It owns a WebGL2 canvas and taps the same audio node the spectrogram does.
@@ -28,6 +29,8 @@ export default class ButterchurnVisualizer extends PureComponent {
     this.resizeObserver = null;
     this.presetNames = [];
     this.presetIndex = 0;
+    this.fpsFrames = 0;
+    this.fpsStart = 0;
     // The canvas keeps its CSS size; only the render buffer scales.
     this.baseWidth = props.width || 448;
     this.baseHeight = props.height || 800;
@@ -35,6 +38,7 @@ export default class ButterchurnVisualizer extends PureComponent {
 
   componentDidMount() {
     this.unmounted = false;
+    startRefreshProbe();
     const canvas = this.canvasRef.current;
     if (canvas && typeof ResizeObserver !== 'undefined') {
       this.resizeObserver = new ResizeObserver(this.handleResize);
@@ -230,6 +234,9 @@ export default class ButterchurnVisualizer extends PureComponent {
 
   start = () => {
     if (this.visualizer && this.animFrameId === null) {
+      this.fpsFrames = 0;
+      this.fpsStart = 0;
+      reportVisualizerFps(0, true);
       this.animFrameId = requestAnimationFrame(this.renderFrame);
     }
   };
@@ -239,11 +246,22 @@ export default class ButterchurnVisualizer extends PureComponent {
       cancelAnimationFrame(this.animFrameId);
       this.animFrameId = null;
     }
+    this.fpsFrames = 0;
+    this.fpsStart = 0;
+    reportVisualizerFps(0, false);
   };
 
-  renderFrame = () => {
+  renderFrame = (timestamp) => {
     this.animFrameId = null;
     if (!this.visualizer) return;
+    if (!this.fpsStart) this.fpsStart = timestamp;
+    this.fpsFrames++;
+    const elapsed = timestamp - this.fpsStart;
+    if (elapsed >= 500) {
+      reportVisualizerFps(this.fpsFrames * 1000 / elapsed, true);
+      this.fpsFrames = 0;
+      this.fpsStart = timestamp;
+    }
     this.visualizer.render();
     this.animFrameId = requestAnimationFrame(this.renderFrame);
   };

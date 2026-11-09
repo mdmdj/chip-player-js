@@ -1,6 +1,7 @@
-import React, { memo, useCallback, useContext } from 'react';
+import React, { memo, useCallback, useContext, useEffect, useState } from 'react';
 import PlayerParams from './PlayerParams';
 import { UserContext } from "./UserProvider";
+import { startRefreshProbe, subscribeVisualizerStats } from '../butterchurn/fps';
 
 const themes = [
   {
@@ -63,6 +64,18 @@ function Settings(props) {
   const isMidi = /\.(mid|midi|smf)$/i.test(sequencer?.getCurrSongPath?.() || '') ||
     Boolean(player?.fileExtensions?.includes('mid'));
   const milkdropActive = Boolean(showVisualizer && visualizerRenderer === 'milkdrop' && !isMidi);
+  const [vizStats, setVizStats] = useState({ fps: 0, refresh: 0, active: false });
+
+  useEffect(() => subscribeVisualizerStats(setVizStats), []);
+  useEffect(() => {
+    if (milkdropActive) startRefreshProbe();
+  }, [milkdropActive]);
+
+  const fps = vizStats.active ? Math.round(vizStats.fps) : 0;
+  const refresh = vizStats.refresh;
+  const fpsRatio = refresh > 0 ? fps / refresh : 0;
+  const fpsTone = !fps || !refresh ? 'idle' : fpsRatio >= 0.9 ? 'good' : fpsRatio >= 0.65 ? 'warn' : 'bad';
+  const fpsLabel = vizStats.active && fps ? `${fps} FPS` : '\u2014';
 
   const handleThemeChange = useCallback((e) => {
     updateSettings({ theme: e.target.value });
@@ -156,6 +169,20 @@ function Settings(props) {
               )}
             </select>
           </span>
+          <span className='PlayerParams-param MilkDrop-fps'
+                title='Measured MilkDrop frame rate. The target is estimated from requestAnimationFrame; it is not a monitor mode query.'>
+            <span className='PlayerParams-label-wide'>Frame rate:</span>
+            <span className={`MilkDrop-fps-value ${fpsTone}`}>{fpsLabel}</span>
+            {refresh > 0 &&
+              <span className='MilkDrop-fps-target'> / ~{refresh} Hz</span>
+            }
+          </span>
+          <div className='MilkDrop-credit'>
+            Powered by{' '}
+            <a href='https://github.com/jberg/butterchurn'
+               target='_blank'
+               rel='noopener noreferrer'>Butterchurn</a>
+          </div>
         </React.Fragment>
       }
     </div>

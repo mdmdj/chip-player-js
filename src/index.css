@@ -565,6 +565,14 @@ button.IconButton {
 .MilkDrop-loading-overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--neutral4); }
 .MilkDrop-canvas { display: block; width: 100%; height: 100%; margin-left: 1px; }
 .MilkDrop-error { padding: var(--charH) var(--charW2); text-align: right; }
+.MilkDrop-fps-value { color: var(--neutral4); }
+.MilkDrop-fps-value.good { color: #54f07a; }
+.MilkDrop-fps-value.warn { color: var(--clickable); }
+.MilkDrop-fps-value.bad { color: #ff6b6b; }
+.MilkDrop-fps-value.idle { color: var(--neutral2); }
+.MilkDrop-fps-target { color: var(--neutral2); }
+.MilkDrop-credit { margin-top: var(--charH); color: var(--neutral2); }
+.MilkDrop-credit a { color: var(--clickable); }
 .PresetNav-row { display: flex; align-items: center; justify-content: flex-end; gap: var(--charW1); }
 .Preset-glyph { display: inline-flex; align-items: center; color: var(--clickable); }
 .Preset-glyph-frame { opacity: .35; }

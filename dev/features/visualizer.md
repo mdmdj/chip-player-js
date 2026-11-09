@@ -66,13 +66,14 @@ The transport is styled like the footer's three-button group: pure CSS triangles
 shuffle glyph only for Random. The "Preset:" text label is replaced by the glyph.
 
 The Visualizer On/Off switch lives in the header (`AppHeader.js`), aligned with
-the "Chip Player JS" title line. The **Renderer** selector is window-right
-anchored at the tab row's vertical position, so it reads as part of that row
-rather than a line of its own between the header and the tabs. The selector is
-hidden on MIDI, where the piano roll owns the panel. Neither is in
-`.Visualizer-options`, so the panel holds only renderer-specific controls, sits
-above the absolute piano-keys overlay, and leaves the keys at full height; the
-spectrogram remains 448×800.
+the "Chip Player JS" title line. The **Renderer** selector is a compact drop-down,
+window-right anchored at the tab row's vertical position, so it reads as part of
+that row rather than a line of its own between the header and the tabs. It is
+shown only while the visualizer is **on** and the song is not MIDI (where the
+piano roll owns the panel); hidden when the visualizer is off, it cannot overlap
+the Settings tab. Neither is in `.Visualizer-options`, so the panel holds only
+renderer-specific controls, sits above the absolute piano-keys overlay, and
+leaves the keys at full height; the spectrogram remains 448×800.
 
 Only the active renderer runs. `Spectrogram` owns a rAF loop and is paused while
 MilkDrop, the piano roll, or the hidden visualizer is on screen (including on the

@@ -26,6 +26,9 @@ const UserContext = createContext({
 const DEFAULT_SETTINGS = {
   showPlayerSettings: false,
   showVisualizer: false,
+  visualizerRenderer: 'spectrogram',
+  milkdropMesh: '48x36',
+  milkdropResolution: 1,
   theme: 'msdos',
   silenceDuration: -1,
 };

@@ -18,10 +18,19 @@ function emit() {
 export function subscribeVisualizerStats(listener) {
   listeners.add(listener);
   listener(current);
-  return () => listeners.delete(listener);
+  return () => {
+    listeners.delete(listener);
+    if (listeners.size === 0) {
+      // The counter is unmounted (Settings closed). Keep the last target, but
+      // stop advertising a frame rate nobody is displaying.
+      current = { ...current, fps: 0, active: false };
+    }
+  };
 }
 
 export function reportVisualizerFps(fps, active = true) {
+  // Settings is the only consumer. Do not churn the store while it is closed.
+  if (listeners.size === 0) return;
   current = {
     ...current,
     fps: active ? Math.max(0, Math.round(fps)) : 0,

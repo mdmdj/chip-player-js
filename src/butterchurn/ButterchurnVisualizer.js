@@ -1,7 +1,7 @@
 import React, { PureComponent } from 'react';
 import butterchurn from 'butterchurn';
 import butterchurnPresets from 'butterchurn-presets';
-import { reportVisualizerFps, startRefreshProbe } from './fps';
+import { reportVisualizerFps } from './fps';
 
 // MilkDrop-style visuals via Butterchurn, a WebGL implementation of Milkdrop.
 // It owns a WebGL2 canvas and taps the same audio node the spectrogram does.
@@ -38,7 +38,6 @@ export default class ButterchurnVisualizer extends PureComponent {
 
   componentDidMount() {
     this.unmounted = false;
-    startRefreshProbe();
     const canvas = this.canvasRef.current;
     if (canvas && typeof ResizeObserver !== 'undefined') {
       this.resizeObserver = new ResizeObserver(this.handleResize);

@@ -54,22 +54,28 @@ class FakePlayer extends EventEmitter {
   canPlay() { return true; }
   setLooping() {}
   suspend() {}
+  // A load claims a cancellation signal (the base Player's beginLoad).
+  beginLoad() {
+    this.loadSignal = { aborted: false };
+    return this.loadSignal;
+  }
+  fetchCatalogMetadata() {}
   stop() {
+    // Stopping is not an end: the sequencer stops the player when switching
+    // songs. A real end announces itself with 'playerSongEnd'.
     this.stopped = true;
-    this.emit('playerStateUpdate', { isStopped: true });
   }
   getMetadata() { return {}; }
   getDurationMs() { return 1000; }
   getPositionMs() { return 0; }
   getTempo() { return 1; }
   getVoiceMask() { return []; }
-  getVoiceNames() { return []; }
   getVoiceGroups() { return []; }
   async loadData(data, filepath, persistedSettings, subtune = 0) {
     this.loads.push(`${filepath}#${subtune}`);
     this.stopped = false;
-    this.emit('playerStateUpdate', { isStopped: false, numSubtunes: 1, subtune });
-    this.stop();
+    this.emit('playerStateUpdate', { paused: false, numSubtunes: 1, subtune });
+    this.emit('playerSongEnd');
   }
 }
 
@@ -83,10 +89,11 @@ class ManualPlayer extends FakePlayer {
   async loadData(data, filepath, persistedSettings, subtune = 0) {
     this.loads.push(`${filepath}#${subtune}`);
     this.stopped = false;
-    this.emit('playerStateUpdate', { isStopped: false, numSubtunes: 1, subtune });
+    this.emit('playerStateUpdate', { paused: false, numSubtunes: 1, subtune });
   }
   endNow() {
-    this.stop();
+    this.stopped = true;
+    this.emit('playerSongEnd');
   }
 }
 

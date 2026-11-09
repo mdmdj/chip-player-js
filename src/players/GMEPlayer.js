@@ -336,6 +336,23 @@ export default class GMEPlayer extends Player {
     return this.looping || !!this.params.indefinitePlayback;
   }
 
+  getDisplayPositionMs() {
+    // Playlist position for the slider head. Tracks with a real loop region
+    // fold into the band while looping; anything else shows the real
+    // position. Blind loops (indefinite with no known region) are handled in
+    // the footer, which parks the head and lets the elapsed time climb.
+    const abs = this.getPositionMs();
+    const band = this.getLoopBandMs();
+    if (band) {
+      if (abs <= band.startMs) return abs;
+      if (!this.isPlayingIndefinitely()) return abs;
+      const loopLength = band.endMs - band.startMs;
+      if (loopLength <= 0) return abs;
+      return band.startMs + ((abs - band.startMs) % loopLength);
+    }
+    return abs;
+  }
+
   restartTrack() {
     this.resetFade();
     this.silenceSamplesRemaining = 0;

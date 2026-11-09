@@ -329,10 +329,7 @@ export default class XMPPlayer extends Player {
           this.metadata.loop_length = this._durationMs - loopStartMs;
           // The band appears mid-song, after the footer already rendered
           // without one -- tell the app to re-render it. Once per song.
-          this.emit('playerStateUpdate', {
-            ...this.getBasePlayerState(),
-            isStopped: false,
-          });
+          this.emit('playerStateUpdate', this.getBasePlayerState());
         }
       }
     }

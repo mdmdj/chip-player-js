@@ -158,6 +158,7 @@ async function main() {
     const row = rows.find(r => r.path === singleSong.path);
     assert.ok(row, `${singleSong.path} missing from its directory listing`);
     assert.strictEqual(row.type, 'file', 'one sub-tune is not a folder');
+    assert.strictEqual(row.songId, singleSong.song_id, 'the row carries its song id');
     assert.strictEqual(row.url, `/?play=${enc(singleSong.song_id)}`);
     assert.ok(!row.url.includes('subtune='), 'no sub-tune parameter for a single song');
   });
@@ -168,7 +169,7 @@ async function main() {
     rows.forEach((row, i) => {
       assert.strictEqual(row.type, 'file', 'sub-tunes are playable rows');
       assert.strictEqual(row.subtune, i, '0-based, in order');
-      assert.strictEqual(row.song_id, multiSong.song_id, 'addressed by the parent file hash');
+      assert.strictEqual(row.songId, multiSong.song_id, 'addressed by the parent file hash');
       assert.strictEqual(row.url, `/?play=${enc(multiSong.song_id)}&subtune=${i}`);
     });
   });

@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+#
+# DEV-ONLY: one front end for the overlay targets named in dev/overlay.conf.
+#
+#   dev/overlay.sh [<target>] list        the targets and where they are checked out
+#   dev/overlay.sh [<target>] status      resolved target, worktrees, ports, arm state
+#   dev/overlay.sh [<target>] plan        dev/promote.sh (plan only; no write path)
+#   dev/overlay.sh [<target>] promote     dev/promote-apply.sh (requires the arm key)
+#   dev/overlay.sh [<target>] refresh [--dry-run]  kit sync + rebase; `all` = every target
+#   dev/overlay.sh [<target>] rebase      dev/rebase.sh (the legacy rebase model)
+#   dev/overlay.sh [<target>] push        dev/push-overlay.sh (force-with-lease)
+#   dev/overlay.sh [<target>] dev         npm run dev in the overlay worktree, on its ports
+#   dev/overlay.sh [<target>] arm         print the arm-key path to touch (does not touch it)
+#   dev/overlay.sh [<target>] bringup [<feature-branch>]  one command: branches, worktrees, ports, engines, deps, run-ready
+#   dev/overlay.sh new [<name>] [<feature-branch>]   dev/overlay-new.sh
+#
+# <target> is a name, feature branch or overlay branch from dev/overlay.conf; with
+# none, the current branch's target (or the manifest default). Promotion is still
+# gated by the arm key: this front end never arms for you, and running `promote`
+# unarmed refuses exactly as dev/promote-apply.sh does.
+set -euo pipefail
+
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$DIR/.." && pwd)"
+
+# shellcheck source=dev/overlaylib.sh
+source "$DIR/overlaylib.sh"
+
+is_cmd() {
+  case "$1" in
+    list|status|plan|promote|refresh|rebase|push|dev|arm|new|bringup|help) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+usage() { sed -n '2,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+
+# No arguments means "show me what this does" -- the pattern every dev/*.sh
+# entry point follows, so a new worktree can discover the tooling.
+if [ -z "${1:-}" ]; then
+  usage
+  exit 0
+fi
+if is_cmd "$1"; then cmd="$1"; target="${2:-}"; else target="$1"; cmd="${2:-status}"; fi
+# An optional third argument: the feature branch, for `new` and `bringup`.
+extra="${3:-}"
+
+die() { echo "overlay: $*" >&2; exit 1; }
+
+case "$cmd" in
+  list)
+    printf '%-10s %-38s %-22s %s\n' NAME FEATURE OVERLAY PORTS
+    while IFS= read -r r; do
+      [ -n "$r" ] || continue
+      read -r n f o w a <<< "$r"
+      printf '%-10s %-38s %-22s %s/%s\n' "$n" "$f" "$o" "$w" "$a"
+    done <<< "$(overlay_rows)"
+    ;;
+
+  status)
+    overlay_resolve "$target"
+    overlay_require_worktrees
+    arm="$OV_OVERLAY_WT/dev/.promote-armed"
+    base="-"
+    regfile="$(overlay_registry_file)"
+    if [ -f "$regfile" ]; then
+      base="$(awk -v n="$OV_NAME" '$1 == n { print ($6 == "" ? "-" : $6); exit }' "$regfile")"
+    fi
+    kit_state="(absent)"
+    if git show-ref --verify --quiet refs/heads/dev/kit; then
+      kit_state="present"
+      mapfile -t kit_paths < <(bash "$DIR/kit.sh" owned 2>/dev/null || true)
+      mapfile -t kit_never < <(bash "$DIR/kit.sh" never 2>/dev/null || true)
+      kit_excl=(":(exclude)AGENTS.md")
+      for n in "${kit_never[@]}"; do [ -n "$n" ] && kit_excl+=(":(exclude)$n"); done
+      if [ ${#kit_paths[@]} -gt 0 ]; then
+        kit_drift="$(git -C "$OV_OVERLAY_WT" diff --name-only dev/kit -- "${kit_paths[@]}" "${kit_excl[@]}" 2>/dev/null || true)"
+        if [ -n "$kit_drift" ]; then
+          kit_state="present (stale: $(printf '%s\n' "$kit_drift" | wc -l | tr -d ' ') file(s); run refresh)"
+        fi
+      fi
+    fi
+    printf 'target    %s\n' "$OV_NAME"
+    printf 'feature   %s  (%s)\n' "$OV_FEATURE" "$OV_FEATURE_WT"
+    printf 'base      %s\n' "$base"
+    printf 'overlay   %s  (%s)\n' "$OV_OVERLAY" "$OV_OVERLAY_WT"
+    printf 'ports     wds=%s api=%s\n' "$OV_WDS" "$OV_API"
+    printf 'arm key   %s%s\n' "${arm#"$ROOT"/}" "$([ -e "$arm" ] && echo '  (ARMED)' || echo '')"
+    printf 'kit       %s\n' "$kit_state"
+    ;;
+
+  plan)    exec "$DIR/promote.sh" "$target" ;;
+  promote) exec "$DIR/promote-apply.sh" "$target" ;;
+  rebase)  exec "$DIR/rebase.sh" "$target" ;;
+  push)    exec "$DIR/push-overlay.sh" "$target" ;;
+  new)     exec "$DIR/overlay-new.sh" "$target" ${extra:+"$extra"} ;;
+  bringup) exec "$DIR/bringup.sh" "$target" "${@:3}" ;;
+  arm)
+    overlay_resolve "$target"
+    overlay_require_worktrees
+    echo "${OV_OVERLAY_WT#"$ROOT"/}/dev/.promote-armed"
+    ;;
+
+  help) usage ;;
+
+  refresh) exec "$DIR/refresh.sh" ${target:+"$target"} ${extra:+"$extra"} ;;
+
+  dev)
+    overlay_resolve "$target"
+    overlay_require_worktrees
+    [ -d "$OV_OVERLAY_WT/node_modules" ] || \
+      echo "overlay: no node_modules in $OV_OVERLAY_WT; install there first" >&2
+    cd "$OV_OVERLAY_WT"
+    echo "overlay: npm run dev on WDS_PORT=$OV_WDS API_PORT=$OV_API ($OV_NAME)"
+    WDS_PORT="$OV_WDS" API_PORT="$OV_API" exec npm run dev
+    ;;
+
+  *) die "unknown command '$cmd'" ;;
+esac

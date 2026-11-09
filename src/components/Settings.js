@@ -41,7 +41,6 @@ function Settings(props) {
     ejected,
     tempo,
     voiceMask,
-    voiceNames,
     voiceGroups,
     onVoiceMaskChange,
     onTempoChange,
@@ -108,7 +107,6 @@ function Settings(props) {
           ejected={ejected}
           tempo={tempo}
           voiceMask={voiceMask}
-          voiceNames={voiceNames}
           voiceGroups={voiceGroups}
           onTempoChange={onTempoChange}
           onVoiceMaskChange={onVoiceMaskChange}

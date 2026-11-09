@@ -197,10 +197,8 @@ export default class GMEPlayer extends Player {
     this.fadeFinished = false;
     this.subtune = subtune;
     this.metadata = this._parseMetadata(subtune);
-    this.emit('playerStateUpdate', {
-      ...this.getBasePlayerState(),
-      isStopped: false,
-    });
+    console.debug('GMEPlayer.playSubtune(subtune=%s)', subtune);
+    this.emit('playerStateUpdate', this.getBasePlayerState());
     const res = core._gme_start_track(this.gmeCtx, subtune);
     if (this.gmeCtx) {
       core._gme_set_fade(this.gmeCtx, 200000000);
@@ -208,7 +206,7 @@ export default class GMEPlayer extends Player {
     return res;
   }
 
-  loadData(data, filepath, persistedSettings, subtune = 0) {
+  async loadData(data, filepath, persistedSettings, subtune = 0) {
     this.subtune = subtune;
     this.fadingOut = false;
     this.fadeStartMs = null;
@@ -302,8 +300,22 @@ export default class GMEPlayer extends Player {
     return meta;
   }
 
-  getVoiceName(index) {
-    if (this.gmeCtx) return core.UTF8ToString(core._gme_voice_name(this.gmeCtx, index));
+  getVoiceGroups() {
+    if (!this.gmeCtx) return [];
+    const numVoices = core._gme_voice_count(this.gmeCtx);
+    const voices = [];
+    for (let i = 0; i < numVoices; i++) {
+      const name = core.UTF8ToString(core._gme_voice_name(this.gmeCtx, i));
+      voices.push({
+        idx: i,
+        name: name || `Voice ${i + 1}`,
+      });
+    }
+    return [{
+      name: this.metadata?.system || 'Voices',
+      icon: !!this.metadata?.system,
+      voices,
+    }];
   }
 
   getNumSubtunes() {
@@ -324,26 +336,6 @@ export default class GMEPlayer extends Player {
     return 0;
   }
 
-  getDisplayPositionMs() {
-    // Playlist position for the slider head. Tracks with a real loop region
-    // fold into the band while looping; anything else shows the real
-    // position. Blind loops (indefinite with no known region) are handled in
-    // the footer, which parks the head and lets the elapsed time climb.
-    const abs = this.getPositionMs();
-    const band = this.getLoopBandMs();
-    if (band) {
-      if (abs <= band.startMs) return abs;
-      if (!this.isPlayingIndefinitely()) return abs;
-      const loopLength = band.endMs - band.startMs;
-      if (loopLength <= 0) return abs;
-      return band.startMs + ((abs - band.startMs) % loopLength);
-    }
-    return abs;
-  }
-
-  getMetadata() {
-    return this.metadata;
-  }
 
   getParameter(id) {
     return this.params[id];
@@ -433,6 +425,23 @@ export default class GMEPlayer extends Player {
     return this.looping || !!this.params.indefinitePlayback;
   }
 
+  getDisplayPositionMs() {
+    // Playlist position for the slider head. Tracks with a real loop region
+    // fold into the band while looping; anything else shows the real
+    // position. Blind loops (indefinite with no known region) are handled in
+    // the footer, which parks the head and lets the elapsed time climb.
+    const abs = this.getPositionMs();
+    const band = this.getLoopBandMs();
+    if (band) {
+      if (abs <= band.startMs) return abs;
+      if (!this.isPlayingIndefinitely()) return abs;
+      const loopLength = band.endMs - band.startMs;
+      if (loopLength <= 0) return abs;
+      return band.startMs + ((abs - band.startMs) % loopLength);
+    }
+    return abs;
+  }
+
   restartTrack() {
     this.fadingOut = false;
     this.fadeStartMs = null;
@@ -504,11 +513,10 @@ export default class GMEPlayer extends Player {
   }
 
   stop() {
-    this.suspend();
+    super.stop();
     if (this.gmeCtx) core._gme_delete(this.gmeCtx);
     this.gmeCtx = null;
     console.debug('GMEPlayer.stop()');
-    this.emit('playerStateUpdate', { isStopped: true });
   }
 
 }

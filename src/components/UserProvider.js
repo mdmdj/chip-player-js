@@ -6,6 +6,7 @@ import firebaseConfig from '../config/firebaseConfig';
 import { API_BASE, CATALOG_PREFIX } from '../config';
 import { pathJoin, songRef } from '../util';
 import { getWithAuth, postWithAuth } from '../util';
+import { logAddFavorite } from '../analytics';
 
 const UserContext = createContext({
   user: null,
@@ -172,7 +173,7 @@ const UserProvider = ({ children }) => {
     }
   };
 
-  const handleToggleFavorite = async (path, subtune = 0, songId) => {
+  const handleToggleFavorite = async (path, subtune = 0, songId, title) => {
     if (user) {
       // Invalidate any read in flight: this toggle's optimistic state is newer
       // than anything a GET issued before it can report. The fallback refresh
@@ -201,6 +202,7 @@ const UserProvider = ({ children }) => {
         if (isFavorite) {
           await removeFavorite(fave);
         } else {
+          logAddFavorite({ songId: fave.songId, path: fave.path, title });
           addResult = await addFavorite(fave);
         }
       } catch (e) {

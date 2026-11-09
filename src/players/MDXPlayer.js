@@ -43,7 +43,8 @@ export default class MDXPlayer extends Player {
     this.buffer = this.core._malloc(this.bufferSize * 4); // 2 ch, 16-bit
   }
 
-  loadData(data, filename, persistedSettings) {
+  async loadData(data, filename, persistedSettings) {
+    const loadSignal = this.pendingLoad?.signal || this.beginLoad();
     // MDXPlayer reads song data from the Emscripten filesystem,
     // rather than loading bytes from memory like other players.
     let err;
@@ -53,6 +54,7 @@ export default class MDXPlayer extends Player {
     // First, write PDX sample files into Emscripten filesystem.
     return ensureEmscFileWithData(this.core, mdxFilename, data)
       .then(() => {
+        if (loadSignal.aborted) return;
         const pdx = this.core.ccall(
           'mdx_get_pdx_filename', 'string',
           ['number', 'string'],
@@ -69,7 +71,9 @@ export default class MDXPlayer extends Player {
         }
       })
       .then(() => {
-        this.muteAudioDuringCall(this.audioNode, () => {
+        if (loadSignal.aborted) return;
+        return this.muteAudioDuringCall(this.audioNode, () => {
+          if (loadSignal.aborted) return;
           err = this.core.ccall(
             'mdx_open', 'number',
             ['number', 'string', 'string'],
@@ -95,10 +99,7 @@ export default class MDXPlayer extends Player {
           this.resolveParamValues(persistedSettings);
           this.setTempo(persistedSettings.tempo || 1);
           this.resume();
-          this.emit('playerStateUpdate', {
-            ...this.getBasePlayerState(),
-            isStopped: false,
-          });
+          this.emit('playerStateUpdate', this.getBasePlayerState());
         });
       });
   }
@@ -294,16 +295,8 @@ export default class MDXPlayer extends Player {
     return this._durationMs;
   }
 
-  getMetadata() {
-    return this.metadata;
-  }
-
   isPlaying() {
     return !this.isPaused();
-  }
-
-  getVoiceName(index) {
-    if (this.mdxCtx) return this.core.UTF8ToString(this.core._mdx_get_track_name(this.mdxCtx, index));
   }
 
   getVoiceGroups() {
@@ -374,13 +367,12 @@ export default class MDXPlayer extends Player {
   }
 
   stop() {
-    this.suspend();
+    super.stop();
     this.core._mdx_close(this.mdxCtx);
     // mdx_close frees the song data behind mdxCtx; mark it closed so a later
     // setLooping() (Sequencer calls it before the next loadData) cannot hand
     // the freed context to _mdx_set_max_loop.
     this.songOpen = false;
     console.debug('MDXPlayer.stop()');
-    this.emit('playerStateUpdate', { isStopped: true });
   }
 }

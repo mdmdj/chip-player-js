@@ -25,7 +25,10 @@ export default class N64Player extends Player {
     },
     {
       id: 'detectSongEnd',
-      label: (<span>Detect Song End While <span className='inline-icon icon-repeat'/>One</span>),
+      label: React.createElement('span', null,
+        'Detect Song End While ',
+        React.createElement('span', { className: 'inline-icon icon-repeat' }),
+        'One'),
       type: 'toggle',
       hint: DETECT_SONG_END_HINT,
       defaultValue: true,
@@ -63,9 +66,10 @@ export default class N64Player extends Player {
     return this.endDetector.getTripAtMs(this.getDurationMs());
   }
 
-  loadData(data, filename, persistedSettings) {
+  async loadData(data, filename, persistedSettings) {
     // N64Player reads song data from the Emscripten filesystem,
     // rather than loading bytes from memory like other players.
+    const loadSignal = this.pendingLoad?.signal || this.beginLoad();
     this.resetEndDetector();
     let err;
     this.filepathMeta = Player.metadataFromFilepath(filename);
@@ -86,6 +90,7 @@ export default class N64Player extends Player {
 
     return Promise.all(filePromises)
       .then(() => {
+        if (loadSignal.aborted) return;
         err = this.core.ccall(
           'n64_load_file', 'number',
           ['string', 'number', 'number', 'number'],
@@ -100,10 +105,7 @@ export default class N64Player extends Player {
         this.resolveParamValues(persistedSettings);
 
         this.resume();
-        this.emit('playerStateUpdate', {
-          ...this.getBasePlayerState(),
-          isStopped: false,
-        });
+        this.emit('playerStateUpdate', this.getBasePlayerState());
       });
   }
 
@@ -180,10 +182,6 @@ export default class N64Player extends Player {
     return this.core._n64_get_duration_ms();
   }
 
-  getMetadata() {
-    return this.metadata;
-  }
-
   isPlaying() {
     return !this.isPaused();
   }
@@ -232,9 +230,8 @@ export default class N64Player extends Player {
   }
 
   stop() {
-    this.suspend();
+    super.stop();
     this.core._n64_shutdown();
     console.debug('N64Player.stop()');
-    this.emit('playerStateUpdate', { isStopped: true });
   }
 }

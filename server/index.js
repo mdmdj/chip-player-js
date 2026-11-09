@@ -22,7 +22,7 @@ const axiosRetry = require('axios-retry').default;
 const { XMLParser } = require('fast-xml-parser');
 
 const { dbStatements } = require('./database.js');
-const { resolveDirectoryMetadata } = require('./directory-metadata');
+const { resolveDirectoryMetadata, escapeHtml, safeJsonLd } = require('./directory-metadata');
 const { requireAuth, optionalAuth } = require('./middleware/auth.js');
 const { validate } = require('./middleware/validate');
 const { SettingsSchema, FavoriteSchema, PlaybackSchema } = require('./schemas');
@@ -114,7 +114,14 @@ if (isDev) {
         pathname.startsWith('/sockjs-node') ||
         /\.hot-update\.(json|js)(\.map)?$/.test(pathname)
       );
-    }
+    },
+    on: {
+      proxyRes: (proxyRes, req) => {
+        if (req.url.match(/\.(ttf|woff|woff2|eot|mp3)$/)) {
+          proxyRes.headers['cache-control'] = 'public, max-age=31536000, immutable';
+        }
+      },
+    },
   });
 
   app.use(devProxy);
@@ -219,8 +226,8 @@ async function getLogoImage() {
 }
 
 app.get('/preview', cache1Hour, async (req, res) => {
-  const { s: songId } = req.query;
-  if (!songId) {
+  const songId = Array.isArray(req.query.s) ? req.query.s[0] : req.query.s;
+  if (!songId || typeof songId !== 'string') {
     return res.status(400).send('Missing song ID');
   }
 
@@ -229,13 +236,15 @@ app.get('/preview', cache1Hour, async (req, res) => {
     let imageUrl = null;
 
     // getting crazy here ···
-    if (song.image_path) {
-      imageUrl = path.join(LOCAL_CATALOG_ROOT, song.image_path);
-    }
-    else if (song.path.endsWith('.sid')) {
-      const sidMeta = getSidMetadataByPathStmt.get('_'+song.path);
-      if (sidMeta) {
-        imageUrl = await getCsdbImageUrl(sidMeta.csdbid);
+    if (song) {
+      if (song.image_path) {
+        imageUrl = path.join(LOCAL_CATALOG_ROOT, song.image_path);
+      }
+      else if (song.path && song.path.endsWith('.sid')) {
+        const sidMeta = getSidMetadataByPathStmt.get('_'+song.path);
+        if (sidMeta) {
+          imageUrl = await getCsdbImageUrl(sidMeta.csdbid);
+        }
       }
     }
 
@@ -328,12 +337,17 @@ app.get('/preview', cache1Hour, async (req, res) => {
  * holds.
  */
 router.get('/search', cache1Hour, (req, res) => {
-  const { limit = 100, query } = req.query;
+  const rawQuery = Array.isArray(req.query.query) ? req.query.query[0] : (req.query.query || '');
+  const parsedLimit = parseInt(req.query.limit, 10);
+  const limit = Math.min(Math.max(isNaN(parsedLimit) ? 100 : parsedLimit, 1), 500);
   const start = performance.now();
-  const cacheKey = (query || '').trim();
+  const cacheKey = rawQuery.trim();
 
   let items = [];
-  const ftsQuery = ftsQueryFor(query);
+  const ftsQuery = ftsQueryFor(rawQuery);
+  if (!cacheKey) {
+    return res.json({ items: [], total: 0 });
+  }
 
   if (searchMap.has(cacheKey)) {
     // The map holds a fixed 50 per 1-2 letter query, so `limit` still caps it.
@@ -347,7 +361,7 @@ router.get('/search', cache1Hour, (req, res) => {
   }
 
   const time = (performance.now() - start).toFixed(1);
-  console.log('Returned %s results for "%s" in %s ms.', items.length, query, time);
+  console.log('Returned %s results for "%s" in %s ms.', items.length, rawQuery, time);
 
   res.json({
     items: items,
@@ -375,7 +389,8 @@ function toSongRefs(rows) {
 }
 
 router.get('/random', (req, res) => {
-  const limit = parseInt(req.query.limit, 10) || 1;
+  const parsedLimit = parseInt(req.query.limit, 10);
+  const limit = Math.min(Math.max(isNaN(parsedLimit) ? 1 : parsedLimit, 1), 100);
   const items = toSongRefs(getShuffleStmt.all('', '%', limit));
   res.json({
     items: items,
@@ -397,8 +412,10 @@ function escapeLike(value) {
  * shuffles as itself (all of its sub-tunes, if it has any).
  */
 router.get('/shuffle', (req, res) => {
-  const limit = parseInt(req.query.limit, 10) || 100;
-  const reqPath = (req.query.path || '').replace(/^\/+|\/+$/g, '');
+  const parsedLimit = parseInt(req.query.limit, 10);
+  const limit = Math.min(Math.max(isNaN(parsedLimit) ? 100 : parsedLimit, 1), 500);
+  const rawPath = Array.isArray(req.query.path) ? req.query.path[0] : (req.query.path || '');
+  const reqPath = rawPath.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
   const items = toSongRefs(getShuffleStmt.all(
     reqPath,
     reqPath === '' ? '%' : `${escapeLike(reqPath)}/%`,
@@ -430,12 +447,20 @@ function toUnixSeconds(value) {
  * directory as `type: 'songfolder'`.
  */
 router.get('/browse', cache1Hour, async (req, res) => {
-  const { path: reqPath } = req.query;
+  const rawPath = Array.isArray(req.query.path) ? req.query.path[0] : (req.query.path || '');
 
   let idx = 0;
   if (browseLocalFilesystem) {
     try {
-      const files = await fs.readdir(path.join(LOCAL_CATALOG_ROOT, reqPath), { withFileTypes: true });
+      const cleanPath = rawPath.replace(/\\/g, '/').replace(/^\/+/, '');
+      const rootResolved = path.resolve(LOCAL_CATALOG_ROOT);
+      const targetPath = path.resolve(rootResolved, cleanPath);
+
+      if (targetPath !== rootResolved && !targetPath.startsWith(rootResolved + path.sep)) {
+        return res.status(403).json([]);
+      }
+
+      const files = await fs.readdir(targetPath, { withFileTypes: true });
       const result = files
         .filter(file => {
           const ext = path.extname(file.name).toLowerCase().slice(1);
@@ -443,7 +468,7 @@ router.get('/browse', cache1Hour, async (req, res) => {
         })
         .map((file, i) => {
           return {
-            path: path.join(reqPath, file.name),
+            path: path.join(cleanPath, file.name),
             size: 0,
             mtime: 0,
             type: file.isDirectory() ? 'directory' : 'file',
@@ -456,7 +481,7 @@ router.get('/browse', cache1Hour, async (req, res) => {
       res.status(404).json([]);
     }
   } else {
-    const normalizedPath = reqPath ? reqPath.replace(/^\/+|\/+$/g, '') : '';
+    const normalizedPath = rawPath.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
 
     const dirRow = getDirIdStmt.get(normalizedPath);
     if (dirRow) {
@@ -586,7 +611,15 @@ async function getCsdbImageUrl(csdbid) {
   const screenshotUrl = releases.sort((a, b) => {
     return releaseDate(a) - releaseDate(b);
   }).find(r => r.ScreenShot)?.ScreenShot;
-  if (screenshotUrl && screenshotUrl.includes('csdb.dk')) return screenshotUrl;
+  if (screenshotUrl) {
+    try {
+      const parsed = new URL(screenshotUrl);
+      if (parsed.protocol === 'https:' && (parsed.hostname === 'csdb.dk' || parsed.hostname.endsWith('.csdb.dk'))) {
+        return screenshotUrl;
+      }
+    } catch (e) {}
+  }
+  return null;
 }
 
 /**
@@ -603,10 +636,11 @@ async function getCsdbImageUrl(csdbid) {
  * Pass `subtune=N` to get metadata for a specific sub-tune (its title).
  */
 router.get('/metadata', cache1Hour, (req, res, next) => {
-  const { path: reqPath, subtune } = req.query;
-  if (!reqPath) return res.json({});
+  const rawPath = Array.isArray(req.query.path) ? req.query.path[0] : (req.query.path || '');
+  const { subtune } = req.query;
+  if (!rawPath) return res.json({});
 
-  const normalizedPath = reqPath.replace(/^\/+/, '');
+  const normalizedPath = rawPath.replace(/\\/g, '/').replace(/^\/+/, '');
   const meta = getMetadataStmt.get(normalizedPath);
 
   if (meta) {
@@ -675,9 +709,11 @@ router.get('/metadata', cache1Hour, (req, res, next) => {
  * gain rather than apply a partial average.
  */
 router.get('/loudness', cache1Hour, (req, res) => {
-  const normalizedPath = (req.query.path || '').replace(/^\/+/, '');
+  const rawPath = Array.isArray(req.query.path) ? req.query.path[0] : (req.query.path || '');
+  const normalizedPath = rawPath.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
   if (!normalizedPath) return res.json({ track: null, album: null, subtuneCount: null });
-  const subtune = Number.parseInt(req.query.subtune, 10) || 0;
+  const rawSubtune = Array.isArray(req.query.subtune) ? req.query.subtune[0] : req.query.subtune;
+  const subtune = Math.max(0, Number.parseInt(rawSubtune, 10) || 0);
 
   const track = getLoudnessStmt.get(normalizedPath, subtune);
   const file = getLoudnessFileStmt.get(normalizedPath);
@@ -751,8 +787,14 @@ const topCache = new LRUCache({
   ttl: 1000 * 60 * 60, // 60 minutes
 });
 
+const formatTopItem = ({ song_id, file_size, ...rest }) => ({
+  ...rest,
+  songId: song_id,
+  size: file_size,
+});
+
 /**
- * Returns: { items: [ { song_id, plays, title, artist, game, system, path, file_size, mtime }, ... ], total }
+ * Returns: { items: [ { songId, plays, title, artist, game, system, path, size, mtime }, ... ], total }
  */
 router.get('/top', optionalAuth, (req, res) => {
   const metric = req.query.metric || 'plays';
@@ -771,7 +813,7 @@ router.get('/top', optionalAuth, (req, res) => {
       return res.json(cached);
     }
 
-    const items = getTopFavoritesStmt.all(overFetch, limit);
+    const items = getTopFavoritesStmt.all(overFetch, limit).map(formatTopItem);
     const responseData = {
       items,
       total: items.length,
@@ -784,7 +826,7 @@ router.get('/top', optionalAuth, (req, res) => {
     if (!req.userId) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
-    const items = getUserTopStmt.all(req.userId, sinceTimestamp, overFetch, limit);
+    const items = getUserTopStmt.all(req.userId, sinceTimestamp, overFetch, limit).map(formatTopItem);
     return res.json({
       items,
       total: items.length,
@@ -797,7 +839,7 @@ router.get('/top', optionalAuth, (req, res) => {
     return res.json(cached);
   }
 
-  const items = getGlobalTopStmt.all(sinceTimestamp, overFetch, limit);
+  const items = getGlobalTopStmt.all(sinceTimestamp, overFetch, limit).map(formatTopItem);
   const responseData = {
     items,
     total: items.length,
@@ -892,14 +934,14 @@ router.post(
         .replace('https://gifx.co/music/', '')
         .replace('http://localhost:8080/catalog/', '');
       try { songPath = decodeURIComponent(songPath); } catch (e) {}
-      removeFavoriteByPathStmt.run({
+      const result = removeFavoriteByPathStmt.run({
         userId: req.userId,
         path: songPath,
         subtune,
         now,
       });
       // Get rows affected
-      const rowsAffected = removeFavoriteByPathStmt.changes;
+      const rowsAffected = result.changes;
       if (rowsAffected === 0) {
         return res.status(404).json({ error: 'Favorite not found' });
       }
@@ -984,13 +1026,13 @@ app.get(clientRoutes, cache1Hour, async (req, res) => {
   const defaultNoscript = 'You need to enable JavaScript to run this app.';
 
   const finalHtml = html
-    .replace(/__TITLE__/g, title)
-    .replace(/__DESCRIPTION__/g, description)
-    .replace(/__URL__/g, url)
-    .replace(/__IMAGE__/g, previewImage)
-    .replace(/<chip-config><\/chip-config>/g, scriptTag)
-    .replace(/__SCHEMA_JSON_LD__/g, schemaJsonLd || '')
-    .replace(/__NOSCRIPT_CONTENT__/g, noscriptContent || defaultNoscript);
+    .replace(/__TITLE__/g, () => escapeHtml(title))
+    .replace(/__DESCRIPTION__/g, () => escapeHtml(description))
+    .replace(/__URL__/g, () => escapeHtml(url))
+    .replace(/__IMAGE__/g, () => escapeHtml(previewImage))
+    .replace(/<chip-config><\/chip-config>/g, () => scriptTag)
+    .replace(/__SCHEMA_JSON_LD__/g, () => safeJsonLd(schemaJsonLd))
+    .replace(/__NOSCRIPT_CONTENT__/g, () => noscriptContent || defaultNoscript);
 
   res.send(finalHtml);
 });
@@ -1092,7 +1134,7 @@ function getHtmlInjectionsForRequest(req) {
         // has to read meaning into an absent field.
         subtuneCount,
       };
-      scriptTag = `<script>window.__chipConfig = ${JSON.stringify(chipConfig)};</script>`;
+      scriptTag = `<script>window.__chipConfig = ${JSON.stringify(chipConfig).replace(/</g, '\\u003c')};</script>`;
 
       // The sub-tune's own name when the format gives one, else "Tune N".
       const subtuneTitle = subtune > 0
@@ -1134,9 +1176,9 @@ function getHtmlInjectionsForRequest(req) {
       if (song.game) {
         songSchema.inAlbum = { '@type': 'MusicAlbum', name: song.game };
       }
-      schemaJsonLd = `<script type="application/ld+json">${JSON.stringify(songSchema)}</script>`;
+      schemaJsonLd = JSON.stringify(songSchema);
 
-      noscriptContent = `<div class="seo-crawler-content"><h1>${title}</h1><p>${description}</p><p><a href="${url}">Play track</a></p></div>`;
+      noscriptContent = `<div class="seo-crawler-content"><h1>${escapeHtml(title)}</h1><p>${escapeHtml(description)}</p><p><a href="${escapeHtml(url)}">Play track</a></p></div>`;
     }
   }
 

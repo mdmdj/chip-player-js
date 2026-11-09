@@ -37,11 +37,22 @@ async function fetchHtml(route) {
   return res.text();
 }
 
-// Pull the tags the SEO work is responsible for out of the served HTML.
+// Pull the tags the SEO work is responsible for out of the served HTML. The
+// values are HTML-escaped in the source (upstream's SSR escaping), so decode
+// them before comparing against the URL the browser would use.
+function decodeEntities(value) {
+  return value && value
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#0?39;/g, "'");
+}
+
 function parse(html) {
-  const grab = (re) => (html.match(re) || [])[1];
-  const cfg = grab(/window\.__chipConfig = (\{[\s\S]*?\});<\/script>/);
-  const ld = grab(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/);
+  const grab = (re) => decodeEntities((html.match(re) || [])[1]);
+  const cfg = (html.match(/window\.__chipConfig = (\{[\s\S]*?\});<\/script>/) || [])[1];
+  const ld = (html.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/) || [])[1];
   return {
     title: grab(/<title>([^<]*)<\/title>/),
     canonical: grab(/<link rel="canonical" href="([^"]*)"/),

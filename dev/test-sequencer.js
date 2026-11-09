@@ -53,7 +53,6 @@ class FakePlayer extends EventEmitter {
   }
   canPlay() { return true; }
   setLooping() {}
-  suspend() {}
   // A load claims a cancellation signal (the base Player's beginLoad).
   beginLoad() {
     this.loadSignal = { aborted: false };

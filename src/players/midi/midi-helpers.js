@@ -141,6 +141,25 @@ export function loopStartStateEvents(events, startMs, endMs, usedChannels = []) 
   });
   const rest = collected.filter((e) => !isBankSelect(e) && !isProgram(e));
   const used = usedChannelSet(usedChannels);
+  // Release both pedal families before restoring the starting values: the
+  // replayed pass's release/re-arm pair carries the finished pass's pedal
+  // value, and a note released under it is no longer in the ringing set. Only
+  // channels the file pedals at all need this; a file without a pedal must not
+  // grow seam controller traffic it never had.
+  const pedalChannels = new Set();
+  for (const event of events) {
+    if (event.playTime >= endMs) break;
+    if (event.type === EVENT_MIDI && event.subtype === EVENT_MIDI_CONTROLLER &&
+        (event.param1 === CC_64_SUSTAIN || event.param1 === CC_66_SOSTENUTO)) {
+      pedalChannels.add(event.channel);
+    }
+  }
+  const lifts = [];
+  for (const channel of used) {
+    if (!pedalChannels.has(channel)) continue;
+    lifts.push({ type: EVENT_MIDI, subtype: EVENT_MIDI_CONTROLLER, channel, param1: CC_64_SUSTAIN, param2: 0, delta: 0 });
+    lifts.push({ type: EVENT_MIDI, subtype: EVENT_MIDI_CONTROLLER, channel, param1: CC_66_SOSTENUTO, param2: 0, delta: 0 });
+  }
   const centers = [];
   for (const channel of used) {
     centers.push({ type: EVENT_MIDI, subtype: EVENT_MIDI_PITCH_BEND, channel, param1: 0, param2: 64, delta: 0 });
@@ -164,7 +183,7 @@ export function loopStartStateEvents(events, startMs, endMs, usedChannels = []) 
   }
   const state = banksForPrograms.concat(programs, pendingBanks, rest, sequenced);
   addLoopStartPrograms(state, used);
-  return centers.concat(state, gmDefaults);
+  return lifts.concat(centers, state, gmDefaults);
 }
 // Loop-point controllers. N64 marks a CC102 (start) / CC103 (end) pair on
 // every track (CC104/105 counts are ignored -- Repeat One loops forever and
@@ -488,7 +507,7 @@ class EventIterator {
       cuts.push(pedal(held.channel, held.value));
     }
     if (cuts.length) {
-      this.pendingReleases = cuts.map((event, i) => ({ ...event, delta: i === 0 ? gap : 0 }));
+      this.pendingReleases = cuts.map((event, i) => ({ ...event, delta: i === 0 ? gap : 0, seamCut: true }));
       // The releases are emitted at the boundary, so the emitted timeline
       // reaches it: without this the *next* boundary would add this gap again
       // (curTick is what the deltas are measured from).
@@ -588,10 +607,11 @@ MIDIFile.prototype.getLoopedEvents = function (tracks, loopCount = 2, range = nu
       noteChannels.add(ev.channel);
     }
     // The merged list's pass boundary is where the replay starts. Remember the
-    // index before the first event of each pass so the loop-start snapshot can
-    // be spliced in ahead of it. A seam release from EventIterator has already
-    // been pushed by then, so the snapshot lands after the note/pedal cuts.
-    if (expandLoop && srcElapsedLoops > 0 && passStarts[srcElapsedLoops] == null) {
+    // index before the first *replayed* event, not the seam releases that
+    // precede it: the snapshot must land after the note/pedal cuts, or a
+    // release that re-arms the pedal would override the starting value again.
+    if (expandLoop && srcElapsedLoops > 0 && !ev.seamCut &&
+        passStarts[srcElapsedLoops] == null) {
       passStarts[srcElapsedLoops] = combinedEvents.length;
     }
     if (!expandLoop) return;

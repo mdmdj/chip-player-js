@@ -144,7 +144,7 @@ function Settings(props) {
         <React.Fragment>
           <h3>MilkDrop</h3>
           <span className='PlayerParams-param'>
-            <label htmlFor='milkdropMesh' title='Simulation mesh resolution. Lower is faster.' className="PlayerParams-label-wide">
+            <label htmlFor='milkdropMesh' title='Higher settings improve quality but may reduce frame rate' className="PlayerParams-label-wide">
               Mesh:{' '}
             </label>
             <select
@@ -157,7 +157,7 @@ function Settings(props) {
             </select>
           </span>
           <span className='PlayerParams-param'>
-            <label htmlFor='milkdropResolution' title='Render resolution. Lower is faster.' className="PlayerParams-label-wide">
+            <label htmlFor='milkdropResolution' title='Higher settings improve quality but may reduce frame rate' className="PlayerParams-label-wide">
               Resolution:{' '}
             </label>
             <select
@@ -170,7 +170,7 @@ function Settings(props) {
             </select>
           </span>
           <span className='PlayerParams-param MilkDrop-fps'
-                title='Measured MilkDrop frame rate. The target is estimated from requestAnimationFrame; it is not a monitor mode query.'>
+                title='Higher settings improve quality but may reduce frame rate'>
             <span className='PlayerParams-label-wide'>Frame rate:</span>
             <span className={`MilkDrop-fps-value ${fpsTone}`}>{fpsLabel}</span>
             {refresh > 0 &&

@@ -130,6 +130,22 @@ async function main() {
     ok('a single-song file ignores subtune and keeps the bare canonical');
   }
 
+  // 5. A song folder at /browse/<file> has the same breadcrumb/collection
+  // metadata as a directory, plus a crawler-readable list of its songs.
+  const folderPath = multi.path.split('/').map(encodeURIComponent).join('/');
+  const folderHtml = await fetchHtml(`/browse/${folderPath}`);
+  const folder = parse(folderHtml);
+  assert.strictEqual(folder.canonical, `${BASE_URL}/browse/${folderPath}`,
+    'a song folder canonical is its browse path');
+  assert.ok(Array.isArray(folder.schema), 'a song folder has combined structured data');
+  assert.strictEqual(folder.schema[0]['@type'], 'BreadcrumbList', 'first: breadcrumb');
+  assert.strictEqual(folder.schema[1]['@type'], 'CollectionPage', 'second: collection');
+  assert.strictEqual(folder.schema[0].itemListElement.at(-1).name,
+    multi.path.split('/').pop(), 'the breadcrumb ends at the song folder');
+  assert.ok(folderHtml.includes(`/?play=${multi.song_id}&subtune=`),
+    'the no-script content links its songs');
+  ok('a song folder has a breadcrumb, CollectionPage and crawlable song links');
+
   console.log(`\n${passed} checks passed.`);
 }
 

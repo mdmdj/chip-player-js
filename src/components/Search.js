@@ -5,7 +5,7 @@ import autoBindReact from 'auto-bind/react';
 import debounce from 'lodash/debounce';
 
 import { API_BASE } from '../config';
-import { getUrlFromFilepath, pathJoin, songRef, subtuneLabel, isSongFolder } from '../util';
+import { encodeFilepathSegments, getUrlFromFilepath, pathJoin, songRef, subtuneLabel, isSongFolder } from '../util';
 import DirectoryLink from './DirectoryLink';
 import FavoriteButton from './FavoriteButton';
 import VirtualizedList from './VirtualizedList';
@@ -159,7 +159,7 @@ export default class Search extends PureComponent {
               currHeading = heading;
               resultsWithHeadings.push({
                 type: 'directory',
-                href: pathJoin('/browse', heading),
+                href: pathJoin('/browse', encodeFilepathSegments(heading)),
                 name: folder ? path.substring(slash + 1) : heading,
               });
             }

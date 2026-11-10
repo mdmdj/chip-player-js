@@ -286,7 +286,8 @@ duration and 60/1 rates, footer starts at `0:00.0` and reads `0:01.0` at the
 The default theme is now **Winamp** (`--theme msdos` still works), and
 `clip-batch.mjs` renders a ten-clip track × preset slate with a local gallery
 (`.work/proto60/index.html`). The current slate measured 10/10 clips at 900×720,
-360/360 frames, 6.000 s and 60/1. See `dev/features/visualizer.md`
+1800/1800 frames, 30.000 s and 60/1, rendered with `--jobs 3`. See
+`dev/features/visualizer.md`
 §"Deterministic 60 fps recorder" for commands and limits. This is separate from
 the PR page's DOM clips, which still use the Playwright + flash pipeline above.
 

@@ -1,12 +1,12 @@
 // DEV-ONLY: render a curated set of whole-app 60 fps MilkDrop clips.
 //
-//   node dev/record/clip-batch.mjs [--seconds 6] [--force]
+//   node dev/record/clip-batch.mjs [--seconds 30] [--force] [--jobs 3]
 //
-// Each clip is one track/preset combination from the local demo catalog. The
-// work is sequential on purpose: proto60.mjs owns one Browser and one shared
-// take.wav/frames directory, so two takes would collide, and two SwiftShader
-// pages would fight over the same CPU anyway. A failed take is recorded in the
-// manifest and the batch continues, so one bad preset does not discard the rest.
+// Each clip is one track/preset combination from the local demo catalog. Each
+// worker gets its own proto60 --work directory, so frames/audio cannot collide;
+// --jobs > 1 trades memory and CPU for wall time. A failed take is recorded in
+// the manifest and the batch continues, so one bad preset does not discard the
+// rest.
 //
 // The output is not meant to be committed: .work/proto60 is gitignored. The
 // gallery (index.html) and manifest.json are written beside the clips for
@@ -30,8 +30,9 @@ const arg = (name, fallback) => {
   const i = argv.indexOf(`--${name}`);
   return i === -1 ? fallback : argv[i + 1];
 };
-const SECONDS = Number(arg('seconds', '6'));
+const SECONDS = Number(arg('seconds', '30'));
 const THEME = arg('theme', 'winamp');
+const JOBS = Math.max(1, Number(arg('jobs', '1')));
 const FORCE = argv.includes('--force');
 const ONLY = [];
 for (let i = 0; i < argv.length; i++) {
@@ -94,18 +95,19 @@ async function main() {
   const selected = ONLY.length ? COMBOS.filter((c) => ONLY.includes(c.slug)) : COMBOS;
   if (!selected.length) throw new Error(`no combo matches --only ${ONLY.join(',')}`);
   const results = [];
-  for (let i = 0; i < selected.length; i++) {
-    const c = selected[i];
+  const expectedFrames = Math.round(SECONDS * 60);
+  const renderCombo = async (c, index, total) => {
     const name = `${c.slug}-p${c.preset}-60fps.mp4`;
     const out = path.join(CLIPS, name);
     const presetName = PRESET_NAMES[c.preset] || `preset ${c.preset}`;
-    console.log(`\n[${i + 1}/${selected.length}] ${c.title} / ${presetName}`);
+    console.log(`\n[${index}/${total}] ${c.title} / ${presetName}`);
     let ok = fs.existsSync(out) && fs.statSync(out).size > 0;
     if (!ok || FORCE) {
+      const worker = path.join(WORK, 'workers', c.slug);
       const code = await run(process.execPath, [
         PROTO, '--whole', '--seconds', String(SECONDS), '--theme', THEME,
+        '--work', worker, '--out', out,
         '--song', c.song, '--preset', String(c.preset),
-        '--out', path.join('clips', name),
       ]);
       ok = code === 0 && fs.existsSync(out) && fs.statSync(out).size > 0;
     } else {
@@ -117,7 +119,7 @@ async function main() {
       presetName,
       output: path.relative(WORK, out),
       seconds: SECONDS,
-      pass: ok && v.avg_frame_rate === '60/1' && String(v.nb_read_frames) !== '',
+      pass: ok && v.avg_frame_rate === '60/1' && Number(v.nb_read_frames) === expectedFrames,
       width: Number(v.width) || null,
       height: Number(v.height) || null,
       frames: Number(v.nb_read_frames) || null,
@@ -126,7 +128,16 @@ async function main() {
     };
     if (!result.pass) console.error(`  FAILED: ${name}`);
     results.push(result);
-  }
+  };
+
+  let next = 0;
+  const worker = async () => {
+    while (next < selected.length) {
+      const i = next++;
+      await renderCombo(selected[i], i + 1, selected.length);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(JOBS, selected.length) }, worker));
 
   // A `--only` run should still rebuild the full gallery from the clips already
   // on disk, so adding one missing combo does not hide the other ten.
@@ -141,7 +152,7 @@ async function main() {
       presetName: PRESET_NAMES[c.preset] || `preset ${c.preset}`,
       output: path.relative(WORK, out),
       seconds: SECONDS,
-      pass: v.avg_frame_rate === '60/1' && Number(v.nb_read_frames) > 0,
+      pass: v.avg_frame_rate === '60/1' && Number(v.nb_read_frames) === expectedFrames,
       width: Number(v.width) || null,
       height: Number(v.height) || null,
       frames: Number(v.nb_read_frames) || null,
@@ -183,7 +194,7 @@ async function main() {
   .card.fail { border-color: #6b2020; }
 </style>
 <h1>MilkDrop track × preset clips — ${passed.length}/${results.length} passed</h1>
-<p>Whole app, 60 fps CFR, 48 kHz stereo. Frame N uses the PCM window ending at N/60.</p>
+<p>${SECONDS}s whole app, ${htmlEscape(THEME)} theme, 60 fps CFR, 48 kHz stereo. Frame N uses the PCM window ending at N/60.</p>
 <div class="grid">
 ${cards}
 </div>`);

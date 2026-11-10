@@ -313,7 +313,7 @@ quality knob.
 
 ### Clip slate (2026-11-10)
 
-`dev/record/clip-batch.mjs` renders ten 6-second whole-app clips, one
+`dev/record/clip-batch.mjs` renders ten 30-second whole-app clips, one
 track/preset combination each, using the **Winamp** theme:
 
 | track | format | preset |
@@ -329,17 +329,20 @@ track/preset combination each, using the **Winamp** theme:
 | Brinstar | SID | 68 `martin - glass corridor` |
 | Megalovania | VGM/VGZ | 98 `Zylot - Star Ornament` |
 
-All ten measured **900×720, 360/360 frames, 6.000 s, r/avg 60/1, AAC 48 kHz
-stereo starting at 0**. The gallery and manifest are
-`dev/record/.work/proto60/index.html` and `manifest.json`; individual files are
-under `dev/record/.work/proto60/clips/`. `proto60.mjs` defaults to
-`--theme winamp`; `--theme msdos` still works.
+All ten measured **900×720, 1800/1800 frames, 30.000 s, r/avg 60/1, AAC 48 kHz
+stereo starting at 0**. The recorder now records 0.5 s extra and trims to the
+requested length, so a MediaRecorder take that lands a few milliseconds short
+cannot turn a 30 s request into 29.95 s. `--jobs 3` gives each worker its own
+frames/audio directory and cut the 10-clip slate to about 20 minutes on this
+8-core host. The gallery and manifest are `dev/record/.work/proto60/index.html`
+and `manifest.json`; individual files are under `dev/record/.work/proto60/clips/`.
+`proto60.mjs` defaults to `--theme winamp`; `--theme msdos` still works.
 
 A Delta SID clip was dropped after the headless target crashed twice during
 `pinDefaults`, before any frame was rendered; Brinstar SID recorded normally, so
 the replacement is Monty on the Run XM rather than a SID diagnosis. Rerun the
-whole slate with `node dev/record/clip-batch.mjs --seconds 6 --force`, or one
-missing combo with `--only monty`.
+whole slate with `node dev/record/clip-batch.mjs --seconds 30 --force --jobs 3`,
+or one missing combo with `--only monty`.
 
 ## Next steps to make it shippable
 

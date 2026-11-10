@@ -49,7 +49,6 @@ import { chromium } from 'playwright';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const BASE = process.env.RECORD_BASE || 'http://mms-1:8301';
-const OUT = path.join(ROOT, 'dev/record/.work/proto60');
 
 const args = process.argv.slice(2);
 const arg = (name, fallback) => {
@@ -62,6 +61,11 @@ const SECONDS = Number(arg('seconds', '8'));
 const PRESET = Number(arg('preset', '0'));
 const THEME = arg('theme', 'winamp');
 const OUT_NAME = arg('out', WHOLE ? 'icecap-whole-60fps.mp4' : 'icecap-60fps.mp4');
+// Each parallel batch worker gets its own frames/audio directory; the encoded
+// clip can still land in a shared output directory via an absolute --out.
+const WORK_ARG = arg('work', '');
+const OUT = WORK_ARG ? path.resolve(ROOT, WORK_ARG) : path.join(ROOT, 'dev/record/.work/proto60');
+const OUTPUT = path.isAbsolute(OUT_NAME) ? OUT_NAME : path.join(OUT, OUT_NAME);
 const VIEWPORT = WHOLE ? { width: 900, height: 720 } : { width: 1100, height: 900 };
 // Canvas-only mode force-renders a 720x720 target. Whole-app mode leaves the
 // canvas at the size the real layout gives it and screenshots the whole page.
@@ -157,10 +161,11 @@ async function main() {
   const framesDir = path.join(OUT, 'frames');
   fs.rmSync(framesDir, { recursive: true, force: true });
   fs.mkdirSync(framesDir, { recursive: true });
-  for (const f of ['take.webm', 'take.wav', 'summary.json', OUT_NAME]) {
+  for (const f of ['take.webm', 'take.wav', 'summary.json']) {
     fs.rmSync(path.join(OUT, f), { force: true });
   }
-  fs.mkdirSync(path.dirname(path.join(OUT, OUT_NAME)), { recursive: true });
+  fs.rmSync(OUTPUT, { force: true });
+  fs.mkdirSync(path.dirname(OUTPUT), { recursive: true });
 
   const browser = await chromium.launch({
     headless: true,
@@ -302,7 +307,7 @@ async function main() {
         startPositionMs:
           startPositionMs,
       };
-    }, Math.round(SECONDS * 1000));
+    }, Math.round((SECONDS + 0.5) * 1000));
 
     if (!audio.bytes) throw new Error('audio take is empty');
     const webm = path.join(OUT, 'take.webm');
@@ -312,8 +317,13 @@ async function main() {
       '-c:a', 'pcm_s16le', wav]);
     const pcm = readWav(wav);
     const duration = pcm.frames / pcm.rate;
-    const frameCount = Math.min(Math.floor(duration * FPS), Math.round(SECONDS * FPS));
-    if (frameCount < 1) throw new Error(`only ${frameCount} frames of audio decoded`);
+    // Record half a second extra, then make the requested duration exact. A
+    // MediaRecorder take can land a few milliseconds short of the wall-clock
+    // request; without this a 30 s request can silently become 29.95 s.
+    const frameCount = Math.round(SECONDS * FPS);
+    if (pcm.frames < Math.ceil((frameCount / FPS) * pcm.rate)) {
+      throw new Error(`audio has ${pcm.frames} samples, need ${Math.ceil((frameCount / FPS) * pcm.rate)} for ${frameCount} frames`);
+    }
     console.log(`audio ${audio.bytes} bytes -> ${pcm.frames} samples (${duration.toFixed(3)}s); rendering ${frameCount} frames`);
 
     // Fresh visualizer clock. loadPreset() does not reset time, and the opening
@@ -391,7 +401,7 @@ async function main() {
       }
     }
 
-    const mp4 = path.join(OUT, OUT_NAME);
+    const mp4 = OUTPUT;
     const clipSeconds = frameCount / FPS;
     run('ffmpeg', [
       '-y', '-v', 'error',

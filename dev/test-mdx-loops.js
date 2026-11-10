@@ -444,6 +444,32 @@ async function main() {
     assertDisplay(p, BAND_START, 'folds into the band again');
   });
 
+  await check('manual seek into the fade under Repeat One plays the fade, not the fold', async () => {
+    const { p, core } = await makePlayer();
+    p.setLooping(true);
+    core.lastMaxLoopArg = null;
+    p.seekMs(BAND_END + 500);
+    assert.strictEqual(p.fadeTailStartMs, BAND_END,
+      'the seek captured the fade start for the head');
+    assert.strictEqual(p._maxLoopCount, 2);
+    assert.strictEqual(core.lastMaxLoopArg, 2,
+      'the engine is handed the finite count that starts its fade');
+    assertDisplay(p, BAND_END + 500, 'the head stays at the seek position');
+    await driveToEnd(p, core, BAND_END + 500, 30000);
+    assert.strictEqual(p.stopped, true, 'the fade finishes and the song ends');
+  });
+
+  await check('seeking back inside the loop re-arms Repeat One after a fade seek', async () => {
+    const { p, core } = await makePlayer();
+    p.setLooping(true);
+    p.seekMs(BAND_END + 500);
+    p.seekMs(BAND_START + 1000);
+    assert.strictEqual(p.fadeTailStartMs, null, 'the fade capture is dropped');
+    assert.strictEqual(p._maxLoopCount, 0, 'repeat one owns the loop count again');
+    assert.strictEqual(core.lastMaxLoopArg, 0);
+    assertDisplay(p, BAND_START + 1000, 'the head follows the new position');
+  });
+
   // The engine's fade limit is the joint-section count the band is drawn from,
   // even when one section is several repeats of the longest track. MDXPlayer
   // hands it that count directly (mdxmml_ym2151.c's loop_gate_value does the

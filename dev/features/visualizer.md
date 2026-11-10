@@ -311,6 +311,36 @@ whole-app costs ~94 s for 8 s at 900×720 in this headless SwiftShader host.
 Raising `deviceScaleFactor` to 2 would capture 1800×1440 and is the obvious next
 quality knob.
 
+### Clip slate (2026-11-10)
+
+`dev/record/clip-batch.mjs` renders ten 6-second whole-app clips, one
+track/preset combination each, using the **Winamp** theme:
+
+| track | format | preset |
+| --- | --- | --- |
+| IceCap Zone Act 1 | VGM/VGZ | 0 `$$$ Royal - Mashup (197)` |
+| Aquatic Ambiance | SPC | 5 `_Geiss - Desert Rose 2` |
+| Go Straight | VGM/VGZ | 25 `flexi + geiss - pogo cubes…` |
+| Stardust Memories | MOD | 97 `Zylot - Paint Spill…` |
+| Monty on the Run | XM | 57 `martin - angel flight` |
+| Stage 1 & 4 BGM (DoDonPachi) | VGM/VGZ | 16 `Cope - …Red Liquid Fire` |
+| Guile | SPC | 47 `Geiss - Reaction Diffusion 2` |
+| Magical Sound Shower | VGM/VGZ | 92 `TonyMilkdrop - Magellan's Nebula…` |
+| Brinstar | SID | 68 `martin - glass corridor` |
+| Megalovania | VGM/VGZ | 98 `Zylot - Star Ornament` |
+
+All ten measured **900×720, 360/360 frames, 6.000 s, r/avg 60/1, AAC 48 kHz
+stereo starting at 0**. The gallery and manifest are
+`dev/record/.work/proto60/index.html` and `manifest.json`; individual files are
+under `dev/record/.work/proto60/clips/`. `proto60.mjs` defaults to
+`--theme winamp`; `--theme msdos` still works.
+
+A Delta SID clip was dropped after the headless target crashed twice during
+`pinDefaults`, before any frame was rendered; Brinstar SID recorded normally, so
+the replacement is Monty on the Run XM rather than a SID diagnosis. Rerun the
+whole slate with `node dev/record/clip-batch.mjs --seconds 6 --force`, or one
+missing combo with `--only monty`.
+
 ## Next steps to make it shippable
 
 Dependency hygiene and topology are done. Remaining order: **browser check ->

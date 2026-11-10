@@ -2,6 +2,7 @@
 //
 //   node dev/record/proto60.mjs [--song Yxw_FUQY] [--seconds 8] [--preset 0]
 //   node dev/record/proto60.mjs --whole [--song ...] [--seconds ...]
+//   node dev/record/proto60.mjs --theme winamp|msdos
 //
 // Without --whole, only the 720x720 MilkDrop canvas is captured. With --whole,
 // every frame is a Playwright screenshot of the real app at 900x720, with the
@@ -59,6 +60,7 @@ const WHOLE = args.includes('--whole');
 const SONG = arg('song', 'Yxw_FUQY'); // IceCap Zone Act 1 (Sonic 3, VGM)
 const SECONDS = Number(arg('seconds', '8'));
 const PRESET = Number(arg('preset', '0'));
+const THEME = arg('theme', 'winamp');
 const OUT_NAME = arg('out', WHOLE ? 'icecap-whole-60fps.mp4' : 'icecap-60fps.mp4');
 const VIEWPORT = WHOLE ? { width: 900, height: 720 } : { width: 1100, height: 900 };
 // Canvas-only mode force-renders a 720x720 target. Whole-app mode leaves the
@@ -158,6 +160,7 @@ async function main() {
   for (const f of ['take.webm', 'take.wav', 'summary.json', OUT_NAME]) {
     fs.rmSync(path.join(OUT, f), { force: true });
   }
+  fs.mkdirSync(path.dirname(path.join(OUT, OUT_NAME)), { recursive: true });
 
   const browser = await chromium.launch({
     headless: true,
@@ -180,11 +183,11 @@ async function main() {
     target.searchParams.set('r', String(Date.now()));
     await page.goto(target.toString(), { waitUntil: 'domcontentloaded' });
     await page.waitForFunction(() => !!window.__cpRec && !!window.__cpDev, null, { timeout: 30000 });
-    await page.evaluate(() => window.__cpRec.pinDefaults({
+    await page.evaluate((theme) => window.__cpRec.pinDefaults({
       showVisualizer: true,
       showPlayerSettings: false,
-      theme: 'msdos',
-    }));
+      theme,
+    }), THEME);
 
     // Turn the visualizer on (it may be off from persisted settings), then pick
     // MilkDrop. The lazy chunk is what creates the Butterchurn instance.

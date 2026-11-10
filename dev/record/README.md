@@ -283,9 +283,12 @@ same duration. `--whole` instead screenshots the real 900×720 app each frame
 and drives the footer time with a dev-only `TimeSlider` hook: **478/478**, same
 duration and 60/1 rates, footer starts at `0:00.0` and reads `0:01.0` at the
 1 s frame. The audio take is still real time; only the video clock is offline.
-See `dev/features/visualizer.md` §"Deterministic 60 fps recorder" for commands
-and limits. This is separate from the PR page's DOM clips, which still use the
-Playwright + flash pipeline above.
+The default theme is now **Winamp** (`--theme msdos` still works), and
+`clip-batch.mjs` renders a ten-clip track × preset slate with a local gallery
+(`.work/proto60/index.html`). The current slate measured 10/10 clips at 900×720,
+360/360 frames, 6.000 s and 60/1. See `dev/features/visualizer.md`
+§"Deterministic 60 fps recorder" for commands and limits. This is separate from
+the PR page's DOM clips, which still use the Playwright + flash pipeline above.
 
 ## 4. Repository layout
 

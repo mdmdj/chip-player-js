@@ -423,7 +423,7 @@ async function main() {
     }
   });
 
-  await check('seek drops the captured fade tail and the head folds again', async () => {
+  await check('seek back into the loop drops a captured fade tail and folds again', async () => {
     const { p, core } = await makePlayer();
     core.abs = FADE_START_OFF + 500;
     p.setLooping(true); // captures fadeTailStartMs
@@ -432,6 +432,31 @@ async function main() {
     assert.strictEqual(p.fadeTailStartMs, null, 'seek drops the capture');
     await drive(p, core, [A + 4 * B]);
     assertDisplay(p, BAND_START, 'folds into the band again');
+  });
+
+  await check('manual seek into the fade under Repeat One plays the fade, not the fold', async () => {
+    const { p, core } = await makePlayer();
+    p.setLooping(true);
+    core.lastLoopArg = null;
+    p.seekMs(FADE_START_OFF + 500);
+    assert.strictEqual(p.fadeTailStartMs, FADE_START_OFF,
+      'the seek captured the fade start for the head');
+    assert.strictEqual(core.lastLoopArg, 2,
+      'the pass finishes with the engine fade instead of looping forever');
+    assert.ok(core.fadeStartedAtMs != null, 'libvgm started the fade at the seek');
+    assertDisplay(p, FADE_START_OFF + 500, 'the head stays at the seek position');
+    await driveToEnd(p, core, FADE_START_OFF + 500);
+    assert.strictEqual(p.stopped, true, 'the fade finishes and the song ends');
+  });
+
+  await check('seeking back inside the loop re-arms Repeat One after a fade seek', async () => {
+    const { p, core } = await makePlayer();
+    p.setLooping(true);
+    p.seekMs(FADE_START_OFF + 500);
+    p.seekMs(BAND_START + 1000);
+    assert.strictEqual(p.fadeTailStartMs, null, 'the fade capture is dropped');
+    assert.strictEqual(core.lastLoopArg, 0, 'repeat one owns the loop count again');
+    assertDisplay(p, BAND_START + 1000, 'the head follows the new position');
   });
 
   await check('file with no loop region: repeat one loops, no band, head runs on', async () => {

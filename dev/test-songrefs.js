@@ -29,7 +29,7 @@ Module.prototype._compile = function (content, filename) {
 
 const {
   songRef, songRefKey, songRefsEqual, songRefListsEqual, getMetadataUrlForFilepath, subtuneLabel,
-  listingToContext, encodeFilepathSegments, getUrlFromFilepath,
+  listingToContext, encodeFilepathSegments, encodeRawFilepathSegments, getUrlFromFilepath,
 } = require('../src/util');
 
 const NSFE = 'famicompo/Castlevania III - The Dracula X Chronicles/09 Big Bat Man.nsf';
@@ -121,6 +121,9 @@ check('browse and share paths escape # and % per segment', () => {
   // the song-folder landing must encode segments the same way Browse rows do.
   assert.strictEqual(encodeFilepathSegments('Game #2/100%.nsf'), 'Game%20%232/100%25.nsf');
   assert.ok(getUrlFromFilepath('Game #2.nsf').endsWith('/Game%20%232.nsf'));
+  // Raw catalog paths keep a literal %20 as a filename, not a space.
+  assert.strictEqual(encodeRawFilepathSegments('Music%20Box.nsf'), 'Music%2520Box.nsf');
+  assert.strictEqual(encodeRawFilepathSegments('Game #2.nsf'), 'Game%20%232.nsf');
 });
 
 check('the metadata URL carries the sub-tune only when asked', () => {

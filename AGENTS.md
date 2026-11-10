@@ -2510,7 +2510,18 @@ only armed when `silenceDuration >= 0`, and both arms must end the song):
   folds the head into the band and runs the fade tail on exit, and
   `isPlayingIndefinitely()` covers `durationExtended`. Feature-detected: a core
   without the loop getters still loops natively (`_mdx_set_max_loop` is an
-  upstream export) but shows the blind-loop UI instead of a band.
+  upstream export) but shows the blind-loop UI instead of a band. A manual seek
+  past the band under Repeat One mirrors VGM: it captures the band end, hands
+  the engine the default finite count so this pass fades, and restores count 0
+  when the seek lands back inside.
+- **Manual seek into the fade — cross-engine audit (2026-11-10).** VGM and MDX
+  were the only players with a display fold *and* a reachable engine fade; both
+  now treat a seek past the band as a landing in the fade. MIDI has no fade,
+  but already has the equivalent contract: a seek into the ending sets
+  `loopRegionLeft` so the head follows the outro instead of rewinding
+  (`dev/test-midi-loops.js`). XMP has no fade and its positional clock does not
+  fold; GME's JS fade begins at the slider's duration, so there is no fade
+  region to seek into; SID, N64, GSF and V2M have no band or fade.
 - **Two engine bugs this surfaced (both fixed in `mdxmini/`, overlay-only).**
   (1) The fade end only returned `FALSE` without latching, so `master_volume`
   kept decrementing past 0; a seek that advanced frames into/through a fade then

@@ -74,7 +74,13 @@ export default class Sequencer extends EventEmitter {
     this.currSongPath = null;
     this.currSongRef = null;
     this.currSongBuffer = null;
-    if (this.context) {
+    if (!this.context) return;
+    // Repeat One is a transport mode for an *automatic* end: stay on this
+    // entry and reload it (the stop-and-reload engines). Manual Next/Previous
+    // must still navigate; advanceSong() no longer special-cases the mode.
+    if (this.repeat === REPEAT_ONE) {
+      this.playCurrentSong();
+    } else {
       this.nextSong();
     }
   }
@@ -177,10 +183,7 @@ export default class Sequencer extends EventEmitter {
 
   advanceSong(direction) {
     if (this.context == null) return;
-
-    if (this.repeat !== REPEAT_ONE) {
-      this.currIdx += direction;
-    }
+    this.currIdx += direction;
 
     if (this.currIdx < 0 || this.currIdx >= this.context.length) {
       // An empty context has nothing to wrap to: REPEAT_ALL's modulo would be

@@ -194,6 +194,34 @@ check('manual next advances under Repeat One', () => {
     'only the automatic end repeats the current entry');
 });
 
+check('Previous at the first entry restarts it instead of ejecting the context', () => {
+  const player = new ManualPlayer();
+  const seq = makeSequencer([player]);
+  seq.playContext([
+    { path: 'local/a.v2m', subtune: 0 },
+    { path: 'local/b.v2m', subtune: 0 },
+  ], 0);
+  assert.deepStrictEqual(player.loads, ['local/a.v2m#0']);
+  seq.prevSong();
+  assert.deepStrictEqual(player.loads, ['local/a.v2m#0', 'local/a.v2m#0'],
+    'the first entry is replayed');
+  assert.strictEqual(seq.getCurrIdx(), 0);
+  assert.strictEqual(seq.getCurrContext().length, 2, 'the context survives');
+});
+
+check('Previous at the first entry still wraps under Repeat All', () => {
+  const player = new ManualPlayer();
+  const seq = makeSequencer([player]);
+  seq.setRepeat(1); // REPEAT_ALL
+  seq.playContext([
+    { path: 'local/a.v2m', subtune: 0 },
+    { path: 'local/b.v2m', subtune: 0 },
+  ], 0);
+  seq.prevSong();
+  assert.deepStrictEqual(player.loads, ['local/a.v2m#0', 'local/b.v2m#0']);
+  assert.strictEqual(seq.getCurrIdx(), 1);
+});
+
 check('repeat off advances to the next entry when a song ends', () => {
   const player = new ManualPlayer();
   const seq = makeSequencer([player]);

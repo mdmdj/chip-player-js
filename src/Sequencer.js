@@ -207,6 +207,20 @@ export default class Sequencer extends EventEmitter {
   }
 
   prevSong() {
+    if (this.context == null) return;
+    // At the first entry there is nothing before the current song to play.
+    // advanceSong(-1) would walk off the context and eject it (except under
+    // Repeat All, which wraps), tearing down the player for a control that
+    // should restart what is already loaded. Keep the context and replay the
+    // first entry; Repeat All retains its wrap to the last entry.
+    if (this.currIdx <= 0 && this.repeat !== REPEAT_ALL) {
+      if (this.context.length === 0) {
+        this.eject();
+      } else {
+        this.playCurrentSong();
+      }
+      return;
+    }
     this.advanceSong(-1);
   }
 

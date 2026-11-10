@@ -173,10 +173,17 @@ export function getFilepathFromUrl(url) {
   return url.replace(CATALOG_PREFIX, '/').replace(MULTI_SLASH_REGEX, '/');
 }
 
+// For an encoded path (decode once before re-encoding). Catalog paths are raw
+// and must use encodeRawFilepathSegments: decoding `Music%20Box.nsf` would turn
+// a literal percent sequence into a different filename.
 export function encodeFilepathSegments(filepath) {
   if (!filepath) return null;
-  // in case it's already encoded
   try { filepath = decodeURIComponent(filepath); } catch {}
+  return encodeRawFilepathSegments(filepath);
+}
+
+export function encodeRawFilepathSegments(filepath) {
+  if (!filepath) return null;
   // Encode each path segment so slashes stay separators (browsers name
   // downloads from the last segment) while spaces/#/%/? are still escaped.
   return filepath.split('/').map(encodeURIComponent).join('/');

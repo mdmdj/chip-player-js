@@ -355,15 +355,32 @@ export default class MDXPlayer extends Player {
     this.muteAudioDuringCall(this.audioNode, () =>
       this.core._mdx_set_position_ms(this.mdxCtx, seekMs)
     );
+    if (!this.songOpen || typeof this.core._mdx_set_max_loop !== 'function') return;
+    const band = this.getLoopBandMs();
+    if (this.looping) {
+      if (band && seekMs >= band.endMs) {
+        // A manual seek past the loop region is a landing in the fade. Let the
+        // engine fade out this pass instead of looping forever and folding the
+        // head back into the band; Repeat One still owns the automatic end.
+        this.fadeTailStartMs = band.endMs;
+        this._maxLoopCount = DEFAULT_LOOP_COUNT;
+        this.core._mdx_set_max_loop(this.mdxCtx, this._maxLoopCount);
+      } else {
+        // Back inside the region while repeat is on: restore the infinite
+        // count a previous seek-to-fade installed.
+        this._maxLoopCount = 0;
+        this.core._mdx_set_max_loop(this.mdxCtx, this._maxLoopCount);
+      }
+      return;
+    }
     // mdxmini keeps max_infinite_loops across a seek, and the extended count /
     // durationExtended were for the pass we just abandoned. A seek repositions
     // into the normal timeline, so restore the default finite count and let the
-    // end detector re-arm -- unless Repeat One is still on (count 0).
-    if (this.songOpen && !this.looping && typeof this.core._mdx_set_max_loop === 'function') {
-      this._maxLoopCount = DEFAULT_LOOP_COUNT;
-      this.durationExtended = false;
-      this.core._mdx_set_max_loop(this.mdxCtx, this._maxLoopCount);
-    }
+    // end detector re-arm. Without this, leaving a deep repeat and seeking back
+    // plays the extended count's passes from the new position.
+    this._maxLoopCount = DEFAULT_LOOP_COUNT;
+    this.durationExtended = false;
+    this.core._mdx_set_max_loop(this.mdxCtx, this._maxLoopCount);
   }
 
   stop() {

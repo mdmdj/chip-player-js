@@ -177,6 +177,23 @@ check('repeat one re-loads the same entry instead of advancing', () => {
   assert.deepStrictEqual(player.loads.length, 3, 'and it keeps repeating');
 });
 
+check('manual next advances under Repeat One', () => {
+  const player = new ManualPlayer();
+  const seq = makeSequencer([player]);
+  seq.setRepeat(2); // REPEAT_ONE
+  seq.playContext([
+    { path: 'local/a.v2m', subtune: 0 },
+    { path: 'local/b.v2m', subtune: 0 },
+  ], 0);
+  assert.deepStrictEqual(player.loads, ['local/a.v2m#0']);
+  seq.nextSong();
+  assert.deepStrictEqual(player.loads, ['local/a.v2m#0', 'local/b.v2m#0'],
+    'an explicit Next is navigation, not an automatic end');
+  player.endNow();
+  assert.deepStrictEqual(player.loads, ['local/a.v2m#0', 'local/b.v2m#0', 'local/b.v2m#0'],
+    'only the automatic end repeats the current entry');
+});
+
 check('repeat off advances to the next entry when a song ends', () => {
   const player = new ManualPlayer();
   const seq = makeSequencer([player]);

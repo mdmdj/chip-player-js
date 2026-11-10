@@ -78,8 +78,13 @@ by the row height rather than having the dropdown cross the groove border.
 
 The preset name is an explicit right-aligned final row of the same header, so
 it is anchored bottom-right in every theme without relying on inherited
-`text-align`. The header sits above the absolute piano-keys overlay and leaves
-the spectrogram at 448×800.
+`text-align`; Winamp's `& > div` rule makes that row a flex container, so it
+also needs `justify-content: flex-end` (text-align alone is not enough there).
+The Blend group no longer uses the form-label class whose 70 px Winamp width
+left a dead gap; the group flexes and the range input uses
+`flex: 1 1 64px`, so the slider expands into the free header width instead. The
+header sits above the absolute piano-keys overlay and leaves the spectrogram at
+448×800.
 
 Only the active renderer runs. `Spectrogram` owns a rAF loop and is paused while
 MilkDrop, the piano roll, or the hidden visualizer is on screen (including on the
@@ -171,10 +176,13 @@ settings without these keys fall back through `||`.
 - **Header layout (2026-11-10):** measured at 900×720 with Settings open. Winamp
   MilkDrop now has the renderer row inside `.Visualizer-options` at y49 h22,
   then the preset nav at y71 and the right-aligned preset name at y93; the
-  canvas starts at y129. MS-DOS is byte-for-byte the same geometry as before
-  the move (options h60, nav y75, name y97, canvas y116), because the renderer
-  row replaces the old top padding. Spectrogram Winamp also measured: renderer
-  row y49 h22, options h102, keys below it.
+  canvas starts at y129. The Blend slider grows into the free row width; the
+  old Winamp 70 px form-label gap is gone. MS-DOS has the same geometry as
+  before the move (options h60, nav y75, name y97, canvas y116), because the
+  renderer row replaces the old top padding. Spectrogram Winamp also measured:
+  renderer row y49 h22, options h102, keys below it. A 1 s whole-app recorder
+  pass with Winamp after the change still produced 60/60 frames, 1.000 s and
+  audio start 0.
 - `dev/check-promotable-refs.js` and `dev/test-client-seams.js` (22/0) green.
 - `./dev/run-tests.sh` on the clean tree (2026-10-22): **25 passed, 1 skipped,
   2 failed** — `test-midi-loops` (the known sample-catalog Gyrocopter check) and

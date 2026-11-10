@@ -255,15 +255,29 @@ export default class VGMPlayer extends Player {
       // capture so the fold mapping takes over again.
       this.fadeTailStartMs = null;
       this.core._lvgm_seek_ms(this.vgmCtx, seekMs);
-      // libvgm keeps its loop count across a seek, and the extended count /
-      // durationExtended were for the pass we just abandoned. A seek repositions
-      // into the normal timeline, so restore the default finite count (the
-      // wrapper's two passes at load) and let the end detector re-arm -- unless
-      // Repeat One or Indefinite Playback still has it looping forever. Without
-      // this, leaving a deep repeat and seeking back plays the extended count's
-      // passes from the new position (measured: 7).
-      if (!this.looping && !this.params.indefinitePlayback &&
-          typeof this.core._lvgm_set_loop_count === 'function') {
+      const looping = this.looping || !!this.params.indefinitePlayback;
+      const band = this.getLoopBandMs();
+      const setLoopCount = this.core._lvgm_set_loop_count;
+      if (looping && typeof setLoopCount === 'function') {
+        if (band && seekMs >= band.endMs) {
+          // A manual seek past the loop region is a landing in the fade. Let
+          // this pass finish with libvgm's own fade instead of leaving the
+          // engine looping forever and folding the head back into the band;
+          // Repeat One still owns the next automatic end.
+          this.fadeTailStartMs = band.endMs;
+          this.core._lvgm_set_loop_count(this.vgmCtx, 2);
+        } else {
+          // Back inside the region while repeat is on: restore the infinite
+          // count a previous seek-to-fade installed.
+          this.core._lvgm_set_loop_count(this.vgmCtx, 0);
+        }
+      } else if (!looping && typeof setLoopCount === 'function') {
+        // libvgm keeps its loop count across a seek, and the extended count /
+        // durationExtended were for the pass we just abandoned. A seek
+        // repositions into the normal timeline, so restore the default finite
+        // count (the wrapper's two passes at load) and let the end detector
+        // re-arm. Without this, leaving a deep repeat and seeking back plays
+        // the extended count's passes from the new position (measured: 7).
         this.durationExtended = false;
         this.core._lvgm_set_loop_count(this.vgmCtx, 2);
       }

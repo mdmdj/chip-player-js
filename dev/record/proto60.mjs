@@ -1,6 +1,12 @@
 // DEV-ONLY prototype: deterministic 60 fps MilkDrop clip with synced audio.
 //
 //   node dev/record/proto60.mjs [--song Yxw_FUQY] [--seconds 8] [--preset 0]
+//   node dev/record/proto60.mjs --whole [--song ...] [--seconds ...]
+//
+// Without --whole, only the 720x720 MilkDrop canvas is captured. With --whole,
+// every frame is a Playwright screenshot of the real app at 900x720, with the
+// footer time driven by the same frame clock and the canvas rendered manually
+// in the same task. The audio still comes from one real-time take in both modes.
 //
 // Why this exists
 // ---------------
@@ -16,9 +22,10 @@
 // the same three 1024-byte time-domain arrays an AnalyserNode would supply, and
 // elapsedTime is a delta in seconds. That lets us run the visualizer faster (or
 // slower) than real time without changing what it sees. The canvas has no
-// preserveDrawingBuffer, so each frame is read back with gl.readPixels inside
-// the same task as render(), then encoded as JPEG for ffmpeg. The browser never
-// captures video, so there is no screencast clock involved.
+// preserveDrawingBuffer, so the canvas-only mode reads each frame back with
+// gl.readPixels inside the same task as render(); --whole instead takes a
+// Playwright screenshot of the page after React commits the same frame's footer
+// time. Neither mode captures video, so there is no screencast clock involved.
 //
 // Audio still has to come from the running app: chiptune formats are not
 // decodable with decodeAudioData, and rendering the engine offline is a much
@@ -27,10 +34,10 @@
 // for both the audio mux and the analyzer windows. The first sample of the take
 // is frame 0.
 //
-// This is a prototype, not the clip pipeline yet: it captures the MilkDrop
-// canvas only (the useful content for these clips), and it needs a dev-only
-// `window.__cpMilkdrop` hook in src/butterchurn/ButterchurnVisualizer.js. That
-// hook is inside a DEV-BEGIN/DEV-END region and is stripped from the PR.
+// This is a prototype, not the clip pipeline yet. It needs two dev-only hooks:
+// `window.__cpMilkdrop` in src/butterchurn/ButterchurnVisualizer.js and
+// `window.__cpSetTimeSlider` in src/components/TimeSlider.js. Both sit inside
+// DEV-BEGIN/DEV-END regions and are stripped from the PR.
 
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -48,10 +55,14 @@ const arg = (name, fallback) => {
   const i = args.indexOf(`--${name}`);
   return i === -1 ? fallback : args[i + 1];
 };
+const WHOLE = args.includes('--whole');
 const SONG = arg('song', 'Yxw_FUQY'); // IceCap Zone Act 1 (Sonic 3, VGM)
 const SECONDS = Number(arg('seconds', '8'));
 const PRESET = Number(arg('preset', '0'));
-const OUT_NAME = arg('out', 'icecap-60fps.mp4');
+const OUT_NAME = arg('out', WHOLE ? 'icecap-whole-60fps.mp4' : 'icecap-60fps.mp4');
+const VIEWPORT = WHOLE ? { width: 900, height: 720 } : { width: 1100, height: 900 };
+// Canvas-only mode force-renders a 720x720 target. Whole-app mode leaves the
+// canvas at the size the real layout gives it and screenshots the whole page.
 const WIDTH = 720;
 const HEIGHT = 720;
 const FPS = 60;
@@ -157,7 +168,7 @@ async function main() {
       '--use-angle=swiftshader',
     ],
   });
-  const context = await browser.newContext({ viewport: { width: 1100, height: 900 }, deviceScaleFactor: 1 });
+  const context = await browser.newContext({ viewport: VIEWPORT, deviceScaleFactor: 1 });
   const page = await context.newPage();
   page.on('pageerror', (e) => console.error('[pageerror]', String(e).slice(0, 300)));
   page.on('console', (m) => {
@@ -185,34 +196,50 @@ async function main() {
     await page.selectOption('#visualizer-renderer', 'milkdrop');
     await page.waitForFunction(() => window.__cpMilkdrop?.visualizer, null, { timeout: 45000 });
 
-    // Force a square backing store. The component's ResizeObserver calls
-    // setRendererSize, which resizes Butterchurn's targets and the canvas. Wait
-    // for that to settle before loading a preset so shader uniforms see the
-    // final dimensions.
-    await page.evaluate(({ w, h }) => {
-      const comp = window.__cpMilkdrop;
-      const canvas = comp.canvasRef.current;
-      const wrap = canvas.closest('.MilkDrop');
-      wrap.style.width = `${w}px`;
-      wrap.style.height = `${h}px`;
-      wrap.style.minHeight = `${h}px`;
-      wrap.style.flex = '0 0 auto';
-      canvas.style.width = `${w}px`;
-      canvas.style.height = `${h}px`;
-      // The stylesheet gives this canvas margin-left: 1px so it does not sit on
-      // the border. At an exact 720px target that rounds the resize-observer
-      // width to 719, so drop the margin for the recorder.
-      canvas.style.marginLeft = '0px';
-    }, { w: WIDTH, h: HEIGHT });
-    await sleep(600);
+    if (WHOLE) {
+      // The whole-app path must not touch the layout: the screenshot is what
+      // the user would see. The TimeSlider dev hook is installed when that
+      // component mounts; wait for it before any frame is captured.
+      await page.waitForFunction(() => typeof window.__cpSetTimeSlider === 'function', null, { timeout: 15000 });
+      await page.evaluate(() => {
+        if (document.activeElement) document.activeElement.blur();
+        window.scrollTo(0, 0);
+      });
+    } else {
+      // Force a square backing store. The component's ResizeObserver calls
+      // setRendererSize, which resizes Butterchurn's targets and the canvas. Wait
+      // for that to settle before loading a preset so shader uniforms see the
+      // final dimensions.
+      await page.evaluate(({ w, h }) => {
+        const comp = window.__cpMilkdrop;
+        const canvas = comp.canvasRef.current;
+        const wrap = canvas.closest('.MilkDrop');
+        wrap.style.width = `${w}px`;
+        wrap.style.height = `${h}px`;
+        wrap.style.minHeight = `${h}px`;
+        wrap.style.flex = '0 0 auto';
+        canvas.style.width = `${w}px`;
+        canvas.style.height = `${h}px`;
+        // The stylesheet gives this canvas margin-left: 1px so it does not sit on
+        // the border. At an exact 720px target that rounds the resize-observer
+        // width to 719, so drop the margin for the recorder.
+        canvas.style.marginLeft = '0px';
+      }, { w: WIDTH, h: HEIGHT });
+      await sleep(600);
+    }
     const dims = await page.evaluate(() => {
       const c = window.__cpMilkdrop.canvasRef.current;
       const gl = c.getContext('webgl2');
       return { css: [c.clientWidth, c.clientHeight], buffer: [gl.drawingBufferWidth, gl.drawingBufferHeight] };
     });
-    if (dims.buffer[0] !== WIDTH || dims.buffer[1] !== HEIGHT) {
+    if (!WHOLE && (dims.buffer[0] !== WIDTH || dims.buffer[1] !== HEIGHT)) {
       throw new Error(`canvas is ${dims.buffer.join('x')}, expected ${WIDTH}x${HEIGHT}`);
     }
+    if (WHOLE && (dims.buffer[0] < 1 || dims.buffer[1] < 1)) {
+      throw new Error('whole-app canvas has no drawing buffer');
+    }
+    const captureSize = WHOLE ? VIEWPORT : { width: WIDTH, height: HEIGHT };
+    console.log(`canvas ${dims.buffer.join('x')}; capture ${captureSize.width}x${captureSize.height}${WHOLE ? ' (whole app)' : ''}`);
 
     // Park the normal rAF loop. Presets auto-cycle every 20 s and the loop would
     // otherwise interleave its own render() calls (and real-time audio samples)
@@ -231,9 +258,15 @@ async function main() {
       const app = window.ChipPlayer;
       const ctx = app.audioCtx;
       await ctx.resume();
+      // Start the recorder before resuming the player. The take then begins at
+      // song position 0 (with a short silence) instead of 200 ms in, so the
+      // footer's first label is 0:00.0 and the audio graph has no previous tail.
+      window.__cpDev.pause();
       window.__cpDev.seek(0);
-      window.__cpDev.play();
-      await new Promise((r) => setTimeout(r, 250));
+      await new Promise((r) => setTimeout(r, 100));
+      // Capture starts before play, so sample 0 is the take's origin. The small
+      // pre-roll is silence and the footer starts at 0:00.0 with it.
+      const startPositionMs = 0;
 
       const dest = ctx.createMediaStreamDestination();
       app.gainNode.connect(dest);
@@ -245,6 +278,8 @@ async function main() {
       rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
       const stopped = new Promise((resolve) => { rec.onstop = resolve; });
       rec.start(100);
+      await new Promise((r) => setTimeout(r, 50));
+      window.__cpDev.play();
       await new Promise((r) => setTimeout(r, durationMs));
       rec.stop();
       await stopped;
@@ -257,7 +292,13 @@ async function main() {
       for (let i = 0; i < buf.length; i += 0x8000) {
         bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
       }
-      return { b64: btoa(bin), bytes: buf.length, mime: rec.mimeType };
+      return {
+        b64: btoa(bin),
+        bytes: buf.length,
+        mime: rec.mimeType,
+        startPositionMs:
+          startPositionMs,
+      };
     }, Math.round(SECONDS * 1000));
 
     if (!audio.bytes) throw new Error('audio take is empty');
@@ -269,7 +310,7 @@ async function main() {
     const pcm = readWav(wav);
     const duration = pcm.frames / pcm.rate;
     const frameCount = Math.min(Math.floor(duration * FPS), Math.round(SECONDS * FPS));
-    if (frameCount < FPS) throw new Error(`only ${frameCount} frames of audio decoded`);
+    if (frameCount < 1) throw new Error(`only ${frameCount} frames of audio decoded`);
     console.log(`audio ${audio.bytes} bytes -> ${pcm.frames} samples (${duration.toFixed(3)}s); rendering ${frameCount} frames`);
 
     // Fresh visualizer clock. loadPreset() does not reset time, and the opening
@@ -286,43 +327,61 @@ async function main() {
     });
 
     const started = Date.now();
+    const uiBaseMs = WHOLE ? Number(audio.startPositionMs) || 0 : 0;
     for (let frame = 0; frame < frameCount; frame++) {
       const levels = levelsAt(pcm, frame);
-      const dataUrl = await page.evaluate(async ({ lev }) => {
-        const comp = window.__cpMilkdrop;
-        const v = comp.visualizer;
-        const canvas = comp.canvasRef.current;
-        const gl = canvas.getContext('webgl2');
-        v.fps = 60;
-        v.render({ audioLevels: lev, elapsedTime: 1 / 60 });
-        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-        const w = gl.drawingBufferWidth;
-        const h = gl.drawingBufferHeight;
-        if (!window.__cpFrameBuf || window.__cpFrameBuf.length !== w * h * 4) {
-          window.__cpFrameBuf = new Uint8Array(w * h * 4);
-          window.__cpFrameCanvas = document.createElement('canvas');
-          window.__cpFrameCanvas.width = w;
-          window.__cpFrameCanvas.height = h;
-          window.__cpFrameCtx = window.__cpFrameCanvas.getContext('2d');
-          window.__cpFrameImg = window.__cpFrameCtx.createImageData(w, h);
-        }
-        const buf = window.__cpFrameBuf;
-        gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, buf);
-        const img = window.__cpFrameImg;
-        const dst = img.data;
-        const stride = w * 4;
-        for (let y = 0; y < h; y++) {
-          const src = (h - 1 - y) * stride;
-          const out = y * stride;
-          dst.set(buf.subarray(src, src + stride), out);
-          for (let x = out + 3; x < out + stride; x += 4) dst[x] = 255;
-        }
-        window.__cpFrameCtx.putImageData(img, 0, 0);
-        return window.__cpFrameCanvas.toDataURL('image/jpeg', 0.92);
-      }, { lev: levels });
-      const b64 = dataUrl.slice(dataUrl.indexOf(',') + 1);
-      fs.writeFileSync(path.join(framesDir, `frame${String(frame).padStart(6, '0')}.jpg`),
-        Buffer.from(b64, 'base64'));
+      const framePath = path.join(framesDir, `frame${String(frame).padStart(6, '0')}.jpg`);
+      if (WHOLE) {
+        // One task renders the canvas and sets the footer time; then two rAFs
+        // let React commit and the compositor present before the screenshot.
+        // The screenshot is the whole app, so it includes the same canvas the
+        // manual render just produced (no readPixels or overlay needed).
+        await page.evaluate(async ({ lev, timeMs }) => {
+          const comp = window.__cpMilkdrop;
+          const v = comp.visualizer;
+          v.fps = 60;
+          v.render({ audioLevels: lev, elapsedTime: 1 / 60 });
+          if (window.__cpSetTimeSlider) window.__cpSetTimeSlider(timeMs);
+          await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+        }, { lev: levels, timeMs: uiBaseMs + (frame * 1000) / FPS });
+        const shot = await page.screenshot({ type: 'jpeg', quality: 92 });
+        fs.writeFileSync(framePath, shot);
+      } else {
+        const dataUrl = await page.evaluate(async ({ lev }) => {
+          const comp = window.__cpMilkdrop;
+          const v = comp.visualizer;
+          const canvas = comp.canvasRef.current;
+          const gl = canvas.getContext('webgl2');
+          v.fps = 60;
+          v.render({ audioLevels: lev, elapsedTime: 1 / 60 });
+          gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+          const w = gl.drawingBufferWidth;
+          const h = gl.drawingBufferHeight;
+          if (!window.__cpFrameBuf || window.__cpFrameBuf.length !== w * h * 4) {
+            window.__cpFrameBuf = new Uint8Array(w * h * 4);
+            window.__cpFrameCanvas = document.createElement('canvas');
+            window.__cpFrameCanvas.width = w;
+            window.__cpFrameCanvas.height = h;
+            window.__cpFrameCtx = window.__cpFrameCanvas.getContext('2d');
+            window.__cpFrameImg = window.__cpFrameCtx.createImageData(w, h);
+          }
+          const buf = window.__cpFrameBuf;
+          gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+          const img = window.__cpFrameImg;
+          const dst = img.data;
+          const stride = w * 4;
+          for (let y = 0; y < h; y++) {
+            const src = (h - 1 - y) * stride;
+            const out = y * stride;
+            dst.set(buf.subarray(src, src + stride), out);
+            for (let x = out + 3; x < out + stride; x += 4) dst[x] = 255;
+          }
+          window.__cpFrameCtx.putImageData(img, 0, 0);
+          return window.__cpFrameCanvas.toDataURL('image/jpeg', 0.92);
+        }, { lev: levels });
+        const b64 = dataUrl.slice(dataUrl.indexOf(',') + 1);
+        fs.writeFileSync(framePath, Buffer.from(b64, 'base64'));
+      }
       if (frame % 30 === 0 || frame === frameCount - 1) {
         const elapsed = (Date.now() - started) / 1000;
         console.log(`frame ${frame + 1}/${frameCount} (${elapsed.toFixed(1)}s)`);
@@ -362,18 +421,20 @@ async function main() {
     const summary = {
       song: SONG,
       preset: PRESET,
-      width: WIDTH,
-      height: HEIGHT,
+      wholeApp: WHOLE,
+      width: captureSize.width,
+      height: captureSize.height,
       fps: FPS,
       frames: frameCount,
       duration: expected,
       audioSamples: pcm.frames,
       audioRate: pcm.rate,
       audioBytes: audio.bytes,
+      audioStartPositionMs: audio.startPositionMs,
       video: probe.video,
       audio: probe.audio,
       countedFrames: counted,
-      sync: 'frame N uses PCM window ending at N/60; audio file starts at sample 0',
+      sync: 'frame N uses PCM window ending at N/60; audio file starts at sample 0; the footer time starts at the captured song position',
       failures,
       pass: failures.length === 0,
       output: mp4,

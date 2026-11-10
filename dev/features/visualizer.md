@@ -273,6 +273,44 @@ the app UI would need a separate static overlaid frame.
 render path also needs the visualizer's rAF loop stopped, which is why the hook
 is on the component rather than only the raw Butterchurn instance.
 
+### Whole-app mode (`--whole`)
+
+The same script can capture the real app instead of the canvas:
+
+```sh
+node dev/record/proto60.mjs --whole --seconds 8 --out icecap-whole-60fps.mp4
+```
+
+Each frame is a **Playwright screenshot of the 900×720 page** after the manual
+canvas render and after `window.__cpSetTimeSlider(ms)` has set the footer clock.
+That hook is a dev-only `TimeSlider` `componentDidMount` method; it also clears
+the app's 100 ms timer, which would otherwise race the screenshot. The app's
+engine is paused without changing the UI's playing state, so the footer keeps
+the pause glyph while the screenshot loop owns the displayed time. Recording
+starts before playback resumes, so the take's origin is song position 0; the
+footer therefore starts at `0:00.0`. The audio has a ~50 ms silent pre-roll from
+the MediaRecorder start, which is visible as the same opening silence in the
+picture.
+
+Measured, IceCap (VGM), preset 0, 900×720:
+
+| property | value |
+| --- | --- |
+| frames | **478 / 478 decoded** |
+| duration | **7.966667 s** |
+| video | H.264 **900×720**, **r/avg 60/1** |
+| audio | AAC 48 kHz stereo, start **0.000000**, duration 7.966667 |
+| footer start | **0:00.0**; frame 60 reads **0:01.0** |
+| render time | ~94 s (~0.2 s/frame) |
+| output | `dev/record/.work/proto60/icecap-whole-60fps.mp4` |
+
+The screenshot path was checked against the frame at 1 s: the footer reads
+`0:01.0`, and the visualizer pixels are the manually rendered frame, not a stale
+compositor copy. Canvas-only is still the faster path for a pure-visual clip;
+whole-app costs ~94 s for 8 s at 900×720 in this headless SwiftShader host.
+Raising `deviceScaleFactor` to 2 would capture 1800×1440 and is the obvious next
+quality knob.
+
 ## Next steps to make it shippable
 
 Dependency hygiene and topology are done. Remaining order: **browser check ->

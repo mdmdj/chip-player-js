@@ -279,10 +279,13 @@ same PCM. Audio sample 0 is frame 0; there is no flash or trim.
 
 Measured on IceCap (VGM, preset 0, 720×720): **478/478 frames**, 7.966667 s,
 `r_frame_rate`/`avg_frame_rate` **60/1**, AAC audio start **0.000000** and the
-same duration. The audio take is still real time; only the video clock is
-offline. See `dev/features/visualizer.md` §"Deterministic 60 fps recorder" for
-the command and the remaining limits. This is separate from the PR page's DOM
-clips, which still use the Playwright + flash pipeline above.
+same duration. `--whole` instead screenshots the real 900×720 app each frame
+and drives the footer time with a dev-only `TimeSlider` hook: **478/478**, same
+duration and 60/1 rates, footer starts at `0:00.0` and reads `0:01.0` at the
+1 s frame. The audio take is still real time; only the video clock is offline.
+See `dev/features/visualizer.md` §"Deterministic 60 fps recorder" for commands
+and limits. This is separate from the PR page's DOM clips, which still use the
+Playwright + flash pipeline above.
 
 ## 4. Repository layout
 

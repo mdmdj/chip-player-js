@@ -18,6 +18,23 @@ export default class TimeSlider extends React.Component {
     };
     this.timer = null;
   }
+  // DEV-BEGIN (stripped for promotion; whole-app recorder hook)
+  // The deterministic recorder renders the UI offline. This stops the 100 ms
+  // playback timer (which would otherwise race the screenshot) and lets the
+  // recorder set the exact frame time shown in the footer.
+  componentDidMount() {
+    window.__cpSetTimeSlider = (ms) => {
+      if (this.timer) {
+        clearInterval(this.timer);
+        this.timer = null;
+      }
+      this.setState({
+        currentSongPositionMs: ms,
+        draggedSongPositionMs: -1,
+      });
+    };
+  }
+  // DEV-END
 
   componentDidUpdate(prevProps) {
     if (prevProps.paused === true && this.props.paused === false) {
@@ -34,6 +51,9 @@ export default class TimeSlider extends React.Component {
 
   componentWillUnmount() {
     clearInterval(this.timer);
+    // DEV-BEGIN (stripped for promotion; whole-app recorder hook)
+    if (window.__cpSetTimeSlider) window.__cpSetTimeSlider = null;
+    // DEV-END
   }
 
   getSongPos() {

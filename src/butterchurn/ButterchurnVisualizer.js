@@ -95,7 +95,6 @@ export default class ButterchurnVisualizer extends PureComponent {
       // itself so the output is CFR rather than a screencast.
       window.__cpMilkdrop = this;
       // DEV-END
-
       if (this.props.paused) {
         this.visualizer.render();
       } else {

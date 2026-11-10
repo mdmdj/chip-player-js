@@ -6,7 +6,7 @@ A file that holds several songs (NSF/NSFE, SID, GBS, AY) becomes a **song folder
 
 **Write-up with a video for every behaviour:** https://mdm.dj/dev/chip-player-js/subtunes-as-first-class/
 
-55 files, +5,279/−675 (two of them are upstream's own tests, adapted to the sub-tune contract). Three pieces are structural: the catalog schema, the client's song identity, and the loop wrappers. Nothing is taken out of `master`'s engine work: the two wrappers only add loop getters, and the one vendored engine touched is `mdxmini`. On the client, the old footer sub-tune widget and the player-side sub-tune chaining are deliberately replaced by the song-folder model — that is the feature; the write-up explains it.
+55 files, +5,315/−680 (two of them are upstream's own tests, adapted to the sub-tune contract). Three pieces are structural: the catalog schema, the client's song identity, and the loop wrappers. Nothing is taken out of `master`'s engine work: the two wrappers only add loop getters, and the one vendored engine touched is `mdxmini`. On the client, the old footer sub-tune widget and the player-side sub-tune chaining are deliberately replaced by the song-folder model — that is the feature; the write-up explains it.
 
 ## Suggested Review Phases
 

@@ -66,14 +66,20 @@ The transport is styled like the footer's three-button group: pure CSS triangles
 shuffle glyph only for Random. The "Preset:" text label is replaced by the glyph.
 
 The Visualizer On/Off switch lives in the header (`AppHeader.js`), aligned with
-the "Chip Player JS" title line. The **Renderer** selector is a compact drop-down,
-window-right anchored at the tab row's vertical position, so it reads as part of
-that row rather than a line of its own between the header and the tabs. It is
-shown only while the visualizer is **on** and the song is not MIDI (where the
-piano roll owns the panel); hidden when the visualizer is off, it cannot overlap
-the Settings tab. Neither is in `.Visualizer-options`, so the panel holds only
-renderer-specific controls, sits above the absolute piano-keys overlay, and
-leaves the keys at full height; the spectrogram remains 448×800.
+the "Chip Player JS" title line. The **Renderer** selector is the first row of
+`.Visualizer-options`, so it flows inside the visualizer panel instead of being
+a fixed overlay registered against a theme-specific tab-row height. It is shown
+only while the visualizer is **on** and the song is not MIDI (where the piano
+roll owns the panel); nothing is rendered when the panel is hidden. The base
+`.Visualizer-options` top padding is zero and the renderer row supplies that
+height (`min-height: var(--charH)`), which keeps the MS-DOS geometry exactly as
+it was; Winamp's normal 12 px side/bottom padding applies and its header grows
+by the row height rather than having the dropdown cross the groove border.
+
+The preset name is an explicit right-aligned final row of the same header, so
+it is anchored bottom-right in every theme without relying on inherited
+`text-align`. The header sits above the absolute piano-keys overlay and leaves
+the spectrogram at 448×800.
 
 Only the active renderer runs. `Spectrogram` owns a rAF loop and is paused while
 MilkDrop, the piano roll, or the hidden visualizer is on screen (including on the
@@ -162,6 +168,13 @@ settings without these keys fall back through `||`.
   MutationObserver; the preset arrived in the same switch and `▶` advanced it.
   The main bundle's preset-name count is 0.
 - MIDI still shows the piano roll, no MilkDrop canvas, no renderer selector.
+- **Header layout (2026-11-10):** measured at 900×720 with Settings open. Winamp
+  MilkDrop now has the renderer row inside `.Visualizer-options` at y49 h22,
+  then the preset nav at y71 and the right-aligned preset name at y93; the
+  canvas starts at y129. MS-DOS is byte-for-byte the same geometry as before
+  the move (options h60, nav y75, name y97, canvas y116), because the renderer
+  row replaces the old top padding. Spectrogram Winamp also measured: renderer
+  row y49 h22, options h102, keys below it.
 - `dev/check-promotable-refs.js` and `dev/test-client-seams.js` (22/0) green.
 - `./dev/run-tests.sh` on the clean tree (2026-10-22): **25 passed, 1 skipped,
   2 failed** — `test-midi-loops` (the known sample-catalog Gyrocopter check) and

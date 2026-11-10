@@ -2236,9 +2236,15 @@ only armed when `silenceDuration >= 0`, and both arms must end the song):
 
 - Indefinite Playback on/off mirrors #3–#7 through the `setParameter` path
   (`syncFadeTailCapture` + `applyLoopCount(wasLooping)` are shared).
-- Seek during a captured tail drops `fadeTailStartMs` (backward seek also
-  cancels libvgm's fade); a seek backward after #7 leaves `durationExtended`
-  set — benign, cleared on next load, engine still ends the song.
+- A seek back into the loop from a captured tail drops `fadeTailStartMs`
+  (backward seek also cancels libvgm's fade); a seek backward after #7 leaves
+  `durationExtended` set — benign, cleared on next load, engine still ends the
+  song.
+- A manual seek *past* the loop band while Repeat One / Indefinite Playback is
+  on is a landing in the fade, not a fold: `VGMPlayer.seekMs` captures the band
+  end for the display tail and gives libvgm a finite count (2), so the engine
+  fades and ends and the Repeat One auto-end reloads. Seeking back inside the
+  band restores count 0 and clears the capture.
 - Song end/advance: engine ends (render 0) under looping/#4/#7; sequencer
   advances and the next entry starts with fresh state.
 - Engine keeps looping through the fade (`curLoop` increments); a short loop
@@ -2273,8 +2279,9 @@ only armed when `silenceDuration >= 0`, and both arms must end the song):
   makes the toggle jump-free. The display is NOT a pure function of the
   absolute position: `fadeTailStartMs` is captured at enable time when looping
   is switched on mid-fade (the loop count change makes the fade-start getter
-  meaningless), and rides the tail until the song ends/seek/loadData clears
-  it.
+  meaningless), and rides the tail until the song ends, a seek back into the
+  loop, or `loadData` clears it. A manual seek into the fade installs it (see
+  the seek bullet above).
 - New wrapper exports (`libvgm-wrapper.cpp` + `build-chip-core.js`):
   `_lvgm_get_cur_loop` (`GetCurLoop`) and `_lvgm_get_fade_start_ms`
   (`GetTotalPlayTicks(loopCount)`).

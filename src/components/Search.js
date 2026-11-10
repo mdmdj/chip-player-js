@@ -5,7 +5,7 @@ import autoBindReact from 'auto-bind/react';
 import debounce from 'lodash/debounce';
 
 import { API_BASE } from '../config';
-import { encodeFilepathSegments, getUrlFromFilepath, pathJoin, songRef, subtuneLabel, isSongFolder } from '../util';
+import { encodeRawFilepathSegments, getUrlFromFilepath, pathJoin, songRef, subtuneLabel, isSongFolder } from '../util';
 import DirectoryLink from './DirectoryLink';
 import FavoriteButton from './FavoriteButton';
 import VirtualizedList from './VirtualizedList';

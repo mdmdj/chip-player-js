@@ -268,6 +268,22 @@ first frame leaves white frames in the clip), and the trim must use filters
 rather than `-ss` (`-ss` after the inputs trims the output twice; `-ss` before
 them is keyframe-snapped, which is the desync the flash exists to remove).
 
+### MilkDrop: a deterministic 60 fps path (prototype)
+
+`screencast` is the wrong source when the picture is one WebGL canvas and the
+only thing that has to be right is time. `proto60.mjs` records the app's audio
+once, then calls Butterchurn's manual render API — `render({ audioLevels,
+elapsedTime: 1/60 })` with the analyser window ending at `N/60` — reads each
+canvas back with `gl.readPixels` (no `preserveDrawingBuffer`), and muxes the
+same PCM. Audio sample 0 is frame 0; there is no flash or trim.
+
+Measured on IceCap (VGM, preset 0, 720×720): **478/478 frames**, 7.966667 s,
+`r_frame_rate`/`avg_frame_rate` **60/1**, AAC audio start **0.000000** and the
+same duration. The audio take is still real time; only the video clock is
+offline. See `dev/features/visualizer.md` §"Deterministic 60 fps recorder" for
+the command and the remaining limits. This is separate from the PR page's DOM
+clips, which still use the Playwright + flash pipeline above.
+
 ## 4. Repository layout
 
 ```

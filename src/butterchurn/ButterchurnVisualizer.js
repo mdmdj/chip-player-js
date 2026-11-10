@@ -89,6 +89,13 @@ export default class ButterchurnVisualizer extends PureComponent {
       this.loadPresetAt(0, 0);
       this.syncAutoCycle();
 
+      // DEV-BEGIN (stripped for promotion; deterministic recorder hook)
+      // The offline recorder needs the live Butterchurn instance and its canvas;
+      // it stops the rAF loop and drives render({ audioLevels, elapsedTime })
+      // itself so the output is CFR rather than a screencast.
+      window.__cpMilkdrop = this;
+      // DEV-END
+
       if (this.props.paused) {
         this.visualizer.render();
       } else {
@@ -151,6 +158,9 @@ export default class ButterchurnVisualizer extends PureComponent {
     if (this.visualizer && this.props.sourceNode) {
       this.visualizer.disconnectAudio(this.props.sourceNode);
     }
+    // DEV-BEGIN (stripped for promotion; deterministic recorder hook)
+    if (window.__cpMilkdrop === this) window.__cpMilkdrop = null;
+    // DEV-END
     this.visualizer = null;
   }
 

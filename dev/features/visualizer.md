@@ -213,6 +213,66 @@ loop-gate expansion, which belongs to sub-tunes.
 
 `./dev/overlay.sh visualizer plan` is clean ("Nothing to promote").
 
+## Demo catalog (2026-11-10)
+
+Downloaded 17 non-MIDI tracks from prod (`https://chiptune.app/catalog/<path>`,
+all 200) into this worktree's `catalog/` and rebuilt with
+`node scripts/build-music.js -n`: **31 music rows**. The catalog is gitignored,
+so these are local fixtures for recording, not files that belong in the PR.
+Formats cover VGM/VGZ, SPC, SID, MOD and XM; no MIDI, because MilkDrop is
+deliberately unavailable for MIDI (the piano roll owns that path).
+
+The set includes IceCap (Sonic 3), Go Straight (SoR2), Aquatic Ambiance (DKC),
+Corridors of Time (Chrono Trigger), Guile (SFII), Magical Sound Shower
+(OutRun), Tetris, Stickerbush (DKC2), Space Debris, Stardust Memories, Unreal
+Superhero, Megalovania (OPL), DoDonPachi, Delta (SID), Brinstar (SID), Monty on
+the Run (XM) and Cybernoid 2 (MOD). Direct URLs worked with only the path
+percent-encoded; `&` in the DoDonPachi filename must become `%26`.
+
+## Deterministic 60 fps recorder (2026-11-10 prototype)
+
+`dev/record/proto60.mjs` proves the recorder route: **canvas capture is not a
+screencast at all**. It records the app's audio once, decodes that take to
+48 kHz PCM, and then reruns Butterchurn frame by frame from the same PCM:
+
+- `render({ audioLevels, elapsedTime: 1/60 })` with a 1024-sample analyser
+  window ending at `N/60`; `v.fps` forced to 60 so the preset clock advances
+  exactly one 60 Hz tick per frame.
+- `gl.readPixels` immediately after `render` (the canvas has no
+  `preserveDrawingBuffer`), flipped into a 2D canvas and encoded as JPEG.
+- ffmpeg reads the numbered frames at `-framerate 60` and muxes the identical
+  WAV, so audio sample 0 is video frame 0. No flash mark, no trim heuristic.
+
+Measured, IceCap (VGM), preset 0, 720×720:
+
+| property | value |
+| --- | --- |
+| frames | **478** (all decoded; 478/478) |
+| duration | **7.966667 s** |
+| video | H.264, **720×720, r/avg 60/1**, 17 Mb/s |
+| audio | AAC 48 kHz stereo, 192 kb/s, **start 0.000000**, duration 7.966667 |
+| source PCM | 383,040 samples @ 48 kHz |
+| render time | ~135 s in headless SwiftShader (~0.28 s/frame) |
+| output | `dev/record/.work/proto60/icecap-60fps.mp4` |
+
+A second run with Aquatic Ambiance (SPC) passed the same checks at 118 frames /
+1.966667 s (`aquatic-60fps.mp4`), so the path is not VGM-specific. The script
+fails unless decoded frame count, `r_frame_rate`, `avg_frame_rate`, video
+duration, audio start and audio duration all match the construction.
+
+What is deterministic and what is not: **frame count, timestamps, audio/PCM
+mapping and sync are exact**. The audio take itself is still real time (the
+engine is played once through MediaRecorder), so a host audio underrun would be
+captured, not corrected. Rendering the chip engine offline would remove that
+last real-time dependency and is the next step if the prototype becomes the
+shipped recorder. The prototype captures the MilkDrop canvas only; compositing
+the app UI would need a separate static overlaid frame.
+
+`ButterchurnVisualizer` exposes `window.__cpMilkdrop` for this recorder inside a
+`DEV-BEGIN`/`DEV-END` region; promotion strips it. The stop/start and manual
+render path also needs the visualizer's rAF loop stopped, which is why the hook
+is on the component rather than only the raw Butterchurn instance.
+
 ## Next steps to make it shippable
 
 Dependency hygiene and topology are done. Remaining order: **browser check ->

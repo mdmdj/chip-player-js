@@ -325,6 +325,13 @@ Measured, IceCap (VGM), preset 0, 900×720:
 | render time | ~94 s (~0.2 s/frame) |
 | output | `dev/record/.work/proto60/icecap-whole-60fps.mp4` |
 
+One recorder gotcha showed up only on 30 s clips: `__cpDev.pause()` calls a
+non-existent `player.pause()`, so the real engine kept running under the
+offline screenshot loop, reached the end of IceCap, and reset the footer's
+duration to `0:00.0` while the first frames still showed `2:52.6`. Set
+`player.paused = true` directly and re-assert `durationMs` after the take; the
+re-rendered clips stay at the correct total duration throughout.
+
 The screenshot path was checked against the frame at 1 s: the footer reads
 `0:01.0`, and the visualizer pixels are the manually rendered frame, not a stale
 compositor copy. Canvas-only is still the faster path for a pure-visual clip;

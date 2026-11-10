@@ -204,6 +204,26 @@ async function main() {
     await page.selectOption('#visualizer-renderer', 'milkdrop');
     await page.waitForFunction(() => window.__cpMilkdrop?.visualizer, null, { timeout: 45000 });
 
+    // Whole-app frames read the duration label from App state, not from the
+    // player directly. If the metadata/engine load is still settling when the
+    // engine is paused for the take, the finished clip can show 0:00.0 on the
+    // right forever. Wait for a real duration first, and repair the state from
+    // the player once if the first sequencer update was missed.
+    await page.waitForFunction(() => {
+      const app = window.ChipPlayer;
+      const p = app?.sequencer?.getPlayer?.();
+      return Boolean(p && (app.state?.durationMs > 0 || p.getDurationMs?.() > 0));
+    }, null, { timeout: 45000 });
+    const durationMs = await page.evaluate(() => {
+      const app = window.ChipPlayer;
+      const p = app?.sequencer?.getPlayer?.();
+      const d = Number(app.state?.durationMs) || Number(p?.getDurationMs?.()) || 0;
+      if (d > 0 && app.state?.durationMs !== d) app.setState({ durationMs: d });
+      return d;
+    });
+    if (!(durationMs > 0)) throw new Error('song duration never settled');
+    console.log(`song duration ${Math.round(durationMs)} ms`);
+
     if (WHOLE) {
       // The whole-app path must not touch the layout: the screenshot is what
       // the user would see. The TimeSlider dev hook is installed when that
@@ -265,11 +285,17 @@ async function main() {
     const audio = await page.evaluate(async (durationMs) => {
       const app = window.ChipPlayer;
       const ctx = app.audioCtx;
+      const player = window.__cpDev.player();
+      // __cpDev.pause() only calls player.pause(), which the player classes do
+      // not implement; leaving `paused` false lets the engine run to the song
+      // end during a long offline screenshot loop, which then resets the app's
+      // duration to 0. Set the actual flag.
+      const pauseEngine = () => { if (player) player.paused = true; };
       await ctx.resume();
       // Start the recorder before resuming the player. The take then begins at
       // song position 0 (with a short silence) instead of 200 ms in, so the
       // footer's first label is 0:00.0 and the audio graph has no previous tail.
-      window.__cpDev.pause();
+      pauseEngine();
       window.__cpDev.seek(0);
       await new Promise((r) => setTimeout(r, 100));
       // Capture starts before play, so sample 0 is the take's origin. The small
@@ -292,7 +318,7 @@ async function main() {
       rec.stop();
       await stopped;
       app.gainNode.disconnect(dest);
-      window.__cpDev.pause();
+      pauseEngine();
 
       const blob = new Blob(chunks, { type: rec.mimeType });
       const buf = new Uint8Array(await blob.arrayBuffer());
@@ -310,6 +336,21 @@ async function main() {
     }, Math.round((SECONDS + 0.5) * 1000));
 
     if (!audio.bytes) throw new Error('audio take is empty');
+
+    // Keep the footer's total-time label pinned after the engine stops. The
+    // song can still have been running when the take ended on older player
+    // classes; a late sequencer update would otherwise overwrite a correct
+    // duration with 0 while the screenshots are still rendering.
+    const uiDurationMs = await page.evaluate(() => {
+      const app = window.ChipPlayer;
+      const p = app?.sequencer?.getPlayer?.();
+      if (p) p.paused = true;
+      const d = Number(p?.getDurationMs?.()) || Number(app.state?.durationMs) || 0;
+      if (d > 0 && app.state?.durationMs !== d) app.setState({ durationMs: d });
+      return d;
+    });
+    if (!(uiDurationMs > 0)) throw new Error('UI duration is zero after the take');
+
     const webm = path.join(OUT, 'take.webm');
     const wav = path.join(OUT, 'take.wav');
     fs.writeFileSync(webm, Buffer.from(audio.b64, 'base64'));

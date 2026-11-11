@@ -269,15 +269,27 @@ async function main() {
     const captureSize = WHOLE ? VIEWPORT : { width: WIDTH, height: HEIGHT };
     console.log(`canvas ${dims.buffer.join('x')}; capture ${captureSize.width}x${captureSize.height}${WHOLE ? ' (whole app)' : ''}`);
 
-    // Park the normal rAF loop. Presets auto-cycle every 20 s and the loop would
-    // otherwise interleave its own render() calls (and real-time audio samples)
-    // with the deterministic ones.
+    // Park the normal rAF loop and turn Auto off through the real checkbox, so
+    // the UI and the component state agree. Auto's 20 s interval otherwise
+    // replaces the selected preset while a 30 s offline take is still rendering
+    // (the clip then shows one name and a different preset). Clear the timer
+    // too, in case the checkbox event has not committed yet.
     await page.evaluate((preset) => {
+      const auto = document.querySelector('.PresetNav-auto input[type="checkbox"]');
+      if (auto && auto.checked) auto.click();
       const comp = window.__cpMilkdrop;
       comp.stop();
       comp.loadPresetAt(preset, 0);
+      if (comp.rotateTimer) {
+        clearInterval(comp.rotateTimer);
+        comp.rotateTimer = null;
+      }
     }, PRESET);
     await sleep(300);
+    await page.waitForFunction(() => {
+      const auto = document.querySelector('.PresetNav-auto input[type="checkbox"]');
+      return auto && !auto.checked && window.__cpMilkdrop?.rotateTimer === null;
+    }, null, { timeout: 5000 });
 
     // Seek to the top so the audio take starts at the song's beginning, then
     // record its real output. Recording is the only real-time part of this

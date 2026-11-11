@@ -305,7 +305,10 @@ node dev/record/proto60.mjs --whole --seconds 8 --out icecap-whole-60fps.mp4
 Each frame is a **Playwright screenshot of the 900×720 page** after the manual
 canvas render and after `window.__cpSetTimeSlider(ms)` has set the footer clock.
 That hook is a dev-only `TimeSlider` `componentDidMount` method; it also clears
-the app's 100 ms timer, which would otherwise race the screenshot. The app's
+the app's 100 ms timer, which would otherwise race the screenshot. The recorder
+unchecks **Auto** through the real checkbox and clears `rotateTimer`; otherwise
+the 20 s rotation replaces the selected preset partway through a 30 s clip while
+the footer still displays the originally selected name. The app's
 engine is paused without changing the UI's playing state, so the footer keeps
 the pause glyph while the screenshot loop owns the displayed time. Recording
 starts before playback resumes, so the take's origin is song position 0; the
@@ -358,11 +361,12 @@ track/preset combination each, using the **Winamp** theme:
 | Megalovania | VGM/VGZ | 98 `Zylot - Star Ornament` |
 
 All ten measured **900×720, 1800/1800 frames, 30.000 s, r/avg 60/1, AAC 48 kHz
-stereo starting at 0**. The recorder now records 0.5 s extra and trims to the
-requested length, so a MediaRecorder take that lands a few milliseconds short
-cannot turn a 30 s request into 29.95 s. `--jobs 3` gives each worker its own
-frames/audio directory and cut the 10-clip slate to about 20 minutes on this
-8-core host. The gallery and manifest are `dev/record/.work/proto60/index.html`
+stereo starting at 0**. The clips have **Auto off**; IceCap was checked at 20 s
+and 29 s and still showed the selected `$$$ Royal - Mashup (197) (1/100)`.
+The recorder records 0.5 s extra and trims to the requested length, so a
+MediaRecorder take that lands a few milliseconds short cannot turn a 30 s
+request into 29.95 s. `--jobs 3` gives each worker its own frames/audio
+directory and cut the 10-clip slate to about 20 minutes on this 8-core host. The gallery and manifest are `dev/record/.work/proto60/index.html`
 and `manifest.json`; individual files are under `dev/record/.work/proto60/clips/`.
 `proto60.mjs` defaults to `--theme winamp`; `--theme msdos` still works.
 

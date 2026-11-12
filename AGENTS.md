@@ -2520,7 +2520,7 @@ only armed when `silenceDuration >= 0`, and both arms must end the song):
   but already has the equivalent contract: a seek into the ending sets
   `loopRegionLeft` so the head follows the outro instead of rewinding
   (`dev/test-midi-loops.js`). XMP has no fade and its positional clock does not
-  fold; GME's JS fade begins at the slider's duration, so there is no fade
+  fold; GME's Host Fade begins at the slider's duration, so there is no fade
   region to seek into; SID, N64, GSF and V2M have no band or fade.
 - **Two engine bugs this surfaced (both fixed in `mdxmini/`, overlay-only).**
   (1) The fade end only returned `FALSE` without latching, so `master_volume`
@@ -2561,9 +2561,9 @@ only armed when `silenceDuration >= 0`, and both arms must end the song):
   *and* the elapsed label drop back to zero each cycle rather than
   accumulating. Drivers that loop internally never take that path, so for them
   the label really does climb. Toggling repeat off
-   restores the clamped head/duration (and the pending JS fade ends the song,
+   restores the clamped head/duration (and the pending Host Fade ends the song,
    since the position is already past the length). Repeat-off plays to the
-   natural end + JS fade. Real per-track regions would need GME-side work
+   natural end + Host Fade. Real per-track regions would need GME-side work
    (roadmap) — NSFe `loop` chunk support and/or a native loop API.
 
   **Categorized not-a-bug 2026-10-16 (greptile, `GMEPlayer.js:336`).** The finding
@@ -3114,3 +3114,37 @@ the opposite of what its event counts predict. Neither `parseMidiData` nor the
 event-list builder changed here, so this is pre-existing and unexplained;
 recorded rather than guessed at. If the load path ever needs trimming, that is
 where to look.
+
+## Handoff (2026-11-12) — upstream master's subtune/Host Fade refactor
+
+Upstream master moved to `5ad97d47e` and landed three commits that touch the
+same seam as this feature: `c7f263908` (consolidate subtune sequencing and Host
+Fade in `Player`), `ecd94697d` (GME), and `07f3a4a41` (SID). The merge is on
+`feature/subtunes-as-first-class`; the overlay is rebased on top.
+
+**The decision.** First-class sub-tunes keep the Sequencer as the only
+sequencer. Upstream's `Player.advanceOrEnd()` auto-advanced `getSubtune() + 1`
+inside a file; that is gone, replaced by `finishSong()` (`stop()` + emit
+`playerSongEnd`). Upstream's two auto-advance tests were replaced by one that
+asserts the player leaves the sub-tune alone and lets the Sequencer decide.
+`playSubtune()` remains for selecting the requested tune at load, but nothing
+calls it to walk to a sibling on song end.
+
+**What was adopted.** Host Fade (`hostFade`, `fading`, `fadeStartMs`,
+`fadeDurationMs`, `startFade`/`resetFade`), the trailing-silence cutoff, and
+the GME/SID migrations that delete their private fade state and sequencing.
+GME's old `fadingOut`/`fadeFinished` fields and custom fade loop are gone; SID
+uses the base fade for repeat-off and keeps its EndDetector tail restart for
+Repeat One. `FavoriteButton` keeps upstream's login prompt and calls the
+feature's `(path, subtune, songId, title)` favorite API.
+
+**Test adaptations.** `dev/test-gme-loops.js` asserts `fading` rather than
+`fadingOut`/`fadeFinished` and stubs the base silence scanner because its fake
+core renders zeros. `dev/test-end-detector.js` sets `p.durationMs` when it
+overrides the SID length, because Host Fade reads the cached duration. The
+overlay dev config uses `window.location?.hostname` so
+`npm run test:player-lifecycle` runs under Node.
+
+**Merge conflicts:** `Player.js`, `GMEPlayer.js`, `SIDPlayer.js`,
+`FavoriteButton.js`. `tests/player-lifecycle.test.js` auto-merged; its new
+auto-advance tests were the semantic conflict and were replaced as above.

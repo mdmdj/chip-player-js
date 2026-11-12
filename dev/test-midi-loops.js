@@ -638,6 +638,38 @@ check('an MSB-only bank clears the previous LSB first', () => {
     'an MSB-only bank clears LSB first: ' + JSON.stringify(collected));
 });
 
+check('a pending bank before the loop restores program 0 on the original bank first', () => {
+  // Bank 5 is selected before the loop, but no program change follows it until
+  // inside the loop. At the loop start the audible patch is still program 0 on
+  // bank 0; the bank-5 selection is pending. The wrap must therefore send the
+  // default program on bank 0 first, then re-select bank 5 for the next program
+  // change inside the region.
+  const bytes = buildMidi([[
+    tempo(), ccAt(0, 0, 5), noteOnAt(0, 0, 60), noteOffAt(TPQ, 0, 60),
+    ccAt(TPQ, 110, 0), programChangeAt(0, 0, 2), noteOnAt(0, 0, 64),
+    noteOffAt(TPQ, 0, 64), cc(111),
+  ]]);
+  const synth = stubSynth(true);
+  const p = makePlayer(synth);
+  p.load(parseBytes(bytes), false);
+  assert.ok(p.loop, 'expected a loop region');
+  p.play(() => {});
+  p.setLooping(true);
+  p.setPosition(p.loop.endMs - 20);
+  synth.log.length = 0;
+  p.processPlaySynth(0, 2048);
+  const firstProgram = synth.log.findIndex(([kind]) => kind === 'prog');
+  const before = synth.log.slice(0, firstProgram).filter(([kind, , cc]) =>
+    kind === 'cc' && (cc === 0 || cc === 32));
+  assert.deepStrictEqual(before.slice(0, 2), [['cc', 0, 0, 0], ['cc', 0, 32, 0]],
+    'clear to bank 0 before the default program: ' + JSON.stringify(synth.log.slice(0, 12)));
+  assert.ok(firstProgram >= 0 && synth.log[firstProgram][2] === 0,
+    'program 0 is restored on bank 0');
+  assert.ok(synth.log.slice(firstProgram + 1).some(([kind, , cc, value]) =>
+    kind === 'cc' && cc === 0 && value === 5),
+    'the pending bank 5 is restored after the program');
+});
+
 check('a pending bank change replays both bank bytes', () => {
   // Only MSB changes after the program; the pair is still a new bank. Replaying
   // MSB alone leaves a synth that resolves MSB/LSB on an incomplete bank.

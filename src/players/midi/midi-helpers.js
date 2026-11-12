@@ -122,30 +122,32 @@ export function bankForProgramEvents(channel, bank, bankSelect) {
 export function addLoopStartPrograms(eventList, usedChannels = []) {
   const used = usedChannelSet(usedChannels);
   const programChannels = new Set();
-  const bankChannels = new Set();
   for (const event of eventList) {
     if (event.subtype === EVENT_MIDI_PROGRAM_CHANGE) {
       programChannels.add(event.channel);
-    } else if (event.subtype === EVENT_MIDI_CONTROLLER &&
-               (event.param1 === CC_BANK_SELECT_MSB || event.param1 === CC_BANK_SELECT_LSB)) {
-      bankChannels.add(event.channel);
     }
   }
   const bankSelect = (channel, param1, param2) => ({
     type: EVENT_MIDI,
     channel, param1, param2, subtype: EVENT_MIDI_CONTROLLER, delta: 0,
   });
+  const defaults = [];
   for (const channel of used) {
     if (programChannels.has(channel)) continue;
-    if (!bankChannels.has(channel)) {
-      eventList.push(bankSelect(channel, CC_BANK_SELECT_MSB, 0));
-      eventList.push(bankSelect(channel, CC_BANK_SELECT_LSB, 0));
-    }
-    eventList.push({
+    // A bank selected before the loop is *pending*: no program change has used
+    // it yet, so the audible patch at the loop start is still program 0 on the
+    // original bank (0). Restore that program on bank 0 first; the pending bank
+    // then follows in the collected state and applies to the next program change
+    // inside the loop. Doing it the other way round plays program 0 on the new
+    // bank, changing the instrument.
+    defaults.push(bankSelect(channel, CC_BANK_SELECT_MSB, 0));
+    defaults.push(bankSelect(channel, CC_BANK_SELECT_LSB, 0));
+    defaults.push({
       type: EVENT_MIDI,
       channel, param1: 0, subtype: EVENT_MIDI_PROGRAM_CHANGE, delta: 0,
     });
   }
+  if (defaults.length) eventList.unshift(...defaults);
   return eventList;
 }
 

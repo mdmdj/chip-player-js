@@ -308,7 +308,7 @@ export const snippets = [
     id: 'handle-song-end',
     title: 'The player plays one song and stops',
     file: 'src/players/Player.js',
-    from: /^  handleSongEnd\(onSilenceEnd = null\) \{/,
+    from: /^  finishSong\(\) \{/,
     to: /^  \}/,
     expect: 'this.stop()',
     why: `<code>master</code> advanced to the next sub-tune inside the player, which is why sub-tunes

@@ -135,6 +135,9 @@ async function makePlayer(coreOpts) {
   const core = makeCore(coreOpts);
   const p = new GMEPlayer(core, SAMPLE_RATE, BUFFER_SIZE);
   await p.loadData(new Uint8Array([0x4e, 0x45, 0x53, 0x4d]), 'test.nsf', {});
+  // The fake core renders zeros; the base silence scanner is covered by
+  // tests/player-lifecycle and would otherwise end every fade test early.
+  p.checkTrailingSilence = () => false;
   return { p, core };
 }
 
@@ -218,10 +221,9 @@ async function main() {
     const { p, core } = await makePlayer({ tracks: [ONE_SHOT] });
     p.setLooping(false);
     drive(p, core, ONE_SHOT.play_length + 50);
-    assert.strictEqual(p.fadingOut, true, 'the fade started at the track length');
+    assert.strictEqual(p.fading, true, 'the Host Fade started at the track length');
     p.setLooping(true);
-    assert.strictEqual(p.fadingOut, false, 'the fade is abandoned');
-    assert.strictEqual(p.fadeFinished, false);
+    assert.strictEqual(p.fading, false, 'the fade is abandoned');
     assert.strictEqual(p.isPlayingIndefinitely(), true);
   });
 
@@ -230,9 +232,9 @@ async function main() {
     p.setLooping(true);                                  // Repeat One
     p.setParameter('indefinitePlayback', true);
     drive(p, core, ONE_SHOT.play_length + 50);           // past the track length
-    assert.strictEqual(p.fadingOut, false, 'repeat one holds it, not the setting');
+    assert.strictEqual(p.fading, false, 'repeat one holds it, not the setting');
     p.setParameter('indefinitePlayback', false);         // the finding: this used to fade
-    assert.strictEqual(p.fadingOut, false, 'no fade: the song is meant to keep looping');
+    assert.strictEqual(p.fading, false, 'no fade: the song is meant to keep looping');
     assert.strictEqual(p.fadeStartMs, null);
     assert.strictEqual(p.isPlayingIndefinitely(), true);
     // The artefact, not just the flag: give the fake core real sample values and
@@ -252,7 +254,7 @@ async function main() {
     p.setParameter('indefinitePlayback', true);
     drive(p, core, ONE_SHOT.play_length + 50);
     p.setParameter('indefinitePlayback', false);
-    assert.strictEqual(p.fadingOut, true, 'with repeat off the setting off still fades');
+    assert.strictEqual(p.fading, true, 'with repeat off the setting off still fades');
     // The other half of the pair: this time the mix really is attenuated.
     const memGet = core.getValue;
     core.getValue = (ptr, type) => (type === 'i16' ? 0x7fff : memGet(ptr));
@@ -301,11 +303,10 @@ async function main() {
     const { p, core } = await makePlayer();
     p.setLooping(false);
     drive(p, core, ONE_SONG.play_length + 50);
-    assert.strictEqual(p.fadingOut, true);
+    assert.strictEqual(p.fading, true);
     p.playSubtune(0);
-    assert.strictEqual(p.fadingOut, false, 'the new sub-tune is not born fading');
+    assert.strictEqual(p.fading, false, 'the new sub-tune is not born fading');
     assert.strictEqual(p.fadeStartMs, null);
-    assert.strictEqual(p.fadeFinished, false);
   });
 
   await check('a partial voice mask reaches the engine (GME keeps no silence state)', async () => {

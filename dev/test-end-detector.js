@@ -141,7 +141,10 @@ async function makePlayer(coreOpts, durationMs = 0) {
   const p = new SIDPlayer(core, SAMPLE_RATE, BUFFER_SIZE);
   await p.loadData(new Uint8Array([1, 2, 3, 4]), 'test.sid', {});
   // 0 leaves the default HVSC length; a number overrides the listed length.
-  if (durationMs > 0) p.subtuneDurations = [durationMs];
+  if (durationMs > 0) {
+    p.subtuneDurations = [durationMs];
+    p.durationMs = durationMs; // Host Fade reads the cached length
+  }
   return { p, core };
 }
 

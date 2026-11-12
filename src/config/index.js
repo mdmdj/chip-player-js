@@ -8,7 +8,7 @@ if (process.env.NODE_ENV === 'development') {
   // window.__devApiPort so a second dev tree is reachable without a rebuild;
   // 8080 is the default (and what a bundle served without the injection gets).
   const devHostname =
-    typeof window !== 'undefined' ? window.location.hostname : 'localhost';
+    typeof window !== 'undefined' && window.location ? window.location.hostname : 'localhost';
   const devPort =
     (typeof window !== 'undefined' && window.__devApiPort) || 8080;
   API_BASE = `http://${devHostname}:${devPort}/api`; // npm run server - Node.js server

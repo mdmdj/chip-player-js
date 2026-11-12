@@ -119,11 +119,18 @@ export default class GMEPlayer extends Player {
       // restart -- letting them run is the seamless case. Never restart at
       // the track length: that would cut a seamlessly looping driver with a
       // hard restart.
-      if (trackEnded) {
-        // Restarting also resets getPositionMs(), so the elapsed label
-        // restarts with it. Looping drivers never get here and keep climbing.
-        this.restartTrack();
-        trackEnded = false;
+      this.restartTrack();
+    }
+
+    core._gme_play(this.gmeCtx, this.bufferSize * 2, this.buffer);
+
+    for (ch = 0; ch < channels.length; ch++) {
+      for (i = 0; i < this.bufferSize; i++) {
+        channels[ch][i] = core.getValue(
+          this.buffer +
+          i * 2 * 2 +
+          ch * 2,
+          'i16') / INT16_MAX;
       }
     }
 

@@ -610,8 +610,13 @@ export default class Player extends EventEmitter {
       }
     }
 
+    // The shared end checks must stand down for every indefinite mode, not
+    // only the two base flags: VGM/MDX set `durationExtended` when leaving a
+    // deep repeat, and their fade tail legitimately runs past the duration.
+    const indefinitely = this.isPlayingIndefinitely() || !!this.params.indefinitePlayback;
+
     // Early silence cutoff (for gapless transitions and dead-air trimming)
-    if (!this.fading && !this.looping && !this.params.indefinitePlayback) {
+    if (!this.fading && !indefinitely) {
       if (this.checkTrailingSilence(output)) {
         this.handleSongEnd();
         for (let ch = 0; ch < output.length; ch++) output[ch].fill(0);
@@ -620,7 +625,7 @@ export default class Player extends EventEmitter {
     }
 
     // Host Fade (for engines without native fadeout, e.g. GME and SID)
-    if (this.hostFade && !this.looping && !this.params.indefinitePlayback) {
+    if (this.hostFade && !indefinitely) {
       const duration = this.durationMs || this.getDurationMs();
       const pos = this.getPositionMs();
 

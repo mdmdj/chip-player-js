@@ -218,6 +218,12 @@ export default class MIDIPlayer extends Player {
     // Transient parameters hold a parameter that is valid only for the current song.
     // They are reset when another song is loaded.
     this.transientParams = {};
+    // The SoundFont path in params is just the request; this records the file
+    // tp_load_soundfont actually accepted, so a missing/failed download cannot
+    // masquerade as the file's own SoundFont.
+    this.loadedSoundfont = null;
+    this.soundfontLoadError = null;
+    this._soundfontRequest = 0;
     this.paramDefs.filter(p => p.id !== 'soundfont').forEach(p => this.setParameter(p.id, p.defaultValue));
     this.activeAuditionPitches = [];
     this.auditionTailTimeout = null;
@@ -756,11 +762,21 @@ export default class MIDIPlayer extends Player {
           core._tp_set_synth_engine(value);
         }
         break;
-      case 'soundfont':
+      case 'soundfont': {
         const url = `${SOUNDFONT_URL_PATH}/${value}`;
+        const request = ++this._soundfontRequest;
+        this.loadedSoundfont = null;
+        this.soundfontLoadError = null;
         ensureEmscFileWithUrl(core, `${SOUNDFONT_MOUNTPOINT}/${value}`, url)
-          .then(filename => this._loadSoundfont(filename));
+          .then(filename => this._loadSoundfont(filename, request))
+          .catch(err => {
+            if (request !== this._soundfontRequest) return;
+            this.loadedSoundfont = null;
+            this.soundfontLoadError = String(err && err.message || err);
+            console.error('Could not load SoundFont %s: %s', value, this.soundfontLoadError);
+          });
         break;
+      }
       case 'reverb':
         // TODO: call fluidsynth directly from JS, similar to chorus
         value = parseFloat(value);
@@ -803,11 +819,21 @@ export default class MIDIPlayer extends Player {
     }
   }
 
-  _loadSoundfont(filename) {
+  _loadSoundfont(filename, request) {
+    if (request != null && request !== this._soundfontRequest) return;
     console.log('Loading soundfont %s...', filename);
     this.muteAudioDuringCall(this.audioNode, () => {
+      if (request != null && request !== this._soundfontRequest) return;
       const err = core.ccall('tp_load_soundfont', 'number', ['string'], [filename]);
-      if (err !== -1) console.log('Loaded soundfont.');
+      if (err !== -1) {
+        this.loadedSoundfont = filename;
+        this.soundfontLoadError = null;
+        console.log('Loaded soundfont.');
+      } else {
+        this.loadedSoundfont = null;
+        this.soundfontLoadError = `tp_load_soundfont returned ${err}`;
+        console.error('SoundFont failed to load: %s', filename);
+      }
     });
   }
 }

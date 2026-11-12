@@ -168,6 +168,13 @@ export function pathJoin(...parts) {
     .join(sep);
 }
 
+// The browse URL for a search-result heading. A catalog-root file has an empty
+// heading; encodeRawFilepathSegments('') is null by contract, so the root must
+// pass an empty segment explicitly.
+export function browseHrefForHeading(heading) {
+  return pathJoin('/browse', encodeRawFilepathSegments(heading) || '');
+}
+
 export function getFilepathFromUrl(url) {
   if (!url) return null;
   return url.replace(CATALOG_PREFIX, '/').replace(MULTI_SLASH_REGEX, '/');

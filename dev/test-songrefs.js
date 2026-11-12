@@ -30,6 +30,7 @@ Module.prototype._compile = function (content, filename) {
 const {
   songRef, songRefKey, songRefsEqual, songRefListsEqual, getMetadataUrlForFilepath, subtuneLabel,
   listingToContext, encodeFilepathSegments, encodeRawFilepathSegments, getUrlFromFilepath,
+  browseHrefForHeading,
 } = require('../src/util');
 
 const NSFE = 'famicompo/Castlevania III - The Dracula X Chronicles/09 Big Bat Man.nsf';
@@ -114,6 +115,13 @@ check('list equality is by content and order (the sequencer copies its context)'
   assert.ok(!songRefListsEqual(a, copy.slice(0, 2)), 'different lengths differ');
   assert.ok(songRefListsEqual([], []));
   assert.ok(!songRefListsEqual(null, []), 'null is not an empty list');
+});
+
+check('a catalog-root search heading still gets a browse URL', () => {
+  assert.strictEqual(browseHrefForHeading(''), '/browse/');
+  assert.strictEqual(browseHrefForHeading('nsf'), '/browse/nsf');
+  assert.strictEqual(browseHrefForHeading('nsf/'), '/browse/nsf/');
+  assert.strictEqual(browseHrefForHeading('a #1/100% Pure.nsf'), '/browse/a%20%231/100%25%20Pure.nsf');
 });
 
 check('browse and share paths escape # and % per segment', () => {

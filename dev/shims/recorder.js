@@ -118,7 +118,12 @@ const snap = () => {
   // what a scenario gates on, since that is the claim in one boolean.
   if (typeof p.getParameter === 'function' && p.params && 'soundfont' in p.params) {
     s.soundfont = p.getParameter('soundfont');
+    s.soundfontLoaded = p.loadedSoundfont || null;
+    s.soundfontLoadError = p.soundfontLoadError || null;
     s.fileSoundfont = !!(s.soundfont && String(s.soundfont).startsWith('user/'));
+    // The path is a request; this is what tp_load_soundfont actually accepted.
+    s.fileSoundfontLoaded = !!(s.fileSoundfont && s.soundfontLoaded &&
+      String(s.soundfontLoaded).includes(String(s.soundfont)));
   }
   return s;
 };

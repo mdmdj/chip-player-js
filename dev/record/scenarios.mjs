@@ -929,14 +929,15 @@ export const scenarios = [
       { atMs: 0, waitFor: 's.positionMs < 80000', label: 'looped — back to the top of the region' },
       { atMs: 2000, label: 'still looping in the region' },
     ],
-    // Gate on the SoundFont, not on `playing`. The MIDI player mounts the file's
-    // own sf2 asynchronously, so the two became true on the same tick here — but
-    // `playing` would also be satisfied by a take that silently fell back to the
-    // default GM font, which is the failure this gate exists to catch.
-    until: 'fileSoundfont',
+    // Gate on the SoundFont actually loading, not merely on its path being
+    // selected. The MIDI player mounts the file's own sf2 asynchronously; a
+    // missing file leaves `fileSoundfont` true while `tp_load_soundfont` never
+    // accepted it, and `playing` would pass on the default GM font too.
+    until: 'fileSoundfontLoaded',
     assert: [
       { name: 'share-link-played-this-song', test: 'decodeURIComponent(s.path || "") === "Nintendo 64 (SoundFont MIDI)/Mario Kart 64/03 - 3 Raceways, Wario Stadium.mid"' },
-      { name: 'files-own-soundfont-mounted', test: 's.fileSoundfont === true' },
+      { name: 'files-own-soundfont-mounted', test: 's.fileSoundfontLoaded === true' },
+      { name: 'soundfont-load-clean', test: 's.soundfontLoadError == null' },
       { name: 'band-from-markers', test: 's.band && s.band.endMs > s.band.startMs' },
       { name: 'band-is-the-marked-region', test: 's.band && Math.abs(s.band.startMs - 72062) < 400 && Math.abs(s.band.endMs - 144125) < 400' },
       { name: 'looping', test: 's.looping === true' },

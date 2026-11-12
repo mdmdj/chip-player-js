@@ -290,6 +290,19 @@ async function main() {
     assertDisplay(p, DURATION, 'display lands at the two-pass duration');
   });
 
+  await check('leaving a deep repeat stands the early silence cutoff down', async () => {
+    const { p, core } = await makePlayer();
+    p.setLooping(true);
+    await seek(p, core, A + 9 * B);
+    p.setLooping(false);
+    assert.strictEqual(p.durationExtended, true);
+    core.silent = true;
+    const ch = () => new Float32Array(BUFFER_SIZE);
+    for (let i = 0; i < 400; i++) p.processAudio([ch(), ch()]);
+    assert.strictEqual(p.stopped, false,
+      'a silent stretch in the extended pass must not end the song');
+  });
+
   await check('#4 Off->One during the fade: fade captured, head rides the tail, song ends', async () => {
     const { p, core } = await makePlayer();
     await seek(p, core, FADE_START_OFF + 500); // fade already running (loopCount 2)

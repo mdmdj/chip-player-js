@@ -893,8 +893,22 @@ MIDIFile.prototype.getLoopedEvents = function (tracks, loopCount = 2, range = nu
       const idx = passStarts[pass];
       if (idx == null) continue;
       const seamMs = loopEndMs + (pass - 1) * length;
+      // A track's seam cuts are emitted at its own boundary and can land after
+      // another track's first replayed event at the same instant. They are part
+      // of the boundary state, so move every cut for this seam ahead of the
+      // shared snapshot; otherwise a pedal re-armed by a cut overwrites the
+      // loop-start value again.
+      const cuts = [];
+      for (let i = idx; i < combinedEvents.length; i++) {
+        const event = combinedEvents[i];
+        if (event.seamCut && Math.abs(event.playTime - seamMs) < 0.5) {
+          cuts.push(event);
+          combinedEvents.splice(i, 1);
+          i--;
+        }
+      }
       const block = state.map(e => ({ ...e, playTime: seamMs, delta: 0 }));
-      combinedEvents.splice(idx, 0, ...block);
+      combinedEvents.splice(idx, 0, ...cuts, ...block);
     }
   }
 

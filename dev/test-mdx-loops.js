@@ -334,6 +334,19 @@ async function main() {
     assertDisplay(p, DURATION, 'display lands at the duration');
   });
 
+  await check('leaving a deep repeat stands the early silence cutoff down', async () => {
+    const { p, core } = await makePlayer();
+    p.setLooping(true);
+    core.advanceTo(BAND_END + 1000);
+    p.setLooping(false);
+    assert.strictEqual(p.durationExtended, true);
+    core.silent = true;
+    const ch = () => new Float32Array(BUFFER_SIZE);
+    for (let i = 0; i < 400; i++) p.processAudio([ch(), ch()]);
+    assert.strictEqual(p.stopped, false,
+      'a silent stretch in the extended pass must not end the song');
+  });
+
   await check('no-op toggle keeps the two-pass default and never moves the head', async () => {
     // Unlike VGM (which leaves the count alone), MDXPlayer re-pushes the default
     // on every toggle. That is harmless -- mdx_set_max_loop only caps passes --

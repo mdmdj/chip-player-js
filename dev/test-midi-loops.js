@@ -2162,4 +2162,20 @@ check('a dangling final note keeps the track end in the merged loop list', () =>
     'the merged list ends at the track end, not at the note-on');
 });
 
+check('shared loop-start state lands after every track boundary cut', () => {
+  // Marker track first, note track second: the note track turns sustain on
+  // inside the loop, so its seam cut re-arms the pedal at the boundary. The
+  // shared start snapshot must come after that cut and leave the pedal off.
+  const bytes = buildMidi([
+    [tempo(), ccAt(TPQ, 110), ccAt(TPQ * 4, 111)],
+    [ccAt(TPQ * 2, 64, 127), noteOnAt(0, 0, 60), noteOffAt(TPQ, 0, 60)],
+  ], { format: 1 });
+  const { events, loopEndMs } = parseBytes(bytes).getPlaybackEvents(true);
+  const seam = events.filter(e => e.subtype === MIDIEvents.EVENT_MIDI_CONTROLLER &&
+    e.param1 === 64 && Math.abs(e.playTime - loopEndMs) < 1);
+  assert.ok(seam.length > 0, `expected seam pedal events, got ${JSON.stringify(seam)}`);
+  assert.strictEqual(seam[seam.length - 1].param2, 0,
+    `the loop-start state must be last at the seam (values: ${seam.map(e => e.param2).join(',')})`);
+});
+
 console.log(`\n${passed} checks passed${xfailed ? `, ${xfailed} known failure(s)` : ''}${process.exitCode ? ' (WITH FAILURES)' : ''}.`);

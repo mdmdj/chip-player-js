@@ -159,7 +159,7 @@ export default class Search extends PureComponent {
               currHeading = heading;
               resultsWithHeadings.push({
                 type: 'directory',
-                href: pathJoin('/browse', encodeRawFilepathSegments(heading)),
+                href: pathJoin('/browse', encodeRawFilepathSegments(heading) || ''),
                 name: folder ? path.substring(slash + 1) : heading,
               });
             }

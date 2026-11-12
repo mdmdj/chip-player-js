@@ -22,6 +22,7 @@ const axiosRetry = require('axios-retry').default;
 const { XMLParser } = require('fast-xml-parser');
 
 const { dbStatements } = require('./database.js');
+const { getDashboardStats } = require('./dashboard-stats');
 const { resolveDirectoryMetadata, escapeHtml, safeJsonLd } = require('./directory-metadata');
 const { requireAuth, optionalAuth } = require('./middleware/auth.js');
 const { validate } = require('./middleware/validate');
@@ -172,6 +173,11 @@ app.use((req, res, next) => {
 
 const cache1Hour = (req, res, next) => {
   res.header('Cache-Control', 'public, max-age=3600');
+  next();
+};
+
+const cache15Min = (req, res, next) => {
+  res.header('Cache-Control', 'public, max-age=900');
   next();
 };
 
@@ -908,6 +914,18 @@ router.post(
 
 // Chrome dev tools requests this for the "Workspace" feature.
 app.get('/.well-known/appspecific/com.chrome.devtools.json', (req, res) => res.sendStatus(404));
+
+// Analytics Dashboard Stats API
+router.get('/dashboard/stats', cache1Hour, (req, res) => {
+  const stats = getDashboardStats(req.query);
+  res.json(stats);
+});
+
+// Standalone Analytics Dashboard Web App
+app.use('/dashboard/assets', express.static(path.join(__dirname, 'dashboard/assets')));
+app.get('/dashboard', (req, res) => {
+  res.sendFile(path.join(__dirname, 'dashboard/index.html'));
+});
 
 // Static file fallback - should be handled by Nginx in production
 app.use(express.static(LOCAL_CLIENT_BUILD_ROOT));

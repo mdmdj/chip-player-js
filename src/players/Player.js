@@ -50,7 +50,6 @@ export default class Player extends EventEmitter {
     this.looping = false; // infinite looping mode (vs. normal mode where it stops at end of song)
     this.silenceDuration = -1;
     this.silenceSamplesRemaining = 0;
-    this.onSilenceEnd = null;
     this.trailingSilenceSamples = 0;
     this.durationMs = 0;
     // A seek asked for while an async load is still starting (SID waits for
@@ -62,6 +61,11 @@ export default class Player extends EventEmitter {
     // slow -- the case that used to lose the link's position.
     this.loadingAsync = false;
     this.deferredSeekMs = null;
+    this.hostFade = false;
+    this.fading = false;
+    this.fadeStartMs = null;
+    this.fadeDurationMs = 5000;
+    this.seekTargetMs = null;
   }
 
   /**
@@ -110,6 +114,7 @@ export default class Player extends EventEmitter {
     // player's first block must not replay a seek from the previous song.
     this.loadingAsync = false;
     this.deferredSeekMs = null;
+    this.resetFade();
     return this.pendingLoad.signal;
   }
 
@@ -178,8 +183,9 @@ export default class Player extends EventEmitter {
     this.stopped = true;
     this.paused = true;
     this.silenceSamplesRemaining = 0;
-    this.onSilenceEnd = null;
     this.trailingSilenceSamples = 0;
+    this.seekTargetMs = null;
+    this.resetFade();
   }
 
   isPlaying() {
@@ -195,8 +201,19 @@ export default class Player extends EventEmitter {
     console.debug(`Player.setTempo() not implemented for ${this.constructor.name}.`);
   }
 
-  setFadeout(startMs) {
-    console.debug(`Player.setFadeout() not implemented for ${this.constructor.name}.`);
+  setFadeDuration(ms) {
+    this.fadeDurationMs = Math.max(0, Number(ms) || 0);
+  }
+
+  startFade(startMs = this.getPositionMs()) {
+    this.fading = true;
+    this.fadeStartMs = startMs;
+  }
+
+  resetFade() {
+    this.fading = false;
+    this.fadeStartMs = null;
+    this.trailingSilenceSamples = 0;
   }
 
   getDurationMs() {
@@ -219,8 +236,9 @@ export default class Player extends EventEmitter {
 
   seekMs(ms) {
     this.silenceSamplesRemaining = 0;
-    this.onSilenceEnd = null;
     this.trailingSilenceSamples = 0;
+    this.seekTargetMs = null;
+    this.resetFade();
     console.debug(`Player.seekMs() not implemented for ${this.constructor.name}.`);
   }
 
@@ -283,9 +301,14 @@ export default class Player extends EventEmitter {
     return 0;
   }
 
-  // Sub-tune selection is handled by the sequencer (one SongRef per sub-tune),
-  // not by the player.
-  playSubtune() {}
+  // A player can select a tune in the file it has loaded, but it never walks
+  // to the next tune on its own. Sub-tune sequencing belongs to the Sequencer:
+  // every sub-tune is its own SongRef/context entry.
+  playSubtune(subtune) {
+    this.silenceSamplesRemaining = 0;
+    this.trailingSilenceSamples = 0;
+    this.resetFade();
+  }
 
   getMetadata() {
     const metadata = this.metadata || { title: null, author: null };
@@ -314,6 +337,18 @@ export default class Player extends EventEmitter {
 
   setParameter(paramId, value) {
     this.params[paramId] = value;
+    if (paramId === 'indefinitePlayback') {
+      if (value) {
+        this.resetFade();
+        this.trailingSilenceSamples = 0;
+      } else if (this.hostFade && !this.looping) {
+        const duration = this.durationMs || this.getDurationMs();
+        const pos = this.getPositionMs();
+        if (duration > 0 && pos >= duration && !this.fading) {
+          this.startFade(pos);
+        }
+      }
+    }
   }
 
   resolveParamValue(paramId, transientValue, persistedSettings) {
@@ -384,6 +419,7 @@ export default class Player extends EventEmitter {
 
   setLooping(looping) {
     this.looping = looping;
+    if (looping) this.resetFade();
   }
 
   // End of the loop region in ms, or null when the track defines no loop.
@@ -455,30 +491,30 @@ export default class Player extends EventEmitter {
     this.silenceDuration = isNaN(val) ? -1 : val;
   }
 
-  handleSongEnd(onSilenceEnd = null) {
-    // A player plays exactly one song and then stops. Sub-tune navigation is
-    // the sequencer's job: each sub-tune is its own context entry.
-    const endAction = onSilenceEnd || (() => {
-      this.stop();
-      this.emit('playerSongEnd');
-    });
-
+  handleSongEnd() {
     if (this.silenceDuration >= 0) {
       const trailingSilenceSec = this.trailingSilenceSamples / this.sampleRate;
       const neededSilenceSec = Math.max(0, this.silenceDuration - trailingSilenceSec);
       this.silenceSamplesRemaining = Math.round(neededSilenceSec * this.sampleRate);
-      this.onSilenceEnd = endAction;
       this.trailingSilenceSamples = 0;
 
       if (this.silenceSamplesRemaining <= 0) {
         this.silenceSamplesRemaining = 0;
-        this.onSilenceEnd = null;
-        endAction();
+        this.finishSong();
       }
     } else {
       this.trailingSilenceSamples = 0;
-      endAction();
+      this.finishSong();
     }
+  }
+
+  // A player plays exactly one song. The Sequencer owns sub-tune navigation:
+  // every sub-tune is its own SongRef/context entry, so walking to the next
+  // tune here would be a second sequencer and would desynchronise the playing
+  // audio from the selected song identity.
+  finishSong() {
+    this.stop();
+    this.emit('playerSongEnd');
   }
 
   // Called at the top of a load that waits on something before playback starts
@@ -509,6 +545,33 @@ export default class Player extends EventEmitter {
     if (ms != null) this.seekMs(ms);
   }
 
+  checkTrailingSilence(output) {
+    const duration = this.durationMs || this.getDurationMs();
+    const position = this.getPositionMs();
+
+    if (duration > 0 && position >= (duration - 5000)) {
+      const threshold = 0.001; // -60 dB
+      let isSilent = true;
+      const left = output[0];
+      const right = output[1] || output[0];
+      const len = left.length;
+      for (let i = 0; i < len; i++) {
+        if (Math.abs(left[i]) > threshold || Math.abs(right[i]) > threshold) {
+          isSilent = false;
+          break;
+        }
+      }
+      this.trailingSilenceSamples = isSilent ? (this.trailingSilenceSamples + this.bufferSize) : 0;
+
+      if (this.trailingSilenceSamples >= (0.4 * this.sampleRate)) {
+        return true;
+      }
+    } else {
+      this.trailingSilenceSamples = 0;
+    }
+    return false;
+  }
+
   processAudio(output) {
     if (this.silenceSamplesRemaining > 0) {
       for (let ch = 0; ch < output.length; ch++) {
@@ -518,14 +581,7 @@ export default class Player extends EventEmitter {
         this.silenceSamplesRemaining -= this.bufferSize;
         if (this.silenceSamplesRemaining <= 0) {
           this.silenceSamplesRemaining = 0;
-          const cb = this.onSilenceEnd;
-          this.onSilenceEnd = null;
-          if (cb) {
-            cb();
-          } else {
-            this.stop();
-            this.emit('playerSongEnd');
-          }
+          this.finishSong();
         }
       }
       return;
@@ -536,42 +592,56 @@ export default class Player extends EventEmitter {
     this.flushDeferredSeek();
     const end = performance.now();
 
-    if (this.silenceSamplesRemaining > 0) {
+    if (this.stopped || this.paused) return;
+
+    // Apply anti-pop smoothing and attenuation during seek
+    if (this.seekTargetMs) {
+      const fadeLength = Math.min(256, Math.floor(this.bufferSize / 2));
       for (let ch = 0; ch < output.length; ch++) {
-        output[ch].fill(0);
-      }
-    } else if (this.silenceDuration >= 0 && !this.paused && !this.isPlayingIndefinitely() && !this.fadingOut && output.length > 0) {
-      const duration = this.durationMs;
-      const position = this.getPositionMs();
-
-      if (duration > 0) {
-        const inFinalFiveSeconds = position >= (duration - 5000);
-        if (inFinalFiveSeconds) {
-          const threshold = 0.001; // -60 dB
-          let isSilent = true;
-          const left = output[0];
-          const right = output[1] || output[0];
-          const len = left.length;
-          for (let i = 0; i < len; i++) {
-            if (Math.abs(left[i]) > threshold || Math.abs(right[i]) > threshold) {
-              isSilent = false;
-              break;
-            }
-          }
-          this.trailingSilenceSamples = isSilent ? (this.trailingSilenceSamples + this.bufferSize) : 0;
-        } else {
-          this.trailingSilenceSamples = 0;
+        const channel = output[ch];
+        for (let i = 0; i < fadeLength; i++) {
+          const fade = i / fadeLength;
+          channel[i] *= fade;
+          channel[this.bufferSize - (i + 1)] *= fade;
         }
+        for (let i = 0; i < this.bufferSize; i++) {
+          channel[i] *= 0.2;
+        }
+      }
+    }
 
-        const reachedEarlySilence = inFinalFiveSeconds && this.trailingSilenceSamples >= (0.4 * this.sampleRate);
-        const reachedDuration = position >= duration;
+    // Early silence cutoff (for gapless transitions and dead-air trimming)
+    if (!this.fading && !this.looping && !this.params.indefinitePlayback) {
+      if (this.checkTrailingSilence(output)) {
+        this.handleSongEnd();
+        for (let ch = 0; ch < output.length; ch++) output[ch].fill(0);
+        return;
+      }
+    }
 
-        if (reachedEarlySilence || reachedDuration) {
+    // Host Fade (for engines without native fadeout, e.g. GME and SID)
+    if (this.hostFade && !this.looping && !this.params.indefinitePlayback) {
+      const duration = this.durationMs || this.getDurationMs();
+      const pos = this.getPositionMs();
+
+      if (!this.fading && duration > 0 && pos >= duration) {
+        this.startFade(pos);
+      }
+
+      if (this.fading && this.fadeStartMs !== null) {
+        const elapsed = pos - this.fadeStartMs;
+        if (elapsed >= this.fadeDurationMs || this.fadeDurationMs === 0) {
+          this.resetFade();
           this.handleSongEnd();
-          for (let ch = 0; ch < output.length; ch++) {
-            output[ch].fill(0);
-          }
+          for (let ch = 0; ch < output.length; ch++) output[ch].fill(0);
           return;
+        }
+        const fadeFactor = Math.pow(0.025, elapsed / this.fadeDurationMs);
+        for (let ch = 0; ch < output.length; ch++) {
+          const channel = output[ch];
+          for (let i = 0; i < channel.length; i++) {
+            channel[i] *= fadeFactor;
+          }
         }
       }
     }

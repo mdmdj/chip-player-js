@@ -169,7 +169,6 @@ export default class N64Player extends Player {
   // refetching the miniusf/usflib.
   restartTrack() {
     this.silenceSamplesRemaining = 0;
-    this.onSilenceEnd = null;
     this.resetEndDetector();
     this.core._n64_seek_ms(0);
   }

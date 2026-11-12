@@ -398,6 +398,36 @@ test('player ends the loaded song and leaves sub-tune sequencing to the sequence
   assert.equal(player.stopped, true);
 });
 
+test('a held seek runs before Host Fade chooses a start', () => {
+  const player = new Player({}, 44100, 256);
+  player.hostFade = true;
+  player.durationMs = 1000;
+  player.posMs = 1000;
+  player.stopped = false;
+  player.paused = false;
+  player.getPositionMs = () => player.posMs;
+  player.getDurationMs = () => player.durationMs;
+  player.processAudioInner = (output) => {
+    output[0].fill(1.0);
+    output[1].fill(1.0);
+  };
+  player.seekMs = (ms) => {
+    player.posMs = ms;
+    player.resetFade();
+  };
+
+  player.beginAsyncLoad();
+  assert.equal(player.deferSeekUntilPlaying(100), true);
+  const output = [new Float32Array(256), new Float32Array(256)];
+  player.processAudio(output);
+
+  // The held seek is applied before the Host Fade decision. At the old
+  // position the fade would have started; after the seek it must not.
+  assert.equal(player.posMs, 100);
+  assert.equal(player.fading, false);
+  assert.equal(player.stopped, false);
+});
+
 test('Host Fade smoothly attenuates audio and triggers handleSongEnd when completed', () => {
   const player = new Player({}, 44100, 256);
   player.hostFade = true;

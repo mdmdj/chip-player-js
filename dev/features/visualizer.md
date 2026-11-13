@@ -249,6 +249,26 @@ loop-gate expansion, which belongs to sub-tunes.
 
 `./dev/overlay.sh visualizer plan` is clean ("Nothing to promote").
 
+## Review fixes (2026-11-13)
+
+Practice PR #20 review findings, all addressed and verified:
+
+- **Lazy-load failure no longer takes down the player.** A small error boundary
+  around the MilkDrop `Suspense` keeps the footer and renderer selector mounted
+  and shows “MilkDrop unavailable…” instead. Verified by aborting the
+  `butterchurn.chunk.js` request in Playwright.
+- **Paused resizing redraws immediately.** `applyResolution()` now calls
+  `visualizer.render()` after changing the canvas backing store when paused.
+  Verified: after pausing and selecting 50% resolution, the 224×210 canvas
+  contained 37,158 non-black pixels.
+- **Piano keys are anchored to the graph.** The overlay's `top` is set from
+  `freqCanvas.offsetTop` on mount, resize and update using a `ResizeObserver`
+  on `.Visualizer-options`; it no longer depends on a per-theme header height.
+  Verified in Winamp and MS-DOS: keys top and analyzer top are equal (y151 and
+  y132 respectively at 900×720).
+
+`npm run build-lite` passed after these changes.
+
 ## Demo catalog (2026-11-10)
 
 Downloaded 17 non-MIDI tracks from prod (`https://chiptune.app/catalog/<path>`,

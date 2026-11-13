@@ -11,6 +11,32 @@ const ButterchurnVisualizer = lazy(() =>
   import(/* webpackChunkName: "butterchurn" */ '../butterchurn/ButterchurnVisualizer')
 );
 
+// MilkDrop is optional and lazy-loaded. A rejected chunk fetch must not take
+// the player down with it; keep the rest of the visualizer (and the renderer
+// selector) mounted when the import or a preset fails.
+class MilkDropErrorBoundary extends React.Component {
+  state = { error: null };
+
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+
+  componentDidCatch(error, info) {
+    console.error('MilkDrop failed to load', error, info);
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div className='MilkDrop MilkDrop-error' style={{ width: VIS_WIDTH }}>
+          MilkDrop unavailable. Select Spectrogram to keep using the player.
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 const SPECTROGRAM_MODES = [
   'Linear FFT', 'Log FFT', 'Constant Q'
 ];
@@ -64,6 +90,8 @@ export default class Visualizer extends PureComponent {
     this.specCanvasRef = React.createRef();
     this.pianoKeysRef = React.createRef();
     this.milkdropRef = React.createRef();
+    this.optionsRef = React.createRef();
+    this.optionsObserver = null;
   }
 
   componentDidMount() {
@@ -84,7 +112,28 @@ export default class Visualizer extends PureComponent {
     this.spectrogram.setPaused(
       isMidi || showMilkDrop || !this.props.visible || this.props.paused
     );
+
+    // Anchor the piano keys to the analyzer rather than to a theme-specific
+    // header height. A renderer/theme change can alter the options height.
+    this.alignPianoKeys();
+    if (typeof ResizeObserver !== 'undefined' && this.optionsRef.current) {
+      this.optionsObserver = new ResizeObserver(this.alignPianoKeys);
+      this.optionsObserver.observe(this.optionsRef.current);
+    }
   }
+
+  componentWillUnmount() {
+    if (this.optionsObserver) {
+      this.optionsObserver.disconnect();
+      this.optionsObserver = null;
+    }
+  }
+
+  alignPianoKeys = () => {
+    const keys = this.pianoKeysRef.current;
+    const analyzer = this.freqCanvasRef.current;
+    if (keys && analyzer) keys.style.top = `${analyzer.offsetTop}px`;
+  };
 
   isCurrentSongMidi() {
     return !!(
@@ -111,6 +160,7 @@ export default class Visualizer extends PureComponent {
     this.spectrogram.setPaused(
       isMidi || showMilkDrop || !this.props.visible || this.props.paused
     );
+    this.alignPianoKeys();
   }
 
   handlePresetNext = () => {
@@ -187,7 +237,9 @@ export default class Visualizer extends PureComponent {
     return (
       <div className='Visualizer' style={{ display: this.props.visible ? 'flex' : 'none' }}>
         {!isMidi && (
-          <div className='Visualizer-options' style={{ width: VIS_WIDTH, boxSizing: 'border-box' }}>
+          <div className='Visualizer-options'
+               ref={this.optionsRef}
+               style={{ width: VIS_WIDTH, boxSizing: 'border-box' }}>
             <div className='Visualizer-renderer-row'>
               <label htmlFor='visualizer-renderer'>Renderer:</label>{' '}
               <select id='visualizer-renderer'
@@ -358,26 +410,28 @@ export default class Visualizer extends PureComponent {
 
         {/* MilkDrop visualizer (Butterchurn) */}
         {showMilkDrop && (
-          <Suspense fallback={
-            <div className='MilkDrop MilkDrop-placeholder' style={{ width: VIS_WIDTH }}>
-              Loading MilkDrop…
-            </div>
-          }>
-            <ButterchurnVisualizer
-              ref={this.milkdropRef}
-              audioCtx={this.props.audioCtx}
-              sourceNode={this.props.sourceNode}
-              width={VIS_WIDTH}
-              height={800}
-              paused={!this.props.visible || this.props.paused}
-              autoCycle={this.state.autoCycle}
-              blendSeconds={this.state.blendSeconds}
-              meshWidth={meshWidth}
-              meshHeight={meshHeight}
-              resolutionScale={settings.milkdropResolution || 1}
-              onPresetChange={this.handlePresetChange}
-            />
-          </Suspense>
+          <MilkDropErrorBoundary>
+            <Suspense fallback={
+              <div className='MilkDrop MilkDrop-placeholder' style={{ width: VIS_WIDTH }}>
+                Loading MilkDrop…
+              </div>
+            }>
+              <ButterchurnVisualizer
+                ref={this.milkdropRef}
+                audioCtx={this.props.audioCtx}
+                sourceNode={this.props.sourceNode}
+                width={VIS_WIDTH}
+                height={800}
+                paused={!this.props.visible || this.props.paused}
+                autoCycle={this.state.autoCycle}
+                blendSeconds={this.state.blendSeconds}
+                meshWidth={meshWidth}
+                meshHeight={meshHeight}
+                resolutionScale={settings.milkdropResolution || 1}
+                onPresetChange={this.handlePresetChange}
+              />
+            </Suspense>
+          </MilkDropErrorBoundary>
         )}
 
         {/* Spectrogram visualizer */}

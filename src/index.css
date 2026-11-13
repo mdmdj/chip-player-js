@@ -552,7 +552,7 @@ button.IconButton {
 .Visualizer {
     position: relative; display: flex; flex-direction: column; align-items: flex-end;
 }
-.Visualizer-overlay { position: absolute; top: calc(4 * var(--charH)); }
+.Visualizer-overlay { position: absolute; top: 0; left: 0; }
 .Visualizer-options { padding: 0 var(--charW2) 0; text-align: right; }
 .Visualizer-controls { position: fixed; top: var(--charH); right: var(--charW2); z-index: 20; text-align: right; }
 .Visualizer-controls .Visualizer-toggle { margin: 0; line-height: var(--charH); }

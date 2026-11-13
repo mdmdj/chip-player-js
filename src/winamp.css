@@ -169,7 +169,6 @@
 
         & > div { display: flex; align-items: center; height: var(--formFieldHeight); }
     }
-    .Visualizer-overlay { top: 92px; }
     .App-main.theater-mode .Visualizer {
         top: 22px;
     }

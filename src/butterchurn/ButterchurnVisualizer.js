@@ -229,6 +229,10 @@ export default class ButterchurnVisualizer extends PureComponent {
       canvas.width = width;
       canvas.height = height;
     }
+    // Resizing the backing store clears the canvas. The rAF loop is stopped
+    // while paused, so draw one frame immediately or the renderer stays blank
+    // until playback resumes.
+    if (this.props.paused) this.visualizer.render();
   }
 
   start = () => {

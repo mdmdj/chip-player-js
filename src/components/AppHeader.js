@@ -31,23 +31,25 @@ const AppHeader = () => {
       <a href="https://twitter.com/messages/compose?recipient_id=587634572" target="_blank" rel="noopener noreferrer">
         Feedback
       </a>
-      <h3 className="Visualizer-toggle">
-        Visualizer{' '}
-        <input onChange={handleToggleVisualizer}
-               id="vis-on"
-               type="radio"
-               value="true"
-               checked={showVisualizer === true}
-               name="visualizer-enabled"/>
-        <label htmlFor="vis-on" className="inline">On</label>
-        <input onChange={handleToggleVisualizer}
-               id="vis-off"
-               type="radio"
-               value="false"
-               checked={showVisualizer === false}
-               name="visualizer-enabled"/>
-        <label htmlFor="vis-off" className="inline">Off</label>
-      </h3>
+      <div className="Visualizer-controls">
+        <h3 className="Visualizer-toggle">
+          Visualizer{' '}
+          <input onChange={handleToggleVisualizer}
+                 id="vis-on"
+                 type="radio"
+                 value="true"
+                 checked={showVisualizer === true}
+                 name="visualizer-enabled"/>
+          <label htmlFor="vis-on" className="inline">On</label>
+          <input onChange={handleToggleVisualizer}
+                 id="vis-off"
+                 type="radio"
+                 value="false"
+                 checked={showVisualizer === false}
+                 name="visualizer-enabled"/>
+          <label htmlFor="vis-off" className="inline">Off</label>
+        </h3>
+      </div>
     </header>
   );
 };

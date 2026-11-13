@@ -190,7 +190,12 @@ export default class ButterchurnVisualizer extends PureComponent {
     const name = this.presetNames[wrapped];
 
     try {
-      this.visualizer.loadPreset(butterchurnPresets.getPresets()[name], blendSeconds);
+      // A paused transport action cannot animate a multi-second blend because
+      // the rAF loop is stopped. Load the destination immediately instead of
+      // leaving a single half-blended frame on screen; Blend still applies to
+      // changes made while playing.
+      const blend = this.props.paused ? 0 : blendSeconds;
+      this.visualizer.loadPreset(butterchurnPresets.getPresets()[name], blend);
       this.presetIndex = wrapped;
       if (this.props.onPresetChange) {
         this.props.onPresetChange(name, wrapped, count);

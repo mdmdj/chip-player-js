@@ -399,8 +399,8 @@ track/preset combination each, using the **Winamp** theme:
 | Stage 1 & 4 BGM (DoDonPachi) | VGM/VGZ | 16 `Cope - …Red Liquid Fire` |
 | Guile | SPC | 47 `Geiss - Reaction Diffusion 2` |
 | Magical Sound Shower | VGM/VGZ | 92 `TonyMilkdrop - Magellan's Nebula…` |
-| Brinstar | SID | 68 `martin - glass corridor` |
-| Megalovania | VGM/VGZ | 98 `Zylot - Star Ornament` |
+| Brinstar 1 | SPC | 68 `martin - glass corridor` |
+| Megalovania | SID | 98 `Zylot - Star Ornament` |
 
 All ten measured **900×720, 1800/1800 frames, 30.000 s, r/avg 60/1, AAC 48 kHz
 stereo starting at 0**. The clips have **Auto off**; IceCap was checked at 20 s
@@ -412,11 +412,20 @@ directory and cut the 10-clip slate to about 20 minutes on this 8-core host. The
 and `manifest.json`; individual files are under `dev/record/.work/proto60/clips/`.
 `proto60.mjs` defaults to `--theme winamp`; `--theme msdos` still works.
 
+The demo catalog was unified with the main checkout on 2026-11-13; it now has
+9,566 rows. Brinstar was switched from the SID version to
+`spc/Super Metroid/Super Metroid [Minako Hamano-Brinstar 1][o].spc`
+(`QFqNQCb1`). Megalovania was switched to the prod share link
+`?play=szRZ03O6`, resolved to
+`High Voltage SID Collection/MUSICIANS/S/Spider_Jerusalem/Megalovania.sid`, and
+downloaded into the shared catalog. Both changed clips were re-rendered at 30 s
+and the gallery is 10/10.
+
 A Delta SID clip was dropped after the headless target crashed twice during
 `pinDefaults`, before any frame was rendered; Brinstar SID recorded normally, so
 the replacement is Monty on the Run XM rather than a SID diagnosis. Rerun the
 whole slate with `node dev/record/clip-batch.mjs --seconds 30 --force --jobs 3`,
-or one missing combo with `--only monty`.
+or one missing combo with `--only brinstar`.
 
 ## Next steps to make it shippable
 

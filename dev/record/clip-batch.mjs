@@ -51,8 +51,8 @@ const COMBOS = [
   { slug: 'dodonpachi', song: 'j5FrNjVz', title: 'Stage 1 & 4 BGM', game: 'DoDonPachi', preset: 16 },
   { slug: 'guile', song: '6QaDUOXj', title: 'Guile', game: 'Street Fighter II', preset: 47 },
   { slug: 'outrun', song: 'LONp2_I2', title: 'Magical Sound Shower', game: 'OutRun', preset: 92 },
-  { slug: 'brinstar', song: '3rBxMC0C', title: 'Brinstar', game: 'Super Metroid', preset: 68 },
-  { slug: 'megalovania', song: '4hrcdygn', title: 'Megalovania', game: 'Undertale', preset: 98 },
+  { slug: 'brinstar', song: 'QFqNQCb1', title: 'Brinstar 1', game: 'Super Metroid (SPC)', preset: 68 },
+  { slug: 'megalovania', song: 'szRZ03O6', title: 'Megalovania', game: 'Undertale (SID)', preset: 98 },
 ];
 
 function run(cmd, args) {

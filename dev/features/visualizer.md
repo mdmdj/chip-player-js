@@ -261,10 +261,11 @@ Practice PR #20 review findings, all addressed and verified:
   Verified: after pausing and selecting 50% resolution, the 224×210 canvas
   contained 37,158 non-black pixels.
 - **Paused preset changes redraw.** `loadPresetAt()` now renders one frame when
-  paused, so Previous/Next/Random replace the visible image immediately.
-  Verified by pausing IceCap, clicking Next, and comparing canvas screenshots:
-  the preset changed from `$$$ Royal - Mashup (197)` to `(220)` and both images
-  had non-zero mean luminance.
+  paused and forces a zero blend, because the stopped rAF loop cannot animate a
+  multi-second crossfade. Verified by pausing IceCap, clicking Next, and
+  comparing canvas screenshots: the preset changed from
+  `$$$ Royal - Mashup (197)` to `(220)` and both images had non-zero mean
+  luminance. Blend still applies to changes made while playing.
 - **Piano keys are anchored to the graph.** The overlay's `top` is set from
   `freqCanvas.offsetTop` on mount, resize and update. The observer watches the
   stable `.Visualizer` root as well as `.Visualizer-options`, and reattaches the

@@ -195,6 +195,10 @@ export default class ButterchurnVisualizer extends PureComponent {
       if (this.props.onPresetChange) {
         this.props.onPresetChange(name, wrapped, count);
       }
+      // The rAF loop is stopped while paused, so loadPreset alone leaves the
+      // previous preset's image on screen. Draw once after a manual transport
+      // action as well.
+      if (this.props.paused) this.visualizer.render();
     } catch (e) {
       console.error('MilkDrop preset failed to load', name, e);
     }

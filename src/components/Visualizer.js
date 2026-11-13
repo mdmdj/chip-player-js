@@ -86,12 +86,14 @@ export default class Visualizer extends PureComponent {
       blendSeconds: 2,
     };
 
+    this.visualizerRef = React.createRef();
     this.freqCanvasRef = React.createRef();
     this.specCanvasRef = React.createRef();
     this.pianoKeysRef = React.createRef();
     this.milkdropRef = React.createRef();
     this.optionsRef = React.createRef();
     this.optionsObserver = null;
+    this.observedOptions = null;
   }
 
   componentDidMount() {
@@ -114,11 +116,14 @@ export default class Visualizer extends PureComponent {
     );
 
     // Anchor the piano keys to the analyzer rather than to a theme-specific
-    // header height. A renderer/theme change can alter the options height.
+    // header height. Observe the stable Visualizer root as well as the options
+    // header; the options unmount while a MIDI piano roll is showing, so the
+    // observer must be reattached when a non-MIDI options header returns.
     this.alignPianoKeys();
-    if (typeof ResizeObserver !== 'undefined' && this.optionsRef.current) {
+    if (typeof ResizeObserver !== 'undefined') {
       this.optionsObserver = new ResizeObserver(this.alignPianoKeys);
-      this.optionsObserver.observe(this.optionsRef.current);
+      if (this.visualizerRef.current) this.optionsObserver.observe(this.visualizerRef.current);
+      this.attachOptionsObserver();
     }
   }
 
@@ -128,6 +133,15 @@ export default class Visualizer extends PureComponent {
       this.optionsObserver = null;
     }
   }
+
+  attachOptionsObserver = () => {
+    if (!this.optionsObserver) return;
+    const options = this.optionsRef.current;
+    if (!options || options === this.observedOptions) return;
+    if (this.observedOptions) this.optionsObserver.unobserve(this.observedOptions);
+    this.optionsObserver.observe(options);
+    this.observedOptions = options;
+  };
 
   alignPianoKeys = () => {
     const keys = this.pianoKeysRef.current;
@@ -160,6 +174,7 @@ export default class Visualizer extends PureComponent {
     this.spectrogram.setPaused(
       isMidi || showMilkDrop || !this.props.visible || this.props.paused
     );
+    this.attachOptionsObserver();
     this.alignPianoKeys();
   }
 
@@ -235,7 +250,9 @@ export default class Visualizer extends PureComponent {
     };
 
     return (
-      <div className='Visualizer' style={{ display: this.props.visible ? 'flex' : 'none' }}>
+      <div className='Visualizer'
+           ref={this.visualizerRef}
+           style={{ display: this.props.visible ? 'flex' : 'none' }}>
         {!isMidi && (
           <div className='Visualizer-options'
                ref={this.optionsRef}

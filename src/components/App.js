@@ -817,7 +817,7 @@ class App extends React.Component {
                       infoTexts={[this.state.metadataText || '']}
                       toggleInfo={() => this.setState({ metadataText: null })}/>
           <Toast/>
-          <AppHeader isMidi={isMidi}/>
+          <AppHeader/>
           <div className={`App-main ${activeTheaterMode ? 'theater-mode' : ''} ${showPlayerSettings ? 'has-settings' : ''}`}>
             <div className="App-main-inner">
               <div className="tab-container">

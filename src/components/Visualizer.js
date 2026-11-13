@@ -98,6 +98,10 @@ export default class Visualizer extends PureComponent {
     return this.context?.settings?.visualizerRenderer || 'spectrogram';
   }
 
+  handleRendererChange = (e) => {
+    this.context.updateSettings({ visualizerRenderer: e.target.value });
+  };
+
   componentDidUpdate() {
     const isMidi = this.isCurrentSongMidi();
     const showMilkDrop = this.props.visible && !isMidi && this.getRenderer() === 'milkdrop';
@@ -184,6 +188,15 @@ export default class Visualizer extends PureComponent {
       <div className='Visualizer' style={{ display: this.props.visible ? 'flex' : 'none' }}>
         {!isMidi && (
           <div className='Visualizer-options' style={{ width: VIS_WIDTH, boxSizing: 'border-box' }}>
+            <div className='Visualizer-renderer-row'>
+              <label htmlFor='visualizer-renderer'>Renderer:</label>{' '}
+              <select id='visualizer-renderer'
+                      value={renderer}
+                      onChange={this.handleRendererChange}>
+                <option value='spectrogram'>Spectrogram</option>
+                <option value='milkdrop'>MilkDrop</option>
+              </select>
+            </div>
             {renderer === 'milkdrop' && (
               <Fragment>
                 <div className='PresetNav-row'>
@@ -236,7 +249,7 @@ export default class Visualizer extends PureComponent {
                            onChange={this.handleAutoCycleChange}/> Auto
                   </label>
                   <span className='PresetNav-blend'>
-                    <span className='VisualizerParams-label'>Blend:</span>
+                    <span className='PresetNav-label'>Blend:</span>
                     <input type='range' min='0' max='10' step='0.5'
                            value={this.state.blendSeconds}
                            onChange={this.handleBlendChange}/>

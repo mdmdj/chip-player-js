@@ -2,18 +2,13 @@ import React, { useContext } from 'react';
 import { Link } from 'react-router-dom';
 import { UserContext } from './UserProvider';
 
-const AppHeader = ({ isMidi }) => {
+const AppHeader = () => {
   const { user, handleLogout, handleLogin, settings, updateSettings } = useContext(UserContext);
   const showVisualizer = settings?.showVisualizer;
-  const renderer = settings?.visualizerRenderer || 'spectrogram';
 
   const handleToggleVisualizer = (e) => {
     const enabled = e.target.value === 'true';
     updateSettings({ showVisualizer: enabled });
-  };
-
-  const handleRendererChange = (e) => {
-    updateSettings({ visualizerRenderer: e.target.value });
   };
 
   return (
@@ -54,17 +49,6 @@ const AppHeader = ({ isMidi }) => {
                  name="visualizer-enabled"/>
           <label htmlFor="vis-off" className="inline">Off</label>
         </h3>
-        {showVisualizer && !isMidi &&
-        <div className="Visualizer-renderer-toggle">
-          <label htmlFor="visualizer-renderer">Renderer:</label>{' '}
-          <select id="visualizer-renderer"
-                  value={renderer}
-                  onChange={handleRendererChange}>
-            <option value="spectrogram">Spectrogram</option>
-            <option value="milkdrop">MilkDrop</option>
-          </select>
-        </div>
-        }
       </div>
     </header>
   );

@@ -215,20 +215,19 @@ settings without these keys fall back through `||`.
 The visualizer is **standalone on master**, not stacked on sub-tunes:
 
     master                             5ad97d47e  (upstream/master)
-            └── feature/visualizer     fd0dd6e00  (master + 11 visualizer commits)
-                    └── dev/overlay-visualizer   e08e5dbca  (feature + dev kit)
+            └── feature/visualizer     427105735  (master + visualizer commits)
+                    └── dev/overlay-visualizer   1734b69ab  (feature + dev kit)
 
 The feature branch was rebased onto current master cleanly (the 16 upstream
 commits do not overlap the visualizer files). The overlay was then rebased onto
-the new feature tip with `dev/rebase.sh`; the pre-catchup tips are preserved on
+the new feature tip with `dev/rebase.sh`. The pre-catchup tips are preserved on
 tags `pre-promote-visualizer-20261113-160818` and
-`pre-promote-visualizer-20261113-160818-feature`. The older sub-tunes-based head
-(`27ba57d6c`) remains on tag `visualizer-pre-master-20261109`.
+`pre-promote-visualizer-20261113-160818-feature`; the pre-promote tips before
+the layout and review-fix promotes are also tagged. The older sub-tunes-based
+head (`27ba57d6c`) remains on tag `visualizer-pre-master-20261109`.
 
-The overlay also still carries the unpromoted header/Blend layout commits
-(`dbe58d73e`, `b13a545db`) and the dev-only recorder commits. Therefore the plan
-is **not** clean: `./dev/overlay.sh visualizer plan` will offer the five feature
-files for promotion. Catch-up did not arm or run a promote.
+The header/Blend work and the review fixes are now promoted; the overlay keeps
+only the dev-only recorder/notes remainder, so the plan is clean.
 
 After the catch-up, `npm run build-lite` in the overlay completed successfully
 (main 191.81 kB gzip, Butterchurn chunk 1.77 kB) and

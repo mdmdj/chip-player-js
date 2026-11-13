@@ -260,11 +260,18 @@ Practice PR #20 review findings, all addressed and verified:
   `visualizer.render()` after changing the canvas backing store when paused.
   Verified: after pausing and selecting 50% resolution, the 224×210 canvas
   contained 37,158 non-black pixels.
+- **Paused preset changes redraw.** `loadPresetAt()` now renders one frame when
+  paused, so Previous/Next/Random replace the visible image immediately.
+  Verified by pausing IceCap, clicking Next, and comparing canvas screenshots:
+  the preset changed from `$$$ Royal - Mashup (197)` to `(220)` and both images
+  had non-zero mean luminance.
 - **Piano keys are anchored to the graph.** The overlay's `top` is set from
-  `freqCanvas.offsetTop` on mount, resize and update using a `ResizeObserver`
-  on `.Visualizer-options`; it no longer depends on a per-theme header height.
-  Verified in Winamp and MS-DOS: keys top and analyzer top are equal (y151 and
-  y132 respectively at 900×720).
+  `freqCanvas.offsetTop` on mount, resize and update. The observer watches the
+  stable `.Visualizer` root as well as `.Visualizer-options`, and reattaches the
+  options node when a non-MIDI header returns, so a MIDI detour cannot leave the
+  observer on a detached header. It no longer depends on a per-theme header
+  height. Verified in Winamp and MS-DOS: keys top and analyzer top are equal
+  (y151 and y132 respectively at 900×720).
 
 `npm run build-lite` passed after these changes.
 

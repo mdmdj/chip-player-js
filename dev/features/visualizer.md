@@ -215,8 +215,8 @@ settings without these keys fall back through `||`.
 The visualizer is **standalone on master**, not stacked on sub-tunes:
 
     master                             5ad97d47e  (upstream/master)
-            └── feature/visualizer     427105735  (master + visualizer commits)
-                    └── dev/overlay-visualizer   1734b69ab  (feature + dev kit)
+            └── feature/visualizer     0c42d4a8c  (master + visualizer commits)
+                    └── dev/overlay-visualizer   f9e4f7842  (feature + dev kit)
 
 The feature branch was rebased onto current master cleanly (the 16 upstream
 commits do not overlap the visualizer files). The overlay was then rebased onto

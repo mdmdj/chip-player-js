@@ -210,16 +210,31 @@ settings without these keys fall back through `||`.
   repeatedly killed this tree's dev server. Use `readlink /proc/<pid>/cwd` before
   killing a port owner.
 
-## Topology (resolved 2026-11-09)
+## Topology (caught up to master 2026-11-13)
 
 The visualizer is **standalone on master**, not stacked on sub-tunes:
 
-    master              9455a8bc8
-            └── feature/visualizer   c1824ad83   (9 files: the visualizer)
-                    └── dev/overlay-visualizer   e27e1245b  (feature + dev kit)
+    master                             5ad97d47e  (upstream/master)
+            └── feature/visualizer     fd0dd6e00  (master + 11 visualizer commits)
+                    └── dev/overlay-visualizer   e08e5dbca  (feature + dev kit)
 
-The feature branch is master plus one commit. The previous sub-tunes-based head
-(`27ba57d6c`) is preserved on tag `visualizer-pre-master-20261109`.
+The feature branch was rebased onto current master cleanly (the 16 upstream
+commits do not overlap the visualizer files). The overlay was then rebased onto
+the new feature tip with `dev/rebase.sh`; the pre-catchup tips are preserved on
+tags `pre-promote-visualizer-20261113-160818` and
+`pre-promote-visualizer-20261113-160818-feature`. The older sub-tunes-based head
+(`27ba57d6c`) remains on tag `visualizer-pre-master-20261109`.
+
+The overlay also still carries the unpromoted header/Blend layout commits
+(`dbe58d73e`, `b13a545db`) and the dev-only recorder commits. Therefore the plan
+is **not** clean: `./dev/overlay.sh visualizer plan` will offer the five feature
+files for promotion. Catch-up did not arm or run a promote.
+
+After the catch-up, `npm run build-lite` in the overlay completed successfully
+(main 191.81 kB gzip, Butterchurn chunk 1.77 kB) and
+`./dev/run-tests.sh` reported **10 passed, 22 skipped, 0 failed**. The feature
+worktree has no `node_modules`, so the build was run in the overlay where the
+same feature files plus master are checked out together.
 
 Sub-tunes owns piano-roll loop-awareness; the master-based visualizer deliberately
 does not import `usesTrackLoops` or the `useTrackLoops` prop. The sub-tunes PR can
